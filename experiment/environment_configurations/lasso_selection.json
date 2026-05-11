@@ -1,0 +1,18 @@
+{
+  "_description": "Lasso selection - draw a loop around target icons in a grid",
+  "env_type": "lasso_selection",
+  "screen_width": 460,
+  "screen_height": 300,
+  "grid_layout": [
+    "O O O O O",
+    "O X X X O",
+    "O X X O O",
+    "O O O O O"
+  ],
+  "grid_origin": [0.1, 0.05],
+  "icon_spacing": 0.035,
+  "icon_radius": 0.015,
+  "target_radius": 0.004,
+  "max_steps": 200,
+  "description": "5x4 icon grid, L-shaped target cluster"
+}

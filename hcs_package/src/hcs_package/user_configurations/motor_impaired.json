@@ -1,0 +1,22 @@
+{
+  "_description": "User with motor impairment \u2014 very slow, highest noise, maximum wall penalty, cautious heavily guarded movements near boundaries",
+  "Tp": 0.05,
+  "Th": 0.3,
+  "nc": [
+    0.4,
+    0.04
+  ],
+  "forearm": 0.35,
+  "planner_weights": {
+    "jerk": 1e-06,
+    "progress": 1e-08,
+    "constraint": 20,
+    "contour": 1,
+    "lag": 0.5,
+    "desired_speed": 0.2
+  },
+  "speed_model": {
+    "type": "gam",
+    "path": "population_gam.pkl"
+  }
+}

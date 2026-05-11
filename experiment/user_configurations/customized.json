@@ -1,0 +1,57 @@
+{
+  "_description": "Office worker \u2014 balanced speed and precision, everyday desktop use",
+  "_tuning_notes": {
+    "jerk": "5e-6: Controls smoothness. jerk ~ 500 m/s\u00b3 \u2192 cost ~ 7.5.",
+    "progress": "5e-3: Drives forward momentum. speed_diff ~ 0.05 \u2192 cost ~ 7.5e-5/step.",
+    "constraint": "50: Repels from walls. violation ~ 3mm \u2192 cost ~ 4.5e-4.",
+    "contour": "10: Lateral tracking weight.",
+    "lag": "0.5: Longitudinal tracking (constant).",
+    "desired_speed": "Base speed (m/s). Modulated by clearance and curvature rate.",
+    "speed_alpha": "Speed scales as (c/speed_ref)^alpha. 0.65 calibrated to human width ratio.",
+    "speed_reference": "0.02: Fixed reference clearance (m). Wide tunnel half-width.",
+    "speed_floor": "0.3: Minimum speed = 30% of base (prevents crawling).",
+    "speed_ceil": "1.5: Maximum speed = 150% of base.",
+    "rate_percentile": "60: Only top 40% of curvature rates trigger slowdown (path-adaptive).",
+    "rate_scale": "300: Controls how quickly speed drops above threshold (higher = gentler).",
+    "rate_alpha": "1.0: Transition sharpness for rate-based slowdown.",
+    "rate_floor": "0.2: Minimum speed fraction at extreme corners (20% = strong stop-and-go).",
+    "rate_median_max": "600: Disable rate effect if median rate > this (filters out sigmoidal paths).",
+    "straight_boost": "1.5: Speed boost on straight segments (rf = 1 + boost \u00d7 straightness^sharpness).",
+    "boost_sharpness": "3.0: Nonlinear selectivity. Higher = only very straight segments get boosted.",
+    "rate_ceil": "2.5: Maximum rate factor. Caps the boost on perfectly straight segments."
+  },
+  "Tp": 0.05,
+  "Th": 0.5,
+  "nc": [
+    0.2,
+    0.02
+  ],
+  "forearm": 0.35,
+  "planner_weights": {
+    "jerk": 5e-06,
+    "progress": 0.005,
+    "constraint": 50,
+    "contour": 10.0,
+    "lag": 0.5,
+    "speed_reference": 0.015,
+    "desired_speed": 0.13,
+    "speed_alpha": 0.65,
+    "speed_floor": 0.2732,
+    "speed_ceil": 2.5,
+    "rate_percentile": 82.0,
+    "rate_alpha": 1.5,
+    "rate_scale": 3000000.0,
+    "rate_floor": 0.2,
+    "straight_boost": 1.5,
+    "boost_sharpness": 3.0,
+    "rate_ceil": 2.5,
+    "rate_median_max": 600
+  },
+  "reference_path": {
+    "w_suppress": 0.3,
+    "w_width_exp": 1.0,
+    "global_clearance_ref": 0.015,
+    "w_cut": 1.0,
+    "cut_window_frac": 0.1
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "_comment": "Example task.json for cascading menu test - based on task_config_cascading_menu.json",
+  "waypoints": [
+    [100, 50],
+    [667, 563],
+    [1126, 1022]
+  ],
+  "screen_width": 1920,
+  "screen_height": 1080,
+  "constraints": {
+    "coordinate_system": "normalized",
+    "default_margin": 0.005,
+    "regions": [
+      {
+        "constraint_type": "keep_in",
+        "geometry": {
+          "type": "rectangle",
+          "x": 0.1,
+          "y": 0.02,
+          "width": 0.12,
+          "height": 0.12
+        },
+        "margin": 0.002,
+        "enabled": true
+      },
+      {
+        "constraint_type": "keep_in",
+        "geometry": {
+          "type": "rectangle",
+          "x": 0.22,
+          "y": 0.11,
+          "width": 0.1,
+          "height": 0.12
+        },
+        "margin": 0.002,
+        "enabled": true
+      }
+    ]
+  }
+}

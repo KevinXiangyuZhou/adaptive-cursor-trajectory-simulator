@@ -1,0 +1,16 @@
+{
+  "_description": "Cascading menu - navigate through hierarchical dropdown menus",
+  "env_type": "cascading_menu",
+  "screen_width": 460,
+  "screen_height": 300,
+  "main_menu_size": 12,
+  "sub_menu_size": 12,
+  "target_main_menu_index": 11,
+  "target_sub_menu_index": 11,
+  "main_menu_window_size": [0.12, 0.12],
+  "sub_menu_window_size": [0.1, 0.12],
+  "main_menu_origin": [0.1, 0.02],
+  "target_radius": 0.01,
+  "max_steps": 500,
+  "description": "12-item main menu, 12-item submenu, target at bottom-right"
+}

@@ -1,0 +1,29 @@
+{
+  "_description": "User with motor impairment \u2014 very slow, high noise, cannot enforce smooth plans, very cautious near walls",
+  "Tp": 0.05,
+  "Th": 0.15,
+  "nc": [
+    0.4,
+    0.04
+  ],
+  "forearm": 0.35,
+  "planner_weights": {
+    "jerk": 1e-07,
+    "progress": 1e-08,
+    "wall": 100,
+    "contour": 50,
+    "lag": 5.0,
+    "desired_speed": 0.1,
+    "clearance_reference": 0.05,
+    "lambda_track": 1.0,
+    "lambda_slope": 0.3,
+    "lambda_curve": 0.03,
+    "steering_exponent": 0.0
+  },
+  "reference_path": {
+    "w_width_exp": 1.0,
+    "global_clearance_ref": 0.025,
+    "w_cut": 0.2,
+    "cut_window_frac": 0.1
+  }
+}

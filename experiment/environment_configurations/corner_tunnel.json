@@ -1,0 +1,14 @@
+{
+  "_description": "Tunnel steering - navigate through a corridor with 90-degree corners",
+  "env_type": "tunnel_steering_corner",
+  "screen_width": 460,
+  "screen_height": 260,
+  "tunnelWidth": 0.04,
+  "start_x": 0.0,
+  "end_x": 0.46,
+  "y_base": 0.13,
+  "num_corners": 2,
+  "corner_offset": 0.1,
+  "max_steps": 200,
+  "description": "narrow tunnel, 3 sharp 90-degree corners"
+}
