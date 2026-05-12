@@ -1,0 +1,202 @@
+{
+  "1": {
+    "curvature": 0.025,
+    "tunnelWidth": 0.01,
+    "description": "sinusoidal, width 0.01",
+    "timeLimit": null,
+    "repetitions": 5
+  },
+  "2": {
+    "curvature": 0.025,
+    "tunnelWidth": 0.02,
+    "description": "sinusoidal, width 0.02",
+    "repetitions": 5,
+    "timeLimit": null
+  },
+  "3": {
+    "curvature": 0.025,
+    "tunnelWidth": 0.03,
+    "description": "sinusoidal, width 0.03",
+    "timeLimit": null,
+    "repetitions": 5
+  },
+  "4": {
+    "timeLimit": null,
+    "repetitions": 5,
+    "description": "sinusoidal, width 0.04",
+    "tunnelWidth": 0.04,
+    "curvature": 0.025
+  },
+  "5": {
+    "description": "sinusoidal, width 0.05",
+    "repetitions": 5,
+    "timeLimit": null,
+    "curvature": 0.025,
+    "tunnelWidth": 0.05
+  },
+  "6": {
+    "cornerOffset": 0.1,
+    "description": "corner, width 0.01",
+    "repetitions": 5,
+    "timeLimit": null,
+    "numCorners": 2,
+    "tunnelType": "corner",
+    "tunnelWidth": 0.01
+  },
+  "7": {
+    "numCorners": 2,
+    "tunnelType": "corner",
+    "tunnelWidth": 0.02,
+    "description": "corner, width 0.02",
+    "cornerOffset": 0.1,
+    "timeLimit": null,
+    "repetitions": 5
+  },
+  "8": {
+    "cornerOffset": 0.1,
+    "description": "corner, width 0.03",
+    "repetitions": 5,
+    "timeLimit": null,
+    "numCorners": 2,
+    "tunnelType": "corner",
+    "tunnelWidth": 0.03
+  },
+  "9": {
+    "timeLimit": null,
+    "repetitions": 5,
+    "description": "corner, width 0.04",
+    "cornerOffset": 0.1,
+    "tunnelWidth": 0.04,
+    "numCorners": 2,
+    "tunnelType": "corner"
+  },
+  "10": {
+    "repetitions": 5,
+    "timeLimit": null,
+    "cornerOffset": 0.1,
+    "description": "corner, width 0.05",
+    "tunnelWidth": 0.05,
+    "numCorners": 2,
+    "tunnelType": "corner"
+  },
+  "11": {
+    "description": "straight, width 0.01",
+    "timeLimit": null,
+    "repetitions": 3,
+    "curvature": 0,
+    "tunnelType": "straight",
+    "tunnelWidth": 0.01
+  },
+  "12": {
+    "timeLimit": null,
+    "repetitions": 3,
+    "description": "straight, width 0.02",
+    "tunnelWidth": 0.02,
+    "curvature": 0,
+    "tunnelType": "straight"
+  },
+  "13": {
+    "tunnelWidth": 0.03,
+    "tunnelType": "straight",
+    "curvature": 0,
+    "repetitions": 3,
+    "timeLimit": null,
+    "description": "straight, width 0.03"
+  },
+  "14": {
+    "description": "straight, width 0.04",
+    "repetitions": 3,
+    "timeLimit": null,
+    "tunnelType": "straight",
+    "curvature": 0,
+    "tunnelWidth": 0.04
+  },
+  "15": {
+    "curvature": 0,
+    "tunnelType": "straight",
+    "tunnelWidth": 0.05,
+    "description": "straight, width 0.05",
+    "repetitions": 3,
+    "timeLimit": null
+  },
+  "16": {
+    "description": "gentle sinusoidal, width 0.01",
+    "repetitions": 5,
+    "timeLimit": null,
+    "curvature": 0.015,
+    "tunnelType": "gentle_sinusoidal",
+    "tunnelWidth": 0.01
+  },
+  "17": {
+    "tunnelWidth": 0.02,
+    "tunnelType": "gentle_sinusoidal",
+    "curvature": 0.015,
+    "repetitions": 5,
+    "timeLimit": null,
+    "description": "gentle sinusoidal, width 0.02"
+  },
+  "18": {
+    "timeLimit": null,
+    "repetitions": 5,
+    "description": "gentle sinusoidal, width 0.03",
+    "tunnelWidth": 0.03,
+    "curvature": 0.015,
+    "tunnelType": "gentle_sinusoidal"
+  },
+  "19": {
+    "curvature": 0.015,
+    "tunnelType": "gentle_sinusoidal",
+    "tunnelWidth": 0.04,
+    "description": "gentle sinusoidal, width 0.04",
+    "repetitions": 5,
+    "timeLimit": null
+  },
+  "20": {
+    "tunnelWidth": 0.05,
+    "curvature": 0.015,
+    "tunnelType": "gentle_sinusoidal",
+    "repetitions": 5,
+    "timeLimit": null,
+    "description": "gentle sinusoidal, width 0.05"
+  },
+  "21": {
+    "description": "sharp sinusoidal, width 0.01",
+    "timeLimit": null,
+    "repetitions": 5,
+    "tunnelType": "sharp_sinusoidal",
+    "curvature": 0.05,
+    "tunnelWidth": 0.01
+  },
+  "22": {
+    "tunnelType": "sharp_sinusoidal",
+    "curvature": 0.05,
+    "tunnelWidth": 0.02,
+    "description": "sharp sinusoidal, width 0.02",
+    "repetitions": 5,
+    "timeLimit": null
+  },
+  "23": {
+    "tunnelType": "sharp_sinusoidal",
+    "curvature": 0.05,
+    "tunnelWidth": 0.03,
+    "description": "sharp sinusoidal, width 0.03",
+    "repetitions": 5,
+    "timeLimit": null
+  },
+  "24": {
+    "timeLimit": null,
+    "repetitions": 5,
+    "description": "sharp sinusoidal, width 0.04",
+    "tunnelWidth": 0.04,
+    "curvature": 0.05,
+    "tunnelType": "sharp_sinusoidal"
+  },
+  "25": {
+    "description": "sharp sinusoidal, width 0.05",
+    "timeLimit": null,
+    "repetitions": 5,
+    "curvature": 0.05,
+    "tunnelType": "sharp_sinusoidal",
+    "tunnelWidth": 0.05
+  }
+}

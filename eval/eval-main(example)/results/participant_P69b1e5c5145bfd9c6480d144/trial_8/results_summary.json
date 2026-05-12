@@ -1,0 +1,114 @@
+{
+  "participant_id": "P69b1e5c5145bfd9c6480d144",
+  "trial_id": 8,
+  "human": {
+    "n_rounds": 5,
+    "avg_completion_time": 5.2307999999999995,
+    "avg_speed": 0.16152263467510045,
+    "rounds": [
+      {
+        "round": 0,
+        "completion_time": 5.472,
+        "avg_speed": 0.15338835906340706
+      },
+      {
+        "round": 1,
+        "completion_time": 5.879,
+        "avg_speed": 0.13447564869163978
+      },
+      {
+        "round": 2,
+        "completion_time": 6.007,
+        "avg_speed": 0.14533839810212676
+      },
+      {
+        "round": 3,
+        "completion_time": 4.494,
+        "avg_speed": 0.18842341108288546
+      },
+      {
+        "round": 4,
+        "completion_time": 4.302,
+        "avg_speed": 0.18598735643544317
+      }
+    ]
+  },
+  "model": {
+    "n_runs": 5,
+    "n_valid_runs": 5,
+    "avg_completion_time": 3.8900000000000006,
+    "avg_speed": 0.20081740509117413,
+    "runs": [
+      {
+        "run": 0,
+        "completion_time": 3.6,
+        "avg_speed": 0.17608575628429332
+      },
+      {
+        "run": 1,
+        "completion_time": 4.2,
+        "avg_speed": 0.17367828694825074
+      },
+      {
+        "run": 2,
+        "completion_time": 4.800000000000001,
+        "avg_speed": 0.17785193419060097
+      },
+      {
+        "run": 3,
+        "completion_time": 3.2,
+        "avg_speed": 0.19916685749262422
+      },
+      {
+        "run": 4,
+        "completion_time": 3.6500000000000004,
+        "avg_speed": 0.17278037624428916
+      }
+    ]
+  },
+  "metrics": {
+    "lateral_rmse_mean": 0.001797013394661393,
+    "speed_rmse_mean": 0.05138524391215418,
+    "speed_corr_mean": 0.682920022801963,
+    "time_diff_mean": 0.25632790395350596
+  },
+  "baseline": {
+    "n_runs": 5,
+    "n_valid_runs": 5,
+    "avg_completion_time": 1.9900000000000002,
+    "avg_speed": 0.3116381006869667,
+    "runs": [
+      {
+        "run": 0,
+        "completion_time": 2.0500000000000003,
+        "avg_speed": 0.2565638581493499
+      },
+      {
+        "run": 1,
+        "completion_time": 2.1,
+        "avg_speed": 0.2567553580250575
+      },
+      {
+        "run": 2,
+        "completion_time": 2.0500000000000003,
+        "avg_speed": 0.26430366705854524
+      },
+      {
+        "run": 3,
+        "completion_time": 1.9000000000000001,
+        "avg_speed": 0.29100535436542296
+      },
+      {
+        "run": 4,
+        "completion_time": 1.85,
+        "avg_speed": 0.2934631368361793
+      }
+    ]
+  },
+  "baseline_metrics": {
+    "lateral_rmse_mean": 0.029611075743744247,
+    "speed_rmse_mean": 0.1787054237534384,
+    "speed_corr_mean": 0.011132673038239777,
+    "time_diff_mean": 0.619561061405521
+  }
+}
