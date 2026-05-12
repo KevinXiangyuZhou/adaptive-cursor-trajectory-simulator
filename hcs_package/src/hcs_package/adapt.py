@@ -6,6 +6,8 @@ from typing import Optional, Tuple, List
 from .constraints import ConstraintType, RectangleConstraint, PolygonConstraint
 from .constraint_utils import _point_in_polygon, _distance_to_polygon_boundary
 
+_trapezoid = getattr(np, "trapezoid", getattr(np, "trapz", None))
+
 
 def compute_local_curvature_integral(
     ref_path,
@@ -29,7 +31,7 @@ def compute_local_curvature_integral(
         s_win = s_samples[mask]
         k_win = kappa[mask]
         if len(s_win) >= 2:
-            phi[i] = float(np.trapz(k_win, s_win))
+            phi[i] = float(_trapezoid(k_win, s_win))
         elif len(s_win) == 1:
             phi[i] = float(k_win[0] * min(window, s_samples[-1] - s_samples[0] + 1e-9))
         else:
