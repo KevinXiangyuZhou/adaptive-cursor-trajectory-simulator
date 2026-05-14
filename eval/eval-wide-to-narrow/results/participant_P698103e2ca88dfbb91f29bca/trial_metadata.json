@@ -1,0 +1,26 @@
+{
+  "26": {
+    "segment2Width": 0.01,
+    "segment1Width": 0.05,
+    "tunnelType": "wide_to_narrow",
+    "description": "wide-to-narrow, narrow=0.01",
+    "repetitions": 3,
+    "timeLimit": null
+  },
+  "27": {
+    "repetitions": 3,
+    "description": "wide-to-narrow, narrow=0.02",
+    "tunnelType": "wide_to_narrow",
+    "timeLimit": null,
+    "segment2Width": 0.02,
+    "segment1Width": 0.05
+  },
+  "28": {
+    "timeLimit": null,
+    "repetitions": 3,
+    "tunnelType": "wide_to_narrow",
+    "description": "wide-to-narrow, narrow=0.03",
+    "segment1Width": 0.05,
+    "segment2Width": 0.03
+  }
+}

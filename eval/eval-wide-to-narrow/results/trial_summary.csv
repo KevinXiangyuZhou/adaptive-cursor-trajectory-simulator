@@ -1,0 +1,4 @@
+trial_id,label,split,tunnel_type,width,human_mt,human_speed,model_mt,model_speed,lat_rmse,speed_rmse,speed_corr,time_diff,n_human,n_model
+26,"Wide-to-narrow, narrow=0.01",test,wide_to_narrow,0.01,3.1346,0.178983,1.75,0.284356,0.002404,0.238765,-0.592,0.4105,42,42
+27,"Wide-to-narrow, narrow=0.02",test,wide_to_narrow,0.02,1.6805,0.323273,1.55,0.297379,0.002149,0.191511,-0.6616,0.3518,42,42
+28,"Wide-to-narrow, narrow=0.03",test,wide_to_narrow,0.03,1.422,0.389393,1.7667,0.268589,0.002418,0.222443,-0.0865,0.6139,42,42

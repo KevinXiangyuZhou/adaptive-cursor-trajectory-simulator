@@ -1,0 +1,55 @@
+{
+  "participant_id": "P659c0682d109f8537a89fdd3",
+  "trial_id": 28,
+  "human": {
+    "n_rounds": 3,
+    "avg_completion_time": 0.7106666666666667,
+    "avg_speed": 0.8806574843232625,
+    "rounds": [
+      {
+        "round": 0,
+        "completion_time": 0.932,
+        "avg_speed": 0.7239436092593166
+      },
+      {
+        "round": 1,
+        "completion_time": 0.498,
+        "avg_speed": 0.989696941630413
+      },
+      {
+        "round": 2,
+        "completion_time": 0.702,
+        "avg_speed": 0.9283319020800579
+      }
+    ]
+  },
+  "model": {
+    "n_runs": 3,
+    "n_valid_runs": 3,
+    "avg_completion_time": 1.7666666666666668,
+    "avg_speed": 0.314679171394437,
+    "runs": [
+      {
+        "run": 0,
+        "completion_time": 1.4000000000000001,
+        "avg_speed": 0.32303226310540595
+      },
+      {
+        "run": 1,
+        "completion_time": 1.5,
+        "avg_speed": 0.2967828543375652
+      },
+      {
+        "run": 2,
+        "completion_time": 2.4000000000000004,
+        "avg_speed": 0.18595132406424664
+      }
+    ]
+  },
+  "metrics": {
+    "lateral_rmse_mean": 0.003872951016816861,
+    "speed_rmse_mean": 0.5267280506435331,
+    "speed_corr_mean": 0.16833213116970222,
+    "time_diff_mean": 1.4859287054409007
+  }
+}
