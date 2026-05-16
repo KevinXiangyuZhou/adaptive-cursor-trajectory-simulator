@@ -1,0 +1,29 @@
+{
+  "_description": "Office worker \u2014 balanced speed and precision, everyday desktop use",
+  "Tp": 0.05,
+  "Th": 0.35000000000000003,
+  "nc": [
+    0.2,
+    0.02
+  ],
+  "forearm": 0.35,
+  "planner_weights": {
+    "jerk": 4.933469459879535e-06,
+    "progress": 0.007674018812767888,
+    "constraint": 91.24896620690656,
+    "contour": 171.1379178950471,
+    "lag": 6.635650007681227,
+    "decel_dist": 0.03
+  },
+  "reference_path": {
+    "w_cut": 0.5495246189769664,
+    "w_suppress": 1.1144133434301093,
+    "w_width_exp": 1.8910855790422836,
+    "cut_window_frac": 0.023139865292240228,
+    "global_clearance_ref": 0.02172158217560881
+  },
+  "speed_model": {
+    "type": "gam",
+    "path": "P6980c16f9985e39f6bcbbe3a_gam_s42.pkl"
+  }
+}

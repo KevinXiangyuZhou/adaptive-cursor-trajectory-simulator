@@ -1,0 +1,22 @@
+{
+  "Interval": 0.05,
+  "Tp": 0.05,
+  "Th": 0.4,
+  "nc": [
+    0.2,
+    0.02
+  ],
+  "forearm": 0.35,
+  "mouseGain": 1,
+  "planner_weights": {
+    "jerk": 4.223295363460701e-09,
+    "progress": 2.7083101290255246e-08,
+    "wall": 852.005405958695,
+    "contour": 5.97406813749959,
+    "lag": 0.029686063607178705,
+    "desired_speed": 0.28780899189109355
+  },
+  "planner_margin": 0.001,
+  "add_noise": false,
+  "random_seed": 1000
+}
