@@ -67,6 +67,13 @@ from utils.stats import (
     speed_profile_correlation,
 )
 
+class ConstantSpeedModel:
+    def __init__(self, desired_speed: float = 0.12):
+        self.desired_speed = desired_speed
+
+    def compute_speed_profile(self, s_samples, clearance, kappa, dkappa_ds):
+        return np.full(len(s_samples), self.desired_speed)
+
 #instead of importing trial IDs, define them here for wide_to_narrow: 
 TRAIN_TIDS = set()
 TEST_TIDS = set(range(26, 29))
@@ -468,8 +475,6 @@ def _load_baseline_simulator():
     sys.path.insert(0, str(BASELINE_PKG_DIR))
     try:
         from hcs_package.cursor_simulator import CursorSimulator as Cls
-        print(f"Loaded CursorSimulator from: {Cls.__module__}")  # ADDED
-        print(f"File: {sys.modules['hcs_package'].__file__}")    # ADDED
     finally:
         for k in list(sys.modules):
             if k == 'hcs_package' or k.startswith('hcs_package.'):
@@ -846,197 +851,222 @@ def _process_trial(config_path, speed_model_path, participant_id, trial_id,
     Returns dict with trial results including any new baseline records.
     """
     import matplotlib
+    from pathlib import Path
     matplotlib.use("Agg")
 
-    trial_folder = Path(trial_folder_str)
-    trial_folder.mkdir(exist_ok=True)
 
-    # -- human data --
-    human_trajectories = []
-    human_speeds_list = []
-    human_timestamps_list = []
-    human_records = []
+    import traceback
+    try:
+        # ... all existing code ...
 
-    for round_num, round_data in trial_data_dict.items():
-        traj = round_data["trajectory"]
-        speeds = round_data["speeds"]
-        timestamps = round_data["timestamps"]
-        ct = round_data["completion_time"]
-        if len(traj) >= 2:
-            human_trajectories.append(traj)
-            human_speeds_list.append(speeds)
-            human_timestamps_list.append(timestamps)
-            human_records.append({
-                "completion_time": ct,
-                "path_length": _path_length(traj),
-                "avg_speed": _path_length(traj) / ct if ct > 0 else 0,
+        trial_folder = Path(trial_folder_str)
+        trial_folder.mkdir(exist_ok=True)
+
+        # -- human data --
+        human_trajectories = []
+        human_speeds_list = []
+        human_timestamps_list = []
+        human_records = []
+
+        for round_num, round_data in trial_data_dict.items():
+            traj = round_data["trajectory"]
+            speeds = round_data["speeds"]
+            timestamps = round_data["timestamps"]
+            ct = round_data["completion_time"]
+            if len(traj) >= 2:
+                human_trajectories.append(traj)
+                human_speeds_list.append(speeds)
+                human_timestamps_list.append(timestamps)
+                human_records.append({
+                    "completion_time": ct,
+                    "path_length": _path_length(traj),
+                    "avg_speed": _path_length(traj) / ct if ct > 0 else 0,
+                })
+
+        # -- model simulation (incremental) --
+        existing = existing_records or []
+        delta = n_rounds - len(existing)
+        if delta > 0:
+            import tempfile, json
+            with open(str(config_path)) as _f:
+                _cfg = json.load(_f)
+
+            if speed_model_path:
+                _cfg['speed_model'] = {
+                    'type': 'gam',
+                    'path': str(Path(speed_model_path).resolve())  # absolute path — worker-safe
+                }
+
+            _fd, _tmp_cfg = tempfile.mkstemp(suffix='.json', prefix='sim_eval_')
+            os.close(_fd)
+            try:
+                with open(_tmp_cfg, 'w') as _f:
+                    json.dump(_cfg, _f)
+                sim = CursorSimulator(_tmp_cfg)
+            finally:
+                os.unlink(_tmp_cfg)
+            new_records = run_simulator_for_trial(sim, trial_id, n_runs=delta)
+            all_model_records = existing + new_records
+        else:
+            all_model_records = existing[:n_rounds]
+
+        all_model_records_unfiltered = all_model_records[:n_rounds]
+        # Filter out model runs that diverged (trajectory goes far outside screen)
+        _MAX_MODEL_CT = 39.5
+        _MODEL_DIVERGE = 1.0
+        model_records = []
+        for ri, r in enumerate(all_model_records_unfiltered):
+            traj = r.get("trajectory", [])
+            if r["completion_time"] >= _MAX_MODEL_CT:
+                print(f"  Filtered model: trial {trial_id} run {ri} "
+                    f"— CT={r['completion_time']:.2f}s (hit max steps)", flush=True)
+                continue
+            if traj:
+                xs = [p[0] for p in traj]
+                ys = [p[1] for p in traj]
+                if min(xs) < -0.1 or max(xs) > 0.56 or min(ys) < -0.1 or max(ys) > 0.36:
+                    print(f"  Filtered model: trial {trial_id} run {ri} "
+                        f"— out of bounds x=[{min(xs):.3f},{max(xs):.3f}] "
+                        f"y=[{min(ys):.3f},{max(ys):.3f}]", flush=True)
+                    continue
+            model_records.append(r)
+        model_trajectories = [r["trajectory"] for r in model_records]
+        model_speeds_list = [r["speeds"] for r in model_records]
+
+        # -- baseline (run in worker if needed, else use pre-computed) --
+        baseline_trajectories = []
+        baseline_speeds_list = []
+        all_baseline_records_trial = list(baseline_records_for_trial) if baseline_records_for_trial else []
+        if include_baseline and baseline_config_path and len(all_baseline_records_trial) < n_rounds:
+            bl_delta = n_rounds - len(all_baseline_records_trial)
+            baseline_sim = CursorSimulator(str(baseline_config_path))
+            baseline_sim.add_noise = True
+            baseline_sim.speed_model = ConstantSpeedModel(
+                baseline_sim.planner_weights.get('desired_speed', 0.12)
+            )
+            new_bl_records = run_baseline_for_trial(baseline_sim, trial_id, n_runs=bl_delta)
+            all_baseline_records_trial.extend(new_bl_records)
+        if include_baseline and all_baseline_records_trial:
+            # Filter out timed-out and diverged baseline runs before plotting/metrics
+            _MAX_BL_CT = 39.5       # 800 steps * 0.05s
+            _DIVERGE_LIM = 1.0      # meters
+            bl_valid = []
+            for ri, r in enumerate(all_baseline_records_trial[:n_rounds]):
+                ct = r["completion_time"]
+                if ct >= _MAX_BL_CT:
+                    print(f"  Filtered baseline: trial {trial_id} run {ri} "
+                        f"— CT={ct:.2f}s (hit max steps)", flush=True)
+                    continue
+                traj = r.get("trajectory", [])
+                if traj:
+                    lp = traj[-1]
+                    if abs(lp[0]) > _DIVERGE_LIM or abs(lp[1]) > _DIVERGE_LIM:
+                        print(f"  Filtered baseline: trial {trial_id} run {ri} "
+                            f"— diverged (end=({lp[0]:.2f},{lp[1]:.2f}))", flush=True)
+                        continue
+                bl_valid.append(r)
+            baseline_trajectories = [r["trajectory"] for r in bl_valid]
+            baseline_speeds_list = [r["speeds"] for r in bl_valid]
+
+        # -- plots --
+        cond = TRIAL_CONDITIONS.get(trial_id, {})
+        #updating plot for wide_to_narrow specifically to showcasing narrowing tunnel
+        if cond.get("type") == "wide_to_narrow":
+            n = len(centerline)
+            mid = n // 2
+            width_profile = [cond["segment1Width"]] * mid + [cond["segment2Width"]] * (n - mid)
+            tunnel_width = width_profile
+        else:
+            tunnel_width = cond.get("width", 0.02)
+        trial_metadata = {trial_id: {participant_id: {0: {"condition": cond}}}}
+
+        segment_data = {
+            'human': {'trajectories': human_trajectories, 'speeds': human_speeds_list},
+            'sim': {'trajectories': model_trajectories, 'speeds': model_speeds_list},
+        }
+        if baseline_trajectories:
+            segment_data['baseline'] = {
+                'trajectories': baseline_trajectories, 'speeds': baseline_speeds_list,
+            }
+
+        all_results = {trial_id: {0: segment_data}}
+        tunnel_paths = {trial_id: centerline}
+        trial_tunnel_widths = {trial_id: tunnel_width}
+
+        plot_experiment_results(all_results, trial_folder, tunnel_paths, trial_tunnel_widths, trial_metadata)
+        plot_enhanced_speed_profiles(all_results, trial_folder, time_step=0.05)
+        if centerline:
+            plot_speeds_vs_progress_enhanced(all_results, trial_folder, tunnel_paths, bin_size=0.1)
+
+        # -- metrics & summary --
+        # Save results_summary.json with ALL baseline runs (unfiltered) as a faithful record.
+        # Use only filtered (valid) baseline runs for metrics computation.
+        summary_path = trial_folder / "results_summary.json"
+        bl_data_all = None
+        if include_baseline and all_baseline_records_trial:
+            bl_all_slice = all_baseline_records_trial[:n_rounds]
+            bl_data_all = {
+                "trajectories": [r["trajectory"] for r in bl_all_slice],
+                "speeds": [r["speeds"] for r in bl_all_slice],
+            }
+        bl_data_filtered = None
+        if baseline_trajectories:
+            bl_data_filtered = {"trajectories": baseline_trajectories, "speeds": baseline_speeds_list}
+        # Model: save all runs (unfiltered) but use filtered for metrics
+        model_data_all = {
+            "trajectories": [r["trajectory"] for r in all_model_records_unfiltered],
+            "speeds": [r["speeds"] for r in all_model_records_unfiltered],
+            "records": all_model_records_unfiltered,
+        }
+        model_data_filtered = {
+            "trajectories": model_trajectories, "speeds": model_speeds_list,
+            "records": model_records,
+        }
+        save_trial_results_summary(
+            participant_id, trial_id,
+            {"trajectories": human_trajectories, "speeds": human_speeds_list,
+            "timestamps": human_timestamps_list, "records": human_records},
+            model_data_all,
+            centerline, summary_path,
+            model_data_for_metrics=model_data_filtered,
+            baseline_data=bl_data_all,
+            baseline_data_for_metrics=bl_data_filtered,
+        )
+
+        # Read back metrics for printing
+        metrics = {}
+        try:
+            with open(summary_path) as f:
+                sm = json.load(f)
+            metrics = sm.get("metrics", {})
+        except Exception:
+            pass
+
+        # Model records for aggregate accumulation
+        model_accum = []
+        for r in model_records:
+            model_accum.append({
+                "trial_id": trial_id,
+                "tunnel_type": cond.get("type", ""),
+                "width": cond.get("width", cond.get("segment2Width", 0)),
+                "completion_time": r["completion_time"],
+                "avg_speed": r["avg_speed"],
+                "path_length": r["path_length"],
             })
 
-    # -- model simulation (incremental) --
-    existing = existing_records or []
-    delta = n_rounds - len(existing)
-    if delta > 0:
-        sim = CursorSimulator(str(config_path))
-        if speed_model_path:
-            from hcs_package.speed_model import GAMSpeedModel
-            sim.speed_model = GAMSpeedModel.load(str(speed_model_path))
-        new_records = run_simulator_for_trial(sim, trial_id, n_runs=delta)
-        all_model_records = existing + new_records
-    else:
-        all_model_records = existing[:n_rounds]
-
-    all_model_records_unfiltered = all_model_records[:n_rounds]
-    # Filter out model runs that diverged (trajectory goes far outside screen)
-    _MAX_MODEL_CT = 39.5
-    _MODEL_DIVERGE = 1.0
-    model_records = []
-    for ri, r in enumerate(all_model_records_unfiltered):
-        traj = r.get("trajectory", [])
-        if r["completion_time"] >= _MAX_MODEL_CT:
-            print(f"  Filtered model: trial {trial_id} run {ri} "
-                  f"— CT={r['completion_time']:.2f}s (hit max steps)", flush=True)
-            continue
-        if traj:
-            xs = [p[0] for p in traj]
-            ys = [p[1] for p in traj]
-            if min(xs) < -0.1 or max(xs) > 0.56 or min(ys) < -0.1 or max(ys) > 0.36:
-                print(f"  Filtered model: trial {trial_id} run {ri} "
-                      f"— out of bounds x=[{min(xs):.3f},{max(xs):.3f}] "
-                      f"y=[{min(ys):.3f},{max(ys):.3f}]", flush=True)
-                continue
-        model_records.append(r)
-    model_trajectories = [r["trajectory"] for r in model_records]
-    model_speeds_list = [r["speeds"] for r in model_records]
-
-    # -- baseline (run in worker if needed, else use pre-computed) --
-    baseline_trajectories = []
-    baseline_speeds_list = []
-    all_baseline_records_trial = list(baseline_records_for_trial) if baseline_records_for_trial else []
-    if include_baseline and baseline_config_path and len(all_baseline_records_trial) < n_rounds:
-        # Run baseline simulation inside the worker (parallelized with model)
-        bl_delta = n_rounds - len(all_baseline_records_trial)
-        new_bl_records = _run_baseline_in_worker(
-            baseline_config_path, baseline_pkg_dir, trial_id, bl_delta)
-        all_baseline_records_trial.extend(new_bl_records)
-    if include_baseline and all_baseline_records_trial:
-        # Filter out timed-out and diverged baseline runs before plotting/metrics
-        _MAX_BL_CT = 39.5       # 800 steps * 0.05s
-        _DIVERGE_LIM = 1.0      # meters
-        bl_valid = []
-        for ri, r in enumerate(all_baseline_records_trial[:n_rounds]):
-            ct = r["completion_time"]
-            if ct >= _MAX_BL_CT:
-                print(f"  Filtered baseline: trial {trial_id} run {ri} "
-                      f"— CT={ct:.2f}s (hit max steps)", flush=True)
-                continue
-            traj = r.get("trajectory", [])
-            if traj:
-                lp = traj[-1]
-                if abs(lp[0]) > _DIVERGE_LIM or abs(lp[1]) > _DIVERGE_LIM:
-                    print(f"  Filtered baseline: trial {trial_id} run {ri} "
-                          f"— diverged (end=({lp[0]:.2f},{lp[1]:.2f}))", flush=True)
-                    continue
-            bl_valid.append(r)
-        baseline_trajectories = [r["trajectory"] for r in bl_valid]
-        baseline_speeds_list = [r["speeds"] for r in bl_valid]
-
-    # -- plots --
-    cond = TRIAL_CONDITIONS.get(trial_id, {})
-    #updating plot for wide_to_narrow specifically to showcasing narrowing tunnel
-    if cond.get("type") == "wide_to_narrow":
-        n = len(centerline)
-        width_profile = np.linspace(
-            cond["segment1Width"], cond["segment2Width"], n
-        ).tolist()
-        tunnel_width = width_profile
-    else:
-        tunnel_width = cond.get("width", 0.02)
-    trial_metadata = {trial_id: {participant_id: {0: {"condition": cond}}}}
-
-    segment_data = {
-        'human': {'trajectories': human_trajectories, 'speeds': human_speeds_list},
-        'sim': {'trajectories': model_trajectories, 'speeds': model_speeds_list},
-    }
-    if baseline_trajectories:
-        segment_data['baseline'] = {
-            'trajectories': baseline_trajectories, 'speeds': baseline_speeds_list,
-        }
-
-    all_results = {trial_id: {0: segment_data}}
-    tunnel_paths = {trial_id: centerline}
-    trial_tunnel_widths = {trial_id: tunnel_width}
-
-    plot_experiment_results(all_results, trial_folder, tunnel_paths, trial_tunnel_widths, trial_metadata)
-    plot_enhanced_speed_profiles(all_results, trial_folder, time_step=0.05)
-    if centerline:
-        plot_speeds_vs_progress_enhanced(all_results, trial_folder, tunnel_paths, bin_size=0.1)
-
-    # -- metrics & summary --
-    # Save results_summary.json with ALL baseline runs (unfiltered) as a faithful record.
-    # Use only filtered (valid) baseline runs for metrics computation.
-    summary_path = trial_folder / "results_summary.json"
-    bl_data_all = None
-    if include_baseline and all_baseline_records_trial:
-        bl_all_slice = all_baseline_records_trial[:n_rounds]
-        bl_data_all = {
-            "trajectories": [r["trajectory"] for r in bl_all_slice],
-            "speeds": [r["speeds"] for r in bl_all_slice],
-        }
-    bl_data_filtered = None
-    if baseline_trajectories:
-        bl_data_filtered = {"trajectories": baseline_trajectories, "speeds": baseline_speeds_list}
-    # Model: save all runs (unfiltered) but use filtered for metrics
-    model_data_all = {
-        "trajectories": [r["trajectory"] for r in all_model_records_unfiltered],
-        "speeds": [r["speeds"] for r in all_model_records_unfiltered],
-        "records": all_model_records_unfiltered,
-    }
-    model_data_filtered = {
-        "trajectories": model_trajectories, "speeds": model_speeds_list,
-        "records": model_records,
-    }
-    save_trial_results_summary(
-        participant_id, trial_id,
-        {"trajectories": human_trajectories, "speeds": human_speeds_list,
-         "timestamps": human_timestamps_list, "records": human_records},
-        model_data_all,
-        centerline, summary_path,
-        model_data_for_metrics=model_data_filtered,
-        baseline_data=bl_data_all,
-        baseline_data_for_metrics=bl_data_filtered,
-    )
-
-    # Read back metrics for printing
-    metrics = {}
-    try:
-        with open(summary_path) as f:
-            sm = json.load(f)
-        metrics = sm.get("metrics", {})
-    except Exception:
-        pass
-
-    # Model records for aggregate accumulation
-    model_accum = []
-    for r in model_records:
-        model_accum.append({
+        return {
             "trial_id": trial_id,
-            "tunnel_type": cond.get("type", ""),
-            "width": cond.get("width", cond.get("segment2Width", 0)),
-            "completion_time": r["completion_time"],
-            "avg_speed": r["avg_speed"],
-            "path_length": r["path_length"],
-        })
-
-    return {
-        "trial_id": trial_id,
-        "all_sim_records": all_model_records,  # full cache (existing + new)
-        "model_accum": model_accum,
-        "metrics": metrics,
-        "n_human": len(human_trajectories),
-        "n_model": len(model_records),
-        "n_baseline": len(baseline_trajectories),
-        "all_baseline_records": all_baseline_records_trial,
-    }
+            "all_sim_records": all_model_records,  # full cache (existing + new)
+            "model_accum": model_accum,
+            "metrics": metrics,
+            "n_human": len(human_trajectories),
+            "n_model": len(model_records),
+            "n_baseline": len(baseline_trajectories),
+            "all_baseline_records": all_baseline_records_trial,
+        }
+    except Exception as e:
+        print(f"  FULL ERROR trial {trial_id}:\n{traceback.format_exc()}")
+        raise
 
 
 # ===================================================================

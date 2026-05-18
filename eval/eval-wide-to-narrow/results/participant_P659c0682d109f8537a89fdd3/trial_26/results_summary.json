@@ -26,30 +26,59 @@
   "model": {
     "n_runs": 3,
     "n_valid_runs": 3,
-    "avg_completion_time": 1.75,
-    "avg_speed": 0.3878389025220769,
+    "avg_completion_time": 3.066666666666667,
+    "avg_speed": 0.1731206709118559,
     "runs": [
       {
         "run": 0,
-        "completion_time": 1.4000000000000001,
-        "avg_speed": 0.325479794366342
+        "completion_time": 3.4000000000000004,
+        "avg_speed": 0.1332405052384022
       },
       {
         "run": 1,
-        "completion_time": 1.55,
-        "avg_speed": 0.2969468085936213
+        "completion_time": 3.1500000000000004,
+        "avg_speed": 0.14387806498202885
       },
       {
         "run": 2,
-        "completion_time": 2.3000000000000003,
-        "avg_speed": 0.23063994666956356
+        "completion_time": 2.6500000000000004,
+        "avg_speed": 0.17115395872919434
       }
     ]
   },
   "metrics": {
-    "lateral_rmse_mean": 0.0019787010435263048,
-    "speed_rmse_mean": 0.24490763304361146,
-    "speed_corr_mean": -0.6154525307406777,
-    "time_diff_mean": 0.3409490333919157
+    "lateral_rmse_mean": 0.0009975084262605278,
+    "speed_rmse_mean": 0.19910526042716914,
+    "speed_corr_mean": 0.19642129996113591,
+    "time_diff_mean": 0.1549083605322621
+  },
+  "baseline": {
+    "n_runs": 3,
+    "n_valid_runs": 3,
+    "avg_completion_time": 0.8333333333333334,
+    "avg_speed": 0.6138097023484255,
+    "runs": [
+      {
+        "run": 0,
+        "completion_time": 0.7000000000000001,
+        "avg_speed": 0.6380946350574759
+      },
+      {
+        "run": 1,
+        "completion_time": 0.9,
+        "avg_speed": 0.49460672705978814
+      },
+      {
+        "run": 2,
+        "completion_time": 0.9,
+        "avg_speed": 0.49313482362216376
+      }
+    ]
+  },
+  "baseline_metrics": {
+    "lateral_rmse_mean": 0.0010371757644551598,
+    "speed_rmse_mean": 0.4192041512967158,
+    "speed_corr_mean": -0.564878875489149,
+    "time_diff_mean": 0.6861662063771027
   }
 }

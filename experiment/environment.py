@@ -127,11 +127,16 @@ def _create_tunnel_env(env_config: Dict) -> Dict:
         step_size=step_size
     )
 
-    # Gets segment widths from environment, otherwise sets default to tunnel_width
-    segment1_width = env_config.get("segment1Width", tunnel_width)
-    segment2_width = env_config.get("segment2Width", tunnel_width)
-    n = len(centerline)
-    width_profile = np.linspace(segment1_width, segment2_width, n).tolist()
+    # Gets segment 1 & 2 widths from environment for narrowing tunnels, otherwise sets default to None
+    segment1_width = env_config.get("segment1Width", None)
+    segment2_width = env_config.get("segment2Width", None)
+
+    if segment1_width is not None and segment2_width is not None:
+        n = len(centerline)
+        mid = n // 2
+        width_profile = [segment1_width] * mid + [segment2_width] * (n - mid)
+    else:
+        width_profile = None
     
     # Generate boundaries for rendering
     left_boundary, right_boundary = generateTunnelBoundaries(centerline, width_profile)
@@ -571,10 +576,18 @@ def _generate_tunnel_constraints(environment: Dict) -> Dict:
     """Generate PathConstraint for tunnel environments."""
     centerline = environment.get("centerline", [])
     tunnel_width = environment.get("tunnel_width", 0.02)
-    
-    # Convert centerline to list of lists for JSON
+    width_profile = environment.get("width_profile", None)
+
     path_coords = [[float(x), float(y)] for x, y in centerline]
-    
+
+    # hcs_package constraint geometry only accepts a scalar width.
+    # For wide-to-narrow tunnels, use the narrower segment width so the
+    # hard constraint reflects the most restrictive part of the tunnel.
+    if width_profile is not None:
+        width_value = min(width_profile)
+    else:
+        width_value = tunnel_width
+
     return {
         "coordinate_system": "normalized",
         "default_margin": 0.0,
@@ -583,7 +596,7 @@ def _generate_tunnel_constraints(environment: Dict) -> Dict:
             "geometry": {
                 "type": "path",
                 "path": path_coords,
-                "width": tunnel_width
+                "width": width_value
             },
             "enabled": True
         }]

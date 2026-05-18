@@ -1,4 +1,4 @@
-trial_id,label,split,tunnel_type,width,human_mt,human_speed,model_mt,model_speed,lat_rmse,speed_rmse,speed_corr,time_diff,n_human,n_model
-26,"Wide-to-narrow, narrow=0.01",test,wide_to_narrow,0.01,3.1346,0.178983,1.75,0.284356,0.002404,0.238765,-0.592,0.4105,42,42
-27,"Wide-to-narrow, narrow=0.02",test,wide_to_narrow,0.02,1.6805,0.323273,1.55,0.297379,0.002149,0.191511,-0.6616,0.3518,42,42
-28,"Wide-to-narrow, narrow=0.03",test,wide_to_narrow,0.03,1.422,0.389393,1.7667,0.268589,0.002418,0.222443,-0.0865,0.6139,42,42
+trial_id,label,split,tunnel_type,width,human_mt,human_speed,model_mt,model_speed,lat_rmse,speed_rmse,speed_corr,time_diff,n_human,n_model,baseline_mt,baseline_speed,bl_lat_rmse,bl_speed_rmse,bl_speed_corr,bl_time_diff
+26,"Wide-to-narrow, narrow=0.01",test,wide_to_narrow,0.01,3.1346,0.178983,5.0333,0.115056,0.001979,0.150057,-0.0036,0.6686,42,42,2.8232,0.33889,0.001966,0.276852,-0.4372,0.6372
+27,"Wide-to-narrow, narrow=0.02",test,wide_to_narrow,0.02,1.6805,0.323273,2.4488,0.227988,0.00192,0.167999,-0.0602,0.4565,42,42,2.7317,0.346163,0.001822,0.2161,-0.5099,1.1077
+28,"Wide-to-narrow, narrow=0.03",test,wide_to_narrow,0.03,1.422,0.389393,1.8536,0.286428,0.002256,0.176161,0.0689,0.3461,42,42,2.6488,0.36775,0.002156,0.165816,-0.0274,0.9472
