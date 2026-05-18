@@ -66,7 +66,7 @@ def run_tunnel_experiment(
     SCREEN_W_PX = environment["screen_width"]
     MAX_STEPS = environment["max_steps"]
     TARGET_RADIUS_M = environment["target_radius"]
-    TUNNEL_WIDTH_M = environment["tunnel_width"]
+    TUNNEL_WIDTH_M = environment.get("width_profile") or environment["tunnel_width"]
     window_width_m = environment["window_width_m"]
     window_height_m = environment["window_height_m"]
     tunnel_path_m = environment["centerline"]

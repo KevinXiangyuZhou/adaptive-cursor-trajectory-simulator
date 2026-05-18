@@ -1,0 +1,15 @@
+{
+  "_description": "Wide-to-narrow tunnel steering task",
+  "env_type": "tunnel_steering_smooth",
+  "screen_width": 460,
+  "screen_height": 260,
+  "curvature": 0.025,
+  "tunnelWidth": 0.05,
+  "segment1Width": 0.05,
+  "segment2Width": 0.01,
+  "start_x": 0.0,
+  "end_x": 0.46,
+  "y_base": 0.13,
+  "max_steps": 200,
+  "description": "wide-to-narrow tunnel, wide=0.05, narrow=0.01"
+}

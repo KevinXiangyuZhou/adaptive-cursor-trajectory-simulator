@@ -126,9 +126,15 @@ def _create_tunnel_env(env_config: Dict) -> Dict:
         wavelength=wavelength,
         step_size=step_size
     )
+
+    # Gets segment widths from environment, otherwise sets default to tunnel_width
+    segment1_width = env_config.get("segment1Width", tunnel_width)
+    segment2_width = env_config.get("segment2Width", tunnel_width)
+    n = len(centerline)
+    width_profile = np.linspace(segment1_width, segment2_width, n).tolist()
     
     # Generate boundaries for rendering
-    left_boundary, right_boundary = generateTunnelBoundaries(centerline, tunnel_width)
+    left_boundary, right_boundary = generateTunnelBoundaries(centerline, width_profile)
     
     # Target is at end of centerline
     target_pos = centerline[-1] if centerline else (end_x, y_base)
@@ -147,6 +153,7 @@ def _create_tunnel_env(env_config: Dict) -> Dict:
         "left_boundary": left_boundary.tolist() if hasattr(left_boundary, 'tolist') else list(left_boundary),
         "right_boundary": right_boundary.tolist() if hasattr(right_boundary, 'tolist') else list(right_boundary),
         "tunnel_width": tunnel_width,
+        "width_profile": width_profile, 
         "target_pos": target_pos,
         "target_radius": target_radius,
         "max_steps": max_steps,

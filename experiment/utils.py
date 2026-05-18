@@ -738,12 +738,18 @@ def generateTunnelBoundaries(tunnel_path, tunnel_width):
             tangents[i] = t_vec / norm
     
     normals = np.stack([tangents[:, 1], -tangents[:, 0]], axis=1)
-    half_width = tunnel_width / 2.0
     
+    half_widths = np.full(n_pts, tunnel_width / 2.0) if np.isscalar(tunnel_width) \
+              else np.asarray(tunnel_width, dtype=float) / 2.0
+    # error check
+    if half_widths.shape[0] != n_pts:
+        raise ValueError(f"width_profile length {half_widths.shape[0]} != path length {n_pts}")
+    half_widths = half_widths[:, np.newaxis]
+
     # Compute raw offset boundaries
-    left_boundary_raw = path + half_width * normals
-    right_boundary_raw = path - half_width * normals
-    
+    left_boundary_raw  = path + half_widths * normals
+    right_boundary_raw = path - half_widths * normals
+
     def smooth_boundary(boundary_points):
         """Smooth a boundary using spline interpolation."""
         boundary_points = np.asarray(boundary_points, dtype=float)
