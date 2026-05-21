@@ -26,59 +26,59 @@
   "model": {
     "n_runs": 3,
     "n_valid_runs": 3,
-    "avg_completion_time": 1.4333333333333336,
-    "avg_speed": 0.3570525886947651,
+    "avg_completion_time": 0.9666666666666667,
+    "avg_speed": 0.5270197824174473,
     "runs": [
       {
         "run": 0,
-        "completion_time": 1.4000000000000001,
-        "avg_speed": 0.3183937789361885
+        "completion_time": 1.0,
+        "avg_speed": 0.4468535564082848
       },
       {
         "run": 1,
-        "completion_time": 1.4000000000000001,
-        "avg_speed": 0.3240849617002858
+        "completion_time": 1.05,
+        "avg_speed": 0.4196915878928883
       },
       {
         "run": 2,
-        "completion_time": 1.5,
-        "avg_speed": 0.30228845102904617
+        "completion_time": 0.8500000000000001,
+        "avg_speed": 0.5199314712708214
       }
     ]
   },
   "metrics": {
-    "lateral_rmse_mean": 0.002697778398397473,
-    "speed_rmse_mean": 0.13561217817065546,
-    "speed_corr_mean": -0.39810952860476634,
-    "time_diff_mean": 0.2536443148688049
+    "lateral_rmse_mean": 0.0028342025018630443,
+    "speed_rmse_mean": 0.15132924134415662,
+    "speed_corr_mean": -0.6569284945814075,
+    "time_diff_mean": 0.15451895043731775
   },
   "baseline": {
     "n_runs": 3,
     "n_valid_runs": 3,
-    "avg_completion_time": 1.3333333333333333,
-    "avg_speed": 0.36737379463262937,
+    "avg_completion_time": 1.3500000000000003,
+    "avg_speed": 0.36944548062811267,
     "runs": [
       {
         "run": 0,
         "completion_time": 1.25,
-        "avg_speed": 0.35417268032031185
+        "avg_speed": 0.35418345514190797
       },
       {
         "run": 1,
-        "completion_time": 1.35,
-        "avg_speed": 0.3228712213692075
+        "completion_time": 1.4000000000000001,
+        "avg_speed": 0.322305900345135
       },
       {
         "run": 2,
         "completion_time": 1.4000000000000001,
-        "avg_speed": 0.3139905379402613
+        "avg_speed": 0.3136152863828486
       }
     ]
   },
   "baseline_metrics": {
-    "lateral_rmse_mean": 0.0023866432030006162,
-    "speed_rmse_mean": 0.11986741913286132,
-    "speed_corr_mean": -0.17224952161038443,
-    "time_diff_mean": 0.16618075801749266
+    "lateral_rmse_mean": 0.0023815159175391803,
+    "speed_rmse_mean": 0.12845016401600162,
+    "speed_corr_mean": -0.3219927235453287,
+    "time_diff_mean": 0.18075801749271167
   }
 }

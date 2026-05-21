@@ -262,6 +262,10 @@ def convert_constraints_to_corridor_bounds(
 
     margin = getattr(constraints, 'default_margin', default_margin)
 
+    # Define sampling grid up front — needed for per-point width interpolation
+    num_samples = max(50, int(reference_path.total_length / 0.01))
+    s_samples = np.linspace(0, reference_path.total_length, num_samples)
+
     half_widths: List[float] = []
     for region in constraints.regions:
         geom = region.geometry
@@ -269,22 +273,33 @@ def convert_constraints_to_corridor_bounds(
             region_margin = getattr(region, 'margin', None)
             if region_margin is None:
                 region_margin = margin
-            half_widths.append(max(0.0, geom.width / 2.0 - region_margin))
+            w = geom.width
+            if isinstance(w, list):
+                w_arr = np.array(w, dtype=float)
+                fracs = np.linspace(0, 1, len(w_arr))
+                s_fracs = s_samples / reference_path.total_length
+                w_interp = np.interp(s_fracs, fracs, w_arr)
+                hw = np.maximum(0.0, w_interp / 2.0 - region_margin)
+                half_widths.append(hw)
+            else:
+                half_widths.append(max(0.0, float(w) / 2.0 - region_margin))
 
     if not half_widths:
         return None
 
-    bound_value = min(half_widths)
+    # Normalize all entries to arrays
+    hw_arrays = []
+    for hw in half_widths:
+        if isinstance(hw, np.ndarray):
+            hw_arrays.append(hw)
+        else:
+            hw_arrays.append(np.full(num_samples, hw))
 
-    num_samples = max(50, int(reference_path.total_length / 0.01))
-    s_samples = np.linspace(0, reference_path.total_length, num_samples)
-
-    left_bounds = np.full(num_samples, bound_value)
-    right_bounds = np.full(num_samples, bound_value)
+    bound_array = np.min(np.stack(hw_arrays, axis=0), axis=0)
 
     max_bound = 0.1
-    left_bounds = np.clip(left_bounds, 0.0, max_bound)
-    right_bounds = np.clip(right_bounds, 0.0, max_bound)
+    left_bounds = np.clip(bound_array, 0.0, max_bound)
+    right_bounds = np.clip(bound_array, 0.0, max_bound)
 
     def left_bound_func(s):
         idx = np.clip(int(s / reference_path.total_length * (num_samples - 1)),

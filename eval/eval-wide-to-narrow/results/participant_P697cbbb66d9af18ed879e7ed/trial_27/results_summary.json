@@ -26,59 +26,59 @@
   "model": {
     "n_runs": 3,
     "n_valid_runs": 3,
-    "avg_completion_time": 4.45,
-    "avg_speed": 0.12192496947331306,
+    "avg_completion_time": 2.9166666666666674,
+    "avg_speed": 0.20920888830816478,
     "runs": [
       {
         "run": 0,
-        "completion_time": 5.3500000000000005,
-        "avg_speed": 0.08435480623262595
+        "completion_time": 3.5500000000000003,
+        "avg_speed": 0.12624545918597097
       },
       {
         "run": 1,
-        "completion_time": 4.45,
-        "avg_speed": 0.10187541263587883
+        "completion_time": 3.1500000000000004,
+        "avg_speed": 0.14183532866761564
       },
       {
         "run": 2,
-        "completion_time": 3.5500000000000003,
-        "avg_speed": 0.1285427946877585
+        "completion_time": 2.0500000000000003,
+        "avg_speed": 0.22021949020394593
       }
     ]
   },
   "metrics": {
-    "lateral_rmse_mean": 0.0015410397527082754,
-    "speed_rmse_mean": 0.18240474212007096,
-    "speed_corr_mean": 0.4179170234080109,
-    "time_diff_mean": 1.2646310432569976
+    "lateral_rmse_mean": 0.001571649751647739,
+    "speed_rmse_mean": 0.08447797785459965,
+    "speed_corr_mean": 0.7884265958592807,
+    "time_diff_mean": 0.4843087362171335
   },
   "baseline": {
     "n_runs": 3,
     "n_valid_runs": 2,
-    "avg_completion_time": 27.475,
-    "avg_speed": 0.082594348847335,
+    "avg_completion_time": 27.175,
+    "avg_speed": 0.08482570593883447,
     "runs": [
       {
         "run": 0,
-        "completion_time": 28.05,
-        "avg_speed": 0.016259963491005728
+        "completion_time": 27.05,
+        "avg_speed": 0.01682219164088159
       },
       {
         "run": 1,
         "completion_time": 40.0,
-        "avg_speed": 0.005213770740633542
+        "avg_speed": 0.006989505016567028
       },
       {
         "run": 2,
-        "completion_time": 26.900000000000002,
-        "avg_speed": 0.016904688294918244
+        "completion_time": 27.3,
+        "avg_speed": 0.016447931904711974
       }
     ]
   },
   "baseline_metrics": {
-    "lateral_rmse_mean": 0.0015353551909514152,
-    "speed_rmse_mean": 0.2441096108394621,
-    "speed_corr_mean": -0.695863493874808,
-    "time_diff_mean": 12.982188295165395
+    "lateral_rmse_mean": 0.0015056654414650767,
+    "speed_rmse_mean": 0.24866861953495392,
+    "speed_corr_mean": -0.6771544030110649,
+    "time_diff_mean": 12.829516539440203
   }
 }

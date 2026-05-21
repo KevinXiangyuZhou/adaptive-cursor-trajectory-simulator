@@ -26,59 +26,59 @@
   "model": {
     "n_runs": 3,
     "n_valid_runs": 3,
-    "avg_completion_time": 1.3666666666666665,
-    "avg_speed": 0.3594965806190194,
+    "avg_completion_time": 0.9833333333333334,
+    "avg_speed": 0.518831474099407,
     "runs": [
       {
         "run": 0,
-        "completion_time": 1.25,
-        "avg_speed": 0.35427577577137026
+        "completion_time": 1.05,
+        "avg_speed": 0.41891245089718454
       },
       {
         "run": 1,
-        "completion_time": 1.35,
-        "avg_speed": 0.32899463357995556
+        "completion_time": 1.05,
+        "avg_speed": 0.4225656626944057
       },
       {
         "run": 2,
-        "completion_time": 1.5,
-        "avg_speed": 0.30867196051925305
+        "completion_time": 0.8500000000000001,
+        "avg_speed": 0.5274072422680544
       }
     ]
   },
   "metrics": {
-    "lateral_rmse_mean": 0.0005920611932365311,
-    "speed_rmse_mean": 0.23057248411033665,
-    "speed_corr_mean": -0.47485775464648405,
-    "time_diff_mean": 0.434067855893669
+    "lateral_rmse_mean": 0.0008323917908618911,
+    "speed_rmse_mean": 0.11116224576158308,
+    "speed_corr_mean": 0.08991878759794565,
+    "time_diff_mean": 0.031829310947883986
   },
   "baseline": {
     "n_runs": 3,
     "n_valid_runs": 3,
     "avg_completion_time": 1.3833333333333335,
-    "avg_speed": 0.3804916881237228,
+    "avg_speed": 0.3828701916074111,
     "runs": [
       {
         "run": 0,
         "completion_time": 1.3,
-        "avg_speed": 0.34255027877377686
+        "avg_speed": 0.34498778824230364
       },
       {
         "run": 1,
         "completion_time": 1.4000000000000001,
-        "avg_speed": 0.326389857818298
+        "avg_speed": 0.32644700771986457
       },
       {
         "run": 2,
         "completion_time": 1.4500000000000002,
-        "avg_speed": 0.3221344550197781
+        "avg_speed": 0.3222313942061974
       }
     ]
   },
   "baseline_metrics": {
-    "lateral_rmse_mean": 0.00073456754653593,
-    "speed_rmse_mean": 0.1992211064914347,
-    "speed_corr_mean": 0.10063685019543345,
+    "lateral_rmse_mean": 0.0007684727937317737,
+    "speed_rmse_mean": 0.19769337990083094,
+    "speed_corr_mean": 0.07274516860053289,
     "time_diff_mean": 0.4515564882826166
   }
 }

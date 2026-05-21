@@ -584,7 +584,7 @@ def _generate_tunnel_constraints(environment: Dict) -> Dict:
     # For wide-to-narrow tunnels, use the narrower segment width so the
     # hard constraint reflects the most restrictive part of the tunnel.
     if width_profile is not None:
-        width_value = min(width_profile)
+        width_value = width_profile 
     else:
         width_value = tunnel_width
 

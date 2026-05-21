@@ -13,7 +13,7 @@ class ConstraintType(str, Enum):
 @dataclass
 class PathConstraint:
     path: List[Tuple[float, float]]
-    width: Optional[float] = None
+    width: Optional[Union[float, List[float]]] = None
 
 
 @dataclass

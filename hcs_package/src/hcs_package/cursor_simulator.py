@@ -253,7 +253,8 @@ class CursorSimulator:
             if constraint_config is not None:
                 for region in constraint_config.regions:
                     if isinstance(region.geometry, PathConstraint):
-                        tunnel_width = float(region.geometry.width)
+                        w = region.geometry.width
+                        tunnel_width = float(min(w) if isinstance(w, list) else w)
                         break
             if tunnel_width is None:
                 distances = [

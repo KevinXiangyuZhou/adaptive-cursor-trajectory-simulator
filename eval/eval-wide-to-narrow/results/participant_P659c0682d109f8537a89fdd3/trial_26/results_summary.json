@@ -26,59 +26,59 @@
   "model": {
     "n_runs": 3,
     "n_valid_runs": 3,
-    "avg_completion_time": 3.066666666666667,
-    "avg_speed": 0.1731206709118559,
+    "avg_completion_time": 1.4666666666666668,
+    "avg_speed": 0.42376221332029584,
     "runs": [
       {
         "run": 0,
-        "completion_time": 3.4000000000000004,
-        "avg_speed": 0.1332405052384022
+        "completion_time": 1.1,
+        "avg_speed": 0.40999651343699584
       },
       {
         "run": 1,
-        "completion_time": 3.1500000000000004,
-        "avg_speed": 0.14387806498202885
+        "completion_time": 1.55,
+        "avg_speed": 0.2905248712783871
       },
       {
         "run": 2,
-        "completion_time": 2.6500000000000004,
-        "avg_speed": 0.17115395872919434
+        "completion_time": 1.75,
+        "avg_speed": 0.257416053734796
       }
     ]
   },
   "metrics": {
-    "lateral_rmse_mean": 0.0009975084262605278,
-    "speed_rmse_mean": 0.19910526042716914,
-    "speed_corr_mean": 0.19642129996113591,
-    "time_diff_mean": 0.1549083605322621
+    "lateral_rmse_mean": 0.000708077099748784,
+    "speed_rmse_mean": 0.2213645917552206,
+    "speed_corr_mean": 0.7011559013349414,
+    "time_diff_mean": 0.44765252322370075
   },
   "baseline": {
     "n_runs": 3,
     "n_valid_runs": 3,
-    "avg_completion_time": 0.8333333333333334,
-    "avg_speed": 0.6138097023484255,
+    "avg_completion_time": 1.1333333333333335,
+    "avg_speed": 0.5808590638776184,
     "runs": [
       {
         "run": 0,
-        "completion_time": 0.7000000000000001,
-        "avg_speed": 0.6380946350574759
+        "completion_time": 0.8,
+        "avg_speed": 0.5684180165842199
       },
       {
         "run": 1,
         "completion_time": 0.9,
-        "avg_speed": 0.49460672705978814
+        "avg_speed": 0.5024266563965146
       },
       {
         "run": 2,
-        "completion_time": 0.9,
-        "avg_speed": 0.49313482362216376
+        "completion_time": 1.7000000000000002,
+        "avg_speed": 0.35367804410132503
       }
     ]
   },
   "baseline_metrics": {
-    "lateral_rmse_mean": 0.0010371757644551598,
-    "speed_rmse_mean": 0.4192041512967158,
-    "speed_corr_mean": -0.564878875489149,
-    "time_diff_mean": 0.6861662063771027
+    "lateral_rmse_mean": 0.0010836296451543124,
+    "speed_rmse_mean": 0.41932027083822093,
+    "speed_corr_mean": -0.7881124024640208,
+    "time_diff_mean": 0.5731860406728596
   }
 }
