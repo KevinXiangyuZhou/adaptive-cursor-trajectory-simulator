@@ -139,7 +139,7 @@ def _create_tunnel_env(env_config: Dict) -> Dict:
         width_profile = None
     
     # Generate boundaries for rendering
-    left_boundary, right_boundary = generateTunnelBoundaries(centerline, width_profile)
+    left_boundary, right_boundary = generateTunnelBoundaries(centerline, width_profile if width_profile is not None else tunnel_width)
     
     # Target is at end of centerline
     target_pos = centerline[-1] if centerline else (end_x, y_base)
@@ -192,7 +192,7 @@ def _create_corner_env(env_config: Dict) -> Dict:
     )
     
     # Generate boundaries for rendering
-    left_boundary, right_boundary = generateTunnelBoundaries(centerline, tunnel_width)
+    left_boundary, right_boundary = generateTunnelBoundaries(centerline, width_profile if width_profile is not None else tunnel_width)
     
     # Target is at end of centerline
     target_pos = centerline[-1] if centerline else (end_x, y_base)

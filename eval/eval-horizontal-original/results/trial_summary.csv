@@ -1,0 +1,6 @@
+trial_id,label,split,tunnel_type,width,human_mt,human_speed,model_mt,model_speed,lat_rmse,speed_rmse,speed_corr,time_diff,goal_approach_speed_human,goal_approach_speed_model,goal_approach_speed_diff,overshoot_rate,mean_overshoot_dist_m,mean_undershoot_dist_m,mean_signed_dist_m,n_human,n_model
+11,Straight W=10mm,test,sigmoidal,0.01,3.1288,0.176066,5.0333,0.115056,0.001,0.087233,-0.0332,0.713,0.2411,0.1517,0.5131,0.2143,0.00229,-0.002795,-0.001923,42,42
+12,Straight W=20mm,test,sigmoidal,0.02,1.8474,0.3085,2.4488,0.227988,0.002134,0.140121,-0.0673,0.4094,0.3382,0.248,0.2838,0.0476,0.001155,-0.005196,-0.004861,42,42
+13,Straight W=30mm,test,sigmoidal,0.03,1.4051,0.408286,1.8536,0.286428,0.002174,0.222463,-0.0631,0.3957,0.3784,0.3523,0.3941,0.1667,0.006254,-0.008754,-0.006397,42,42
+14,Straight W=40mm,test,sigmoidal,0.04,1.2788,0.449966,1.594,0.318436,0.002601,0.287691,0.0112,0.477,0.4629,0.3349,0.5245,0.0238,0.004976,-0.011838,-0.011394,42,42
+15,Straight W=50mm,test,sigmoidal,0.05,1.1307,0.458582,1.3595,0.371451,0.0034,0.270292,-0.1121,0.2866,0.411,0.4312,0.4389,0.0714,0.004677,-0.016828,-0.015535,42,42

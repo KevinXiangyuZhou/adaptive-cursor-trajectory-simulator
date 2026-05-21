@@ -360,6 +360,8 @@ def plot_speeds_vs_progress_enhanced(all_results, output_path_base, tunnel_paths
     # Progress bins
     progress_bins = np.arange(0.0, 1.0 + bin_size, bin_size)
     progress_centers = (progress_bins[:-1] + progress_bins[1:]) / 2.0
+    # Force last center to 1.0 so the line extends to the end
+    progress_centers[-1] = 1.0
     
     fig = plt.figure(figsize=(6 * n_segments, 4 * n_trials))
     gs = GridSpec(n_trials, n_segments, figure=fig, hspace=0.3, wspace=0.3)
@@ -466,12 +468,12 @@ def plot_speeds_vs_progress_enhanced(all_results, output_path_base, tunnel_paths
                            ax=ax, errorbar='sd', alpha=0.8, legend=False, palette=palette)
             
             # Show only the 10%-90% range used for speed metrics
-            ax.set_xticks([0.1, 0.25, 0.5, 0.75, 0.9])
-            ax.set_xticklabels(['10%', '25%', '50%', '75%', '90%'])
+            ax.set_xticks([0.1, 0.25, 0.5, 0.75, 1.0])
+            ax.set_xticklabels(['10%', '25%', '50%', '75%', '100%'])
             ax.set_xlabel('Progress', fontsize=10)
             ax.set_ylabel('Speed (m/s)', fontsize=10)
             ax.grid(False)
-            ax.set_xlim(0.1, 0.9)
+            ax.set_xlim(0.1, 1.0)
     
     # Create filename with trial IDs
     trial_ids_str = '_'.join([f't{tid}' for tid in trial_ids])

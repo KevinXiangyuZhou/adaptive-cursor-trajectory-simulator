@@ -249,7 +249,24 @@ def generate_mpcc(
                             if inside:
                                 tracking_cost += w_constraint * dist_to_boundary**2
 
-        return j_cost + prog_cost + tracking_cost
+        # 5. Goal precision — added noise-aware stopping term
+        w_precision = weights.get('goal_precision', 0.0)
+        if w_precision > 0.0:
+            s_end = ref_path.total_length
+            s_N = s_traj[-1]
+            overshoot = max(0.0, s_N - s_end)
+            #both nc0 and nc1 are signal-dependent
+            nc0 = weights.get('nc0', 0.2)
+            nc1 = weights.get('nc1', 0.02)
+            vx_N = vx_free[-1] + (A_vel_mat @ jx)[-1]
+            vy_N = vy_free[-1] + (A_vel_mat @ jy)[-1]
+            predicted_noise_variance = (nc0**2 + nc1**2) * (vx_N**2 + vy_N**2)
+
+            goal_cost = w_precision * overshoot * predicted_noise_variance
+        else:
+            goal_cost = 0.0
+
+        return j_cost + prog_cost + tracking_cost + goal_cost
 
     # vs >= 50% of speed target
     vs_min_per_step = 0.5 * speed_target / SCALE_VS

@@ -88,12 +88,16 @@ def model(model_input: SteeringModelInput):
         s_estimated, clearance_at_s, kappa_at_s, dkappa_at_s,
     )
 
+    weights_with_nc = dict(model_input.planner_weights) if model_input.planner_weights else {}
+    weights_with_nc['nc0'] = model_input.bump.nc[0]
+    weights_with_nc['nc1'] = model_input.bump.nc[1]
+
     controls, opt_info = generate_mpcc(
         ref_path=ref_path,
         state_0=state_0,
         num_steps=pred_horizon,
         dt=interval,
-        weights=model_input.planner_weights,
+        weights=weights_with_nc,
         limits=limits,
         speed_profile=speed_profile,
         desired_speed=desired_speed,
