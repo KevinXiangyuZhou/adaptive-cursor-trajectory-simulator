@@ -26,37 +26,37 @@
   "model": {
     "n_runs": 3,
     "n_valid_runs": 3,
-    "avg_completion_time": 1.1333333333333335,
-    "avg_speed": 0.4676355471150339,
+    "avg_completion_time": 1.1666666666666667,
+    "avg_speed": 0.4535743210145698,
     "runs": [
       {
         "run": 0,
         "completion_time": 1.1,
-        "avg_speed": 0.4033024838134131
+        "avg_speed": 0.40480681858696593
       },
       {
         "run": 1,
-        "completion_time": 1.2000000000000002,
-        "avg_speed": 0.375053649989591
+        "completion_time": 1.1500000000000001,
+        "avg_speed": 0.3762490812728139
       },
       {
         "run": 2,
-        "completion_time": 1.1,
-        "avg_speed": 0.3933604215409295
+        "completion_time": 1.25,
+        "avg_speed": 0.3489965208794843
       }
     ]
   },
   "metrics": {
-    "lateral_rmse_mean": 0.006565869591750351,
-    "speed_rmse_mean": 0.13754968860121988,
-    "speed_corr_mean": 0.776782397537625,
-    "time_diff_mean": 0.11731843575419017,
+    "lateral_rmse_mean": 0.006475030144901032,
+    "speed_rmse_mean": 0.1582278947796123,
+    "speed_corr_mean": 0.6865846838270587,
+    "time_diff_mean": 0.1501807426881368,
     "goal_approach_speed_human": 0.2668764854056612,
-    "goal_approach_speed_model": 0.3478323568983412,
-    "goal_approach_speed_diff": 0.3033458394418838,
+    "goal_approach_speed_model": 0.38164954172822946,
+    "goal_approach_speed_diff": 0.4300605808267796,
     "overshoot_rate": 0.0,
     "mean_overshoot_dist_m": null,
-    "mean_undershoot_dist_m": -0.01489241529021502,
-    "mean_signed_dist_m": -0.01489241529021502
+    "mean_undershoot_dist_m": -0.018862068229765494,
+    "mean_signed_dist_m": -0.018862068229765494
   }
 }
