@@ -59,3 +59,4 @@ class SteeringModelInput:
     curvature_rate_profile: Optional[Tuple] = None  # (s_array, rate_array)
     curvature_profile: Optional[Tuple] = None  # (s_array, kappa_array)
     speed_model: Optional[Any] = None
+    target_radius: float = 0.01  # added as dead code for using target_radius in mpcc_model.py

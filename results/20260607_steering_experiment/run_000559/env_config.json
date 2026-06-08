@@ -1,0 +1,14 @@
+{
+  "_description": "Tunnel steering - navigate through a sinusoidal corridor to reach target",
+  "env_type": "tunnel_steering_smooth",
+  "screen_width": 460,
+  "screen_height": 260,
+  "curvature": 0.025,
+  "tunnelWidth": 0.04,
+  "start_x": 0.0,
+  "end_x": 0.46,
+  "y_base": 0.13,
+  "wavelength": 0.23,
+  "max_steps": 200,
+  "description": "narrow tunnel, gentle sinusoidal curve"
+}

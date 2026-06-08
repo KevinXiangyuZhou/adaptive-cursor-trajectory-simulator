@@ -61,7 +61,7 @@ class CursorSimulator:
                 "contour": 20,
                 "lag": 0.05,
                 "desired_speed": 0.2,
-                "goal_precision": 150.0  # added
+                "goal_precision": 0.0  # added
             },
             "planner_margin": 0.0,
             "add_noise": True,
@@ -346,10 +346,20 @@ class CursorSimulator:
         current_time = 0.0
         final_target = np.array(waypoints_norm[-1])
 
+        '''
         for step in range(max_steps):
             dist_to_target = np.linalg.norm(cursor_pos - final_target)
             if dist_to_target < target_radius:
                 break
+        '''
+        dwell_required = int(round(0.5 / self.interval))
+        dwell_steps = 0
+        for step in range(max_steps):
+            dist_to_target = np.linalg.norm(cursor_pos - final_target)
+            if dist_to_target < target_radius:
+                dwell_steps += 1
+                if dwell_steps >= dwell_required:
+                    break
 
             tunnel_path = waypoints_norm
             model_input = SteeringModelInput(
@@ -381,6 +391,7 @@ class CursorSimulator:
                 curvature_rate_profile=curvature_rate_profile,
                 curvature_profile=curvature_profile,
                 speed_model=self.speed_model,
+                target_radius=target_radius,  # added for pointing model
             )
 
             cursor_info, plan_debug = model(model_input)

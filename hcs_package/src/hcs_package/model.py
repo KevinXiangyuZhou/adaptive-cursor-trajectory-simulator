@@ -91,6 +91,7 @@ def model(model_input: SteeringModelInput):
     weights_with_nc = dict(model_input.planner_weights) if model_input.planner_weights else {}
     weights_with_nc['nc0'] = model_input.bump.nc[0]
     weights_with_nc['nc1'] = model_input.bump.nc[1]
+    weights_with_nc['target_radius'] = model_input.target_radius
 
     controls, opt_info = generate_mpcc(
         ref_path=ref_path,

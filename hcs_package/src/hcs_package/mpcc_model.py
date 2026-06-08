@@ -251,10 +251,11 @@ def generate_mpcc(
 
         # 5. Goal precision — added noise-aware stopping term
         w_precision = weights.get('goal_precision', 0.0)
+        target_radius = weights.get('target_radius', 0.01)
         if w_precision > 0.0:
             s_end = ref_path.total_length
             s_N = s_traj[-1]
-            overshoot = max(0.0, s_N - s_end)
+            overshoot = max(0.0, s_N - s_end - target_radius)
             #both nc0 and nc1 are signal-dependent
             nc0 = weights.get('nc0', 0.2)
             nc1 = weights.get('nc1', 0.02)
