@@ -1,0 +1,63 @@
+{
+  "participant_id": "P5c3c1617f5ebd500018596cb",
+  "trial_id": 12,
+  "human": {
+    "n_rounds": 3,
+    "avg_completion_time": 1.835,
+    "avg_speed": 0.26787959980552456,
+    "rounds": [
+      {
+        "round": 0,
+        "completion_time": 2.132,
+        "avg_speed": 0.2348146462791731
+      },
+      {
+        "round": 1,
+        "completion_time": 1.833,
+        "avg_speed": 0.260330437348641
+      },
+      {
+        "round": 2,
+        "completion_time": 1.54,
+        "avg_speed": 0.3084937157887596
+      }
+    ]
+  },
+  "model": {
+    "n_runs": 3,
+    "n_valid_runs": 2,
+    "avg_completion_time": 4.4,
+    "avg_speed": 0.16029768408373257,
+    "runs": [
+      {
+        "run": 0,
+        "completion_time": 4.0,
+        "avg_speed": 0.11543138839552894
+      },
+      {
+        "run": 1,
+        "completion_time": 4.800000000000001,
+        "avg_speed": 0.10096532616560087
+      },
+      {
+        "run": 2,
+        "completion_time": 4.3,
+        "avg_speed": 0.17272927422512876
+      }
+    ]
+  },
+  "metrics": {
+    "lateral_rmse_mean": 0.0012212830219240826,
+    "speed_rmse_mean": 0.11663810975926524,
+    "speed_corr_mean": 0.18082894576883835,
+    "time_diff_mean": 1.3978201634877387,
+    "goal_approach_speed_human": 0.27715287989244297,
+    "goal_approach_speed_model": 0.07525441935559582,
+    "goal_approach_speed_diff": 0.7284732549602211,
+    "approach_speed_corr_20": -0.37570205887726654,
+    "approach_speed_rmse_20": 0.14951938323362457,
+    "approach_speed_corr_10": -0.8982541475713285,
+    "approach_speed_rmse_10": 0.20681297949636582,
+    "terminated_by_dwell_rate": 1.0
+  }
+}

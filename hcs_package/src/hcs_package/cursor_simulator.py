@@ -61,7 +61,7 @@ class CursorSimulator:
                 "contour": 20,
                 "lag": 0.05,
                 "desired_speed": 0.2,
-                "goal_precision": 300.0  # added
+                "goal_precision": 75.0  # added
             },
             "planner_margin": 0.0,
             "add_noise": True,
@@ -95,8 +95,9 @@ class CursorSimulator:
 
         self.interval = config['Interval']
         self.forearm = config['forearm']
-
-        th = config['Th']
+        
+        TH_SCALE = 1.0  # change this value to scale prediction horizon (e.g. 1.5, 2.0)
+        th = config['Th'] * TH_SCALE
         self.pred_horizon = max(1, int(round(th / self.interval)))
 
         tp = config['Tp']

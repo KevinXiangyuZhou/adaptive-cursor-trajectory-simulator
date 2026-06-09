@@ -1,0 +1,42 @@
+{
+  "11": {
+    "tunnelWidth": 0.01,
+    "timeLimit": null,
+    "curvature": 0,
+    "repetitions": 3,
+    "tunnelType": "straight",
+    "description": "straight, width 0.01"
+  },
+  "12": {
+    "curvature": 0,
+    "repetitions": 3,
+    "tunnelType": "straight",
+    "description": "straight, width 0.02",
+    "timeLimit": null,
+    "tunnelWidth": 0.02
+  },
+  "13": {
+    "tunnelWidth": 0.03,
+    "timeLimit": null,
+    "repetitions": 3,
+    "curvature": 0,
+    "description": "straight, width 0.03",
+    "tunnelType": "straight"
+  },
+  "14": {
+    "tunnelWidth": 0.04,
+    "timeLimit": null,
+    "repetitions": 3,
+    "curvature": 0,
+    "description": "straight, width 0.04",
+    "tunnelType": "straight"
+  },
+  "15": {
+    "description": "straight, width 0.05",
+    "tunnelType": "straight",
+    "repetitions": 3,
+    "curvature": 0,
+    "timeLimit": null,
+    "tunnelWidth": 0.05
+  }
+}
