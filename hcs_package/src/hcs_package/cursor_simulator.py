@@ -61,7 +61,7 @@ class CursorSimulator:
                 "contour": 20,
                 "lag": 0.05,
                 "desired_speed": 0.2,
-                "goal_precision": 0.0  # added
+                "goal_precision": 300.0  # added
             },
             "planner_margin": 0.0,
             "add_noise": True,

@@ -1,0 +1,34 @@
+{
+  "participant_id": "P69b1e5c5145bfd9c6480d144",
+  "trial_id": 13,
+  "human": {
+    "n_rounds": 3,
+    "avg_completion_time": 0,
+    "avg_speed": 0,
+    "rounds": []
+  },
+  "model": {
+    "n_runs": 3,
+    "n_valid_runs": 0,
+    "avg_completion_time": 0,
+    "avg_speed": 0,
+    "runs": [
+      {
+        "run": 0,
+        "completion_time": 12.700000000000001,
+        "avg_speed": 0.19033372570722823
+      },
+      {
+        "run": 1,
+        "completion_time": 22.400000000000002,
+        "avg_speed": 0.18532570851194458
+      },
+      {
+        "run": 2,
+        "completion_time": 21.150000000000002,
+        "avg_speed": 0.1901950449614003
+      }
+    ]
+  },
+  "metrics": {}
+}
