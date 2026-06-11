@@ -39,6 +39,13 @@ from experiment.environment import (
     load_environment_config, create_environment, generate_task_config
 )
 
+# Reuse the evaluation pipeline's plotting so pygame output matches eval figures.
+sys.path.insert(0, str(Path(__file__).parent.parent / "eval" / "utils"))
+from plot_utils import (
+    plot_enhanced_speed_profiles,
+    plot_speeds_vs_progress_enhanced,
+)
+
 DEFAULT_USER_CONFIG = Path(__file__).parent / "user_configurations" / "customized.json"
 
 
@@ -53,6 +60,44 @@ def get_experiment_name(env_type: str) -> str:
     elif "menu" in env_type:
         return "menu"
     return "experiment"
+
+
+def save_evaluation_speed_figures(trajectory, environment, interval, run_dir):
+    """Render the evaluation-style speed figures for a single sim run.
+
+    Produces speeds_enhanced_t0.png and speeds_progress_enhanced_t0.png using
+    eval/utils/plot_utils, so the speed output is directly comparable with the
+    evaluation results. (The trajectory figure is drawn separately by
+    draw_trajectory so it keeps the target point + radius marker.)
+
+    Trajectory points arrive in task-config pixels; the evaluation works in
+    metres at a 0.001 scale (matching environment["centerline"]), so we apply
+    the same conversion and speed convention as run_eval.
+
+    Returns the per-step speed list (m/s).
+    """
+    scale = 0.001  # task-config pixels -> metres (matches run_eval)
+    sim_traj_m = [[x * scale, y * scale] for x, y, _ in trajectory]
+
+    # Per-step speed = displacement / interval, with speeds[0] duplicated so
+    # len(speeds) == len(trajectory) (identical convention to run_eval).
+    speeds = []
+    for i in range(1, len(sim_traj_m)):
+        dx = sim_traj_m[i][0] - sim_traj_m[i - 1][0]
+        dy = sim_traj_m[i][1] - sim_traj_m[i - 1][1]
+        speeds.append(float(np.hypot(dx, dy)) / interval)
+    if speeds:
+        speeds.insert(0, speeds[0])
+
+    trial_id = 0
+    all_results = {trial_id: {0: {'sim': {'trajectories': [sim_traj_m], 'speeds': [speeds]}}}}
+    tunnel_paths = {trial_id: environment.get("centerline", [])}
+
+    plot_enhanced_speed_profiles(all_results, run_dir, time_step=interval)
+    if tunnel_paths[trial_id]:
+        plot_speeds_vs_progress_enhanced(all_results, run_dir, tunnel_paths, bin_size=0.1)
+
+    return speeds
 
 
 def run_tunnel_experiment(
@@ -95,28 +140,11 @@ def run_tunnel_experiment(
 
     print(f"Generated {len(trajectory)} points")
 
-    # Convert trajectory to metres (use separate scales for X and Y)
+    # Conversion from task-config pixels to metres (uniform 0.001 scale)
     SCREEN_H_PX = environment["screen_height"]
     s2m_x = window_width_m / SCREEN_W_PX
     s2m_y = window_height_m / SCREEN_H_PX
-    start_pos_m = tunnel_path_m[0] if tunnel_path_m else (0, 0)
-    cursor_xs_m = [start_pos_m[0]]
-    cursor_ys_m = [start_pos_m[1]]
-    speeds = []
-    pause_coordinates = []
     interval = simulator.interval
-
-    for x_px, y_px, _ in trajectory:
-        cursor_xs_m.append(x_px * s2m_x)
-        cursor_ys_m.append(y_px * s2m_y)
-
-    for i in range(1, len(cursor_xs_m)):
-        dx = cursor_xs_m[i] - cursor_xs_m[i - 1]
-        dy = cursor_ys_m[i] - cursor_ys_m[i - 1]
-        speed = np.sqrt(dx ** 2 + dy ** 2) / interval
-        speeds.append(speed)
-        if speed < 1e-3:
-            pause_coordinates.append((cursor_xs_m[i], cursor_ys_m[i]))
 
     # Pygame replay
     display_w = int(window_width_m * SCALE)
@@ -164,14 +192,23 @@ def run_tunnel_experiment(
 
     pygame.quit()
 
-    # Save plots
-    draw_speed_profile(
-        speeds,
-        save_path=os.path.join(run_dir, "plot_speed.png"),
-        title="Speed Profile",
-    )
+    # Trajectory plot (original style): cursor path, tunnel corridor, and the
+    # target drawn as a red point with the target-radius circle around it.
+    start_pos_m = tunnel_path_m[0] if tunnel_path_m else (0, 0)
+    cursor_xs_m = [start_pos_m[0]]
+    cursor_ys_m = [start_pos_m[1]]
+    for x_px, y_px, _ in trajectory:
+        cursor_xs_m.append(x_px * s2m_x)
+        cursor_ys_m.append(y_px * s2m_y)
 
-    # Pre-convert reference path from pixels/1000 to meters
+    pause_coordinates = []
+    for i in range(1, len(cursor_xs_m)):
+        dx = cursor_xs_m[i] - cursor_xs_m[i - 1]
+        dy = cursor_ys_m[i] - cursor_ys_m[i - 1]
+        if np.sqrt(dx ** 2 + dy ** 2) / interval < 1e-3:
+            pause_coordinates.append((cursor_xs_m[i], cursor_ys_m[i]))
+
+    # Pre-convert reference path from pixels/1000 to metres
     ref_path_m = None
     if reference_path is not None:
         try:
@@ -201,6 +238,9 @@ def run_tunnel_experiment(
         save_path=os.path.join(run_dir, "plot_trajectory.png"),
         title="Cursor Trajectory",
     )
+
+    # Speed figures in the evaluation format (speeds_enhanced, speeds_progress_enhanced)
+    speeds = save_evaluation_speed_figures(trajectory, environment, interval, run_dir)
 
     return trajectory, speeds
 
