@@ -61,7 +61,7 @@ class CursorSimulator:
                 "contour": 20,
                 "lag": 0.05,
                 "desired_speed": 0.2,
-                "goal_precision": 75.0  # added
+                "goal_precision": 75.0  # fallback; overridden per-user via user_configurations
             },
             "planner_margin": 0.0,
             "add_noise": True,
@@ -353,7 +353,7 @@ class CursorSimulator:
             if dist_to_target < target_radius:
                 break
         '''
-        dwell_required = int(round(0.5 / self.interval))
+        dwell_required = int(round(1.0 / self.interval))
         dwell_steps = 0
         for step in range(max_steps):
             dist_to_target = np.linalg.norm(cursor_pos - final_target)
@@ -402,13 +402,19 @@ class CursorSimulator:
             planned_vel_idx = min(1, len(c_vel_x) - 1)
 
             if self.add_noise:
+                # Pass both the start velocity (c_vel_x[0], the current cursor
+                # velocity) and the planned end velocity (c_vel_x[1]) so the
+                # noisy step integrates trapezoidally over the same interval as
+                # the deterministic path — in the zero-noise limit this advances
+                # by c_pos_dx[0], matching the add_noise=False branch.
                 c_pos_dx_step, c_pos_dy_step, c_vel_x_step, c_vel_y_step, \
                 hand_pos[0], hand_pos[1], _, _ = single_step_motor_and_device_noise(
                     c_vel_x[planned_vel_idx], c_vel_y[planned_vel_idx],
                     hand_pos[0], hand_pos[1],
                     self.nc,
                     self.interval,
-                    self.forearm
+                    self.forearm,
+                    c_vel_x_prev=c_vel_x[0], c_vel_y_prev=c_vel_y[0],
                 )
             else:
                 c_pos_dx_step = c_pos_dx[0]

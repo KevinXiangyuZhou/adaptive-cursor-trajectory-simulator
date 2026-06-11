@@ -54,27 +54,40 @@ def motor_and_device_noise(c_vel_x, c_vel_y, h_pos_x, h_pos_y, pred_horizon, nc,
 
 
 def single_step_motor_and_device_noise(
-    c_vel_x, 
-    c_vel_y, 
-    h_pos_x, 
-    h_pos_y, 
-    nc, 
-    interval, 
-    forearm
+    c_vel_x,
+    c_vel_y,
+    h_pos_x,
+    h_pos_y,
+    nc,
+    interval,
+    forearm,
+    c_vel_x_prev=None,
+    c_vel_y_prev=None,
 ):
     """Apply motor and device noise for a single step.
 
     Args:
-        c_vel_x, c_vel_y: Current cursor velocity in screen frame (m/s).
+        c_vel_x, c_vel_y: Planned cursor velocity at the END of the step
+            (m/s); the signal-dependent motor noise is applied to this.
         h_pos_x, h_pos_y: Current hand position in physical space (m).
         nc: [directional, perpendicular] motor noise coefficients.
         interval: Time step (s).
         forearm: Forearm length (m) for coordinate transformation.
+        c_vel_x_prev, c_vel_y_prev: Velocity at the START of the step (m/s).
+            Used as the base of the trapezoidal position integral so that, in
+            the zero-noise limit, the executed displacement equals the planner's
+            true first-step displacement c_pos_dx[0] = (v_start + v_end)/2 * dt.
+            Defaults to (c_vel_x, c_vel_y) for backward compatibility (which
+            reproduces the old forward-Euler behaviour using the end velocity).
 
     Returns:
         (c_pos_dx, c_pos_dy, c_vel_x_out, c_vel_y_out,
          h_pos_x_out, h_pos_y_out, h_pos_delta_x, h_pos_delta_y).
     """
+    if c_vel_x_prev is None:
+        c_vel_x_prev = c_vel_x
+    if c_vel_y_prev is None:
+        c_vel_y_prev = c_vel_y
     # motor_noise expects [current, next] velocity pairs
     vx = np.array([float(c_vel_x), float(c_vel_x)], dtype=float)
     vy = np.array([float(c_vel_y), float(c_vel_y)], dtype=float)
@@ -121,9 +134,12 @@ def single_step_motor_and_device_noise(
     vx_noisy = vx_noisy_dev * mouse_gain_val
     vy_noisy = vy_noisy_dev * mouse_gain_val
 
-    # Trapezoidal integration: dx = (v_current + v_next) / 2 * interval
-    dx = (c_vel_x + vx_noisy) / 2.0 * interval
-    dy = (c_vel_y + vy_noisy) / 2.0 * interval
+    # Trapezoidal integration between the step's START velocity and the (noisy)
+    # END velocity: dx = (v_start + v_end_noisy) / 2 * interval. Using the start
+    # velocity as the base (rather than the end velocity twice) makes this the
+    # zero-noise-consistent counterpart of the planner's c_pos_dx[0].
+    dx = (c_vel_x_prev + vx_noisy) / 2.0 * interval
+    dy = (c_vel_y_prev + vy_noisy) / 2.0 * interval
 
     hand_ori_prev = mouse.get_hand_orientation(np.array((h_pos_x, h_pos_y)), forearm)
 
