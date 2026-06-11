@@ -249,32 +249,29 @@ def generate_mpcc(
                             if inside:
                                 tracking_cost += w_constraint * dist_to_boundary**2
 
-        # 5. Goal precision — added noise-aware stopping term
+        # 5. Goal precision — speed-accuracy (Fitts) tradeoff. Signal-dependent
+        # motor noise scatters the landing by ~nc*v, so penalize speed at the
+        # goal relative to the target radius: (nc*v / R)^2. Small target -> slow,
+        # careful approach; large target -> fast, casual.
         w_precision = weights.get('goal_precision', 0.0)
         target_radius = weights.get('target_radius', 0.01)
         if w_precision > 0.0:
             s_end = ref_path.total_length
-            s_N = s_traj[-1]
-            overshoot = max(0.0, s_N - s_end - target_radius)
             #both nc0 and nc1 are signal-dependent
             nc0 = weights.get('nc0', 0.2)
             nc1 = weights.get('nc1', 0.02)
-            vx_N = vx_free[-1] + (A_vel_mat @ jx)[-1]
-            vy_N = vy_free[-1] + (A_vel_mat @ jy)[-1]
-            predicted_noise_variance = (nc0**2 + nc1**2) * (vx_N**2 + vy_N**2)
-
-            goal_cost = w_precision * overshoot * predicted_noise_variance
+            # predicted endpoint-scatter variance at each node: (nc * v)^2
+            scatter_var = (nc0**2 + nc1**2) * (vx**2 + vy**2)
+            at_goal = s_traj >= s_end
+            scatter_at_goal = np.sum(np.where(at_goal, scatter_var, 0.0))
+            goal_cost = w_precision * scatter_at_goal / (target_radius**2)
         else:
             goal_cost = 0.0
 
         return j_cost + prog_cost + tracking_cost + goal_cost
 
-    # vs >= 50% of speed target
-    vs_min_per_step = 0.5 * speed_target / SCALE_VS
     bounds = []
-    bounds.extend([(None, None)] * num_steps)
-    bounds.extend([(None, None)] * num_steps)
-    bounds.extend([(float(vs_min_per_step[i]), None) for i in range(num_steps)])
+    bounds.extend([(None, None)] * 3 * num_steps)
 
     x0_cold = np.zeros(n_vars)
     x0_cold[idx_vs] = speed_target / SCALE_VS
