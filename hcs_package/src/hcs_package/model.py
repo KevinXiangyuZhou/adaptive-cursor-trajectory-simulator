@@ -64,7 +64,12 @@ def model(model_input: SteeringModelInput):
         raise ValueError("speed_model is required in SteeringModelInput")
 
     s0_init = theta_0
-    s_estimated = s0_init + desired_speed * interval * np.arange(1, pred_horizon + 1)
+    # Project the look-ahead at the cursor's actual speed (not a fixed nominal)
+    # so braking anticipation emerges from the horizon. desired_speed is just a
+    # start-up floor (the cursor begins at rest).
+    speed_now = float(np.hypot(cursor_vel_x, cursor_vel_y))
+    v_proj = max(speed_now, desired_speed)
+    s_estimated = s0_init + v_proj * interval * np.arange(1, pred_horizon + 1)
 
     clearance_profile = getattr(model_input, 'clearance_profile', None)
     curvature_rate_profile = getattr(model_input, 'curvature_rate_profile', None)
