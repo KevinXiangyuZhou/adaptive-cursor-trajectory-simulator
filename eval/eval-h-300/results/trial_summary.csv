@@ -1,6 +1,0 @@
-trial_id,label,split,tunnel_type,width,human_mt,human_speed,model_mt,model_speed,lat_rmse,speed_rmse,speed_corr,time_diff,goal_approach_speed_human,goal_approach_speed_model,goal_approach_speed_diff,approach_speed_corr_20,approach_speed_rmse_20,approach_speed_corr_10,approach_speed_rmse_10,terminated_by_dwell_rate,n_human,n_model
-11,Straight W=10mm,test,sigmoidal,0.01,3.1288,0.176066,6.7,0.088027,0.001023,0.093571,-0.0576,1.3333,0.2427,0.1543,0.5614,-0.3893,0.119334,-0.4651,0.149855,1.0,42,39
-12,Straight W=20mm,test,sigmoidal,0.02,1.8474,0.3085,3.65,0.159544,0.002096,0.154182,-0.022,1.3524,0.3501,0.2553,0.3181,-0.1239,0.141961,-0.0792,0.17193,1.0,42,39
-13,Straight W=30mm,test,sigmoidal,0.03,1.4051,0.408286,2.7421,0.210504,0.002151,0.209249,0.2435,1.2645,0.3674,0.2972,0.3368,0.2492,0.160883,0.1762,0.185073,1.0,42,38
-14,Straight W=40mm,test,sigmoidal,0.04,1.2788,0.449966,2.2526,0.244088,0.002659,0.286624,0.132,1.0122,0.4765,0.3318,0.5436,0.0296,0.285676,-0.0123,0.333954,1.0,42,39
-15,Straight W=50mm,test,sigmoidal,0.05,1.1307,0.458582,1.9923,0.274797,0.003204,0.256658,0.2065,0.89,0.4213,0.3413,0.2637,0.1344,0.195423,-0.1084,0.234684,1.0,42,39
