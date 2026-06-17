@@ -61,7 +61,7 @@ class CursorSimulator:
                 "contour": 20,
                 "lag": 0.05,
                 "desired_speed": 0.2,
-                "goal_precision": 75.0  # fallback; overridden per-user via user_configurations
+                "goal_precision": 0.01  # fallback; overridden per-user via user_configurations
             },
             "planner_margin": 0.0,
             "add_noise": True,
