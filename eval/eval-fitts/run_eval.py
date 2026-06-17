@@ -28,8 +28,13 @@ Directory structure:
         participant_{pid}/
             trial_{tid}_R{r_mult:.2f}/
                 trajectories_t{tid}.png
+                speeds_enhanced_t{tid}.png
                 speeds_progress_enhanced_t{tid}.png
                 results_summary.json
+            speed_profiles_W{width_mm}mm.png   <- one subplot per R value
+                                                   (same width), shared y-axis
+                                                   so deceleration depth is
+                                                   comparable across R/W
         fitts_results.csv           <- one row per run
         fitts_condition_summary.csv <- one row per (participant, tid, r_mult)
         progress_metrics.csv        <- one row per (participant, tid, r_mult), all metrics
@@ -66,7 +71,9 @@ EXPERIMENT_MAIN_DIR = PROJECT_ROOT / "eval" / "experiment-main"
 sys.path.insert(0, str(EXPERIMENT_MAIN_DIR))
 from utils.plot_utils import (
     plot_experiment_results,
+    plot_enhanced_speed_profiles,
     plot_speeds_vs_progress_enhanced,
+    compute_progress_along_path,
 )
 from utils.stats import (
     resample_by_progress,
@@ -433,6 +440,10 @@ def _build_condition_summary(
     m_app    = [r["approach_speed"]  for r in valid_records]
     m_tps    = [ID / ct for ct in m_cts if ct > 0]
 
+    h_trajs  = human_traj_list      or []
+    h_speeds = human_speeds_list    or []
+    h_ts     = human_timestamps_list or []
+
     agg = {}
     if m_trajs and centerline:
         all_spd_m, all_lat_m = [], []
@@ -468,10 +479,6 @@ def _build_condition_summary(
             goal_spd_h = None
             goal_spd_diff = None
             human_time = None
-
-            h_trajs  = human_traj_list   or []
-            h_speeds = human_speeds_list  or []
-            h_ts     = human_timestamps_list or []
 
             if h_trajs and centerline:
                 all_spd_h, all_lat_h = [], []
@@ -521,26 +528,6 @@ def _build_condition_summary(
                         )
                     human_time = mean_human_time
 
-            # ----------------------------------------------------------------
-            # Overshoot analysis (from experiment-main)
-            # ----------------------------------------------------------------
-            overshoot_distances = []
-            if centerline and len(centerline) >= 2:
-                goal     = np.array(centerline[-1])
-                path_dir = np.array(centerline[-1]) - np.array(centerline[-2])
-                path_dir = path_dir / (np.linalg.norm(path_dir) + 1e-10)
-                for traj in m_trajs:
-                    if len(traj) < 2:
-                        continue
-                    last_pt = np.array(traj[-1])
-                    overshoot_distances.append(
-                        float(np.dot(last_pt - goal, path_dir))
-                    )
-
-            n_overshoot = sum(1 for d in overshoot_distances if d > 0)
-            overshoots  = [d for d in overshoot_distances if d > 0]
-            undershoots = [d for d in overshoot_distances if d <= 0]
-
             agg = {
                 # ---- Fitts-specific ----
                 "ID":                         round(ID, 4),
@@ -562,10 +549,6 @@ def _build_condition_summary(
                 "goal_approach_speed_human":  round(goal_spd_h,    4) if goal_spd_h    is not None else None,
                 "goal_approach_speed_model":  round(goal_spd_m,    4) if goal_spd_m    is not None else None,
                 "goal_approach_speed_diff":   round(goal_spd_diff, 4) if goal_spd_diff is not None else None,
-                "overshoot_rate":             float(n_overshoot / len(m_trajs)) if m_trajs else None,
-                "mean_overshoot_dist_m":      float(np.mean(overshoots))   if overshoots  else None,
-                "mean_undershoot_dist_m":     float(np.mean(undershoots))  if undershoots else None,
-                "mean_signed_dist_m":         float(np.mean(overshoot_distances)) if overshoot_distances else None,
                 # ---- Human timing reference ----
                 "human_time_mean_s":          round(human_time, 4) if human_time is not None else None,
             }
@@ -672,8 +655,12 @@ def _process_condition(
     segment_data = {
         "sim": {"trajectories": model_trajectories, "speeds": model_speeds_list},
     }
-    # Include human in plot only at R=W/2 where comparison is meaningful
-    if human_trajectories and r_mult == HUMAN_R_MULT:
+    # CHANGED: human data is now overlaid at every R value (not just R=W/2),
+    # purely for visual comparison in the trajectory and speeds-vs-progress
+    # plots. This is independent of the metrics computation in
+    # _build_condition_summary, which already compares against human R=W/2
+    # data at all R values — this only affects what gets drawn.
+    if human_trajectories:
         segment_data["human"] = {
             "trajectories": human_trajectories,
             "speeds":       human_speeds_list,
@@ -687,6 +674,7 @@ def _process_condition(
     plot_experiment_results(
         all_results, trial_folder, tunnel_paths, tunnel_widths, trial_metadata
     )
+    plot_enhanced_speed_profiles(all_results, trial_folder, time_step=0.05)
     if centerline:
         plot_speeds_vs_progress_enhanced(
             all_results, trial_folder, tunnel_paths, bin_size=0.1
@@ -719,16 +707,147 @@ def _process_condition(
         "n_model":         len(valid_records),
         "n_human":         len(human_trajectories),
         "metrics":         metrics,
+        # Returned so main() can build the per-participant, per-width
+        # "speed_profiles_W{width_mm}mm.png" summary plot after all R
+        # conditions for this (participant, tid) have been processed.
+        # Kept minimal (no full all_records) to limit IPC payload size.
+        "segment_data":    segment_data,
     }
+
+
+# ---------------------------------------------------------------------------
+# Per-width speed-profile summary plot (one PNG per participant per width,
+# laying every R/W condition's speeds_progress_enhanced-style subplot side
+# by side on a shared y-axis so deceleration depth is comparable across R).
+# ---------------------------------------------------------------------------
+
+def _binned_speed_rows(trajectories, speeds_list, tunnel_path, label,
+                        bin_size=0.1):
+    """
+    Replicates the per-run progress-binning from plot_speeds_vs_progress_enhanced
+    (mean speed per progress bin, per run), returned as long-form rows
+    ready to feed into a seaborn dataframe: {"Progress", "Speed (m/s)", "Type"}.
+    """
+    rows = []
+    if not tunnel_path:
+        return rows
+
+    progress_bins    = np.arange(0.0, 1.0 + bin_size, bin_size)
+    progress_centers = (progress_bins[:-1] + progress_bins[1:]) / 2.0
+    progress_centers[-1] = 1.0
+
+    for traj, speeds in zip(trajectories, speeds_list):
+        if len(traj) != len(speeds) or len(traj) == 0:
+            continue
+
+        progress_values = compute_progress_along_path(traj, tunnel_path)
+
+        binned_speeds = [[] for _ in range(len(progress_centers))]
+        for progress, speed in zip(progress_values, speeds):
+            bin_idx = int(np.clip(progress / bin_size, 0, len(progress_centers) - 1))
+            binned_speeds[bin_idx].append(speed)
+
+        for bin_idx, progress_center in enumerate(progress_centers):
+            if binned_speeds[bin_idx]:
+                rows.append({
+                    "Progress":     progress_center,
+                    "Speed (m/s)":  float(np.mean(binned_speeds[bin_idx])),
+                    "Type":         label,
+                })
+    return rows
+
+
+def plot_speed_profiles_by_width(width_mm, r_segment_data, fitts_conditions_for_width,
+                                  tunnel_path, output_path, bin_size=0.1):
+    """
+    One figure per tunnel width: one subplot per R value tested for that
+    width, all sharing the same y-axis scale so the deceleration depth near
+    the goal is visually comparable across R/W conditions.
+
+    Args:
+        width_mm: tunnel width in mm, used only for the figure title.
+        r_segment_data: dict {r_mult: segment_data} where segment_data is
+            the same {"sim": {...}, "human": {...}} structure built in
+            _process_condition for that (tid, r_mult).
+        fitts_conditions_for_width: dict {r_mult: cond} for axis titles/labels.
+        tunnel_path: centerline for this width (same across all R values).
+        output_path: full path to save the PNG to.
+        bin_size: progress bin size (default 0.1, matches the other
+            speeds_progress_enhanced plots).
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import pandas as pd
+
+    r_mults = sorted(r_segment_data.keys())
+    if not r_mults:
+        return
+
+    n_r = len(r_mults)
+    fig, axes = plt.subplots(1, n_r, figsize=(5 * n_r, 4), squeeze=False)
+    axes = axes[0]
+
+    palette = {"Human": "tab:blue", "Simulator": "tab:orange"}
+
+    # First pass: build each subplot's dataframe and track the global y-max
+    # so every subplot can share the same y-axis scale.
+    per_axis_df = {}
+    global_y_max = 0.0
+    for r_mult in r_mults:
+        segment_data = r_segment_data[r_mult]
+        rows = []
+        if "human" in segment_data:
+            rows.extend(_binned_speed_rows(
+                segment_data["human"]["trajectories"],
+                segment_data["human"]["speeds"],
+                tunnel_path, "Human", bin_size=bin_size,
+            ))
+        if "sim" in segment_data:
+            rows.extend(_binned_speed_rows(
+                segment_data["sim"]["trajectories"],
+                segment_data["sim"]["speeds"],
+                tunnel_path, "Simulator", bin_size=bin_size,
+            ))
+        df = pd.DataFrame(rows) if rows else None
+        per_axis_df[r_mult] = df
+        if df is not None and not df.empty:
+            global_y_max = max(global_y_max, float(df["Speed (m/s)"].max()))
+
+    y_top = global_y_max * 1.05 if global_y_max > 0 else 1.0
+
+    for ax, r_mult in zip(axes, r_mults):
+        df = per_axis_df[r_mult]
+        if df is not None and not df.empty:
+            sns.lineplot(data=df, x="Progress", y="Speed (m/s)", hue="Type",
+                         ax=ax, errorbar="sd", alpha=0.8, legend=False,
+                         palette=palette)
+
+        cond  = fitts_conditions_for_width.get(r_mult, {})
+        label = cond.get("label", f"R={r_mult}W")
+        ax.set_title(label, fontsize=11)
+        ax.set_xticks([0.1, 0.25, 0.5, 0.75, 1.0])
+        ax.set_xticklabels(["10%", "25%", "50%", "75%", "100%"])
+        ax.set_xlim(0.1, 1.0)
+        ax.set_ylim(0, y_top)
+        ax.set_xlabel("Progress", fontsize=10)
+        ax.set_ylabel("Speed (m/s)", fontsize=10)
+        ax.grid(False)
+
+    fig.suptitle(f"Speed vs. Progress by R — W={width_mm:.0f}mm", fontsize=13)
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {output_path}")
 
 
 # ---------------------------------------------------------------------------
 # Regression helpers
 # ---------------------------------------------------------------------------
 
-def _compute_fitts_regression(rows, label="model"):
-    """Fit MT = a + b*ID across rows with per-width monotonicity check."""
-    sub = [r for r in rows if r["source"] == label and r["MT_s"] is not None]
+def _compute_fitts_regression(rows):
+    sub = [r for r in rows if r["MT_s"] is not None]
     if len(sub) < 3:
         return {}
 
@@ -742,7 +861,6 @@ def _compute_fitts_regression(rows, label="model"):
     ss_tot = np.sum((mts - np.mean(mts)) ** 2)
     r_sq   = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
-    # Spearman rho(R_over_W, MT) per width — should be negative
     width_rhos = {}
     by_width   = defaultdict(list)
     for r in sub:
@@ -764,9 +882,10 @@ def _compute_fitts_regression(rows, label="model"):
     }
 
 
-def _per_width_regression(rows, label="model"):
-    """Per-width MT = a + b*ID regression."""
-    sub      = [r for r in rows if r["source"] == label and r["MT_s"] is not None]
+def _per_width_regression(rows):
+    """Per-width MT = a + b*ID regression.
+    """
+    sub      = [r for r in rows if r["MT_s"] is not None]
     by_width = defaultdict(list)
     for r in sub:
         by_width[r["width_mm"]].append(r)
@@ -852,10 +971,6 @@ def write_aggregate_outputs(all_rows, aggregate_metrics, fitts_conditions,
         "goal_approach_speed_human",
         "goal_approach_speed_model",
         "goal_approach_speed_diff",
-        "overshoot_rate",
-        "mean_overshoot_dist_m",
-        "mean_undershoot_dist_m",
-        "mean_signed_dist_m",
         # Counts
         "n_valid_runs", "n_human_rounds",
     ]
@@ -892,10 +1007,6 @@ def write_aggregate_outputs(all_rows, aggregate_metrics, fitts_conditions,
                 "goal_approach_speed_human":  m.get("goal_approach_speed_human"),
                 "goal_approach_speed_model":  m.get("goal_approach_speed_model"),
                 "goal_approach_speed_diff":   m.get("goal_approach_speed_diff"),
-                "overshoot_rate":         m.get("overshoot_rate"),
-                "mean_overshoot_dist_m":  m.get("mean_overshoot_dist_m"),
-                "mean_undershoot_dist_m": m.get("mean_undershoot_dist_m"),
-                "mean_signed_dist_m":     m.get("mean_signed_dist_m"),
                 "n_valid_runs":           m.get("n_valid_runs"),
                 "n_human_rounds":         m.get("n_human_rounds"),
             }
@@ -915,8 +1026,7 @@ def write_aggregate_outputs(all_rows, aggregate_metrics, fitts_conditions,
         "has_human_data",
         "lat_rmse", "speed_rmse", "speed_corr", "time_diff",
         "goal_approach_speed_human", "goal_approach_speed_model",
-        "goal_approach_speed_diff", "overshoot_rate",
-        "mean_overshoot_dist_m", "mean_undershoot_dist_m", "mean_signed_dist_m",
+        "goal_approach_speed_diff",
         "throughput_mean_bps", "approach_speed_mean_ms",
     ]
     with open(pm_path, "w", newline="") as f:
@@ -943,10 +1053,6 @@ def write_aggregate_outputs(all_rows, aggregate_metrics, fitts_conditions,
                 "goal_approach_speed_human": m.get("goal_approach_speed_human") or "",
                 "goal_approach_speed_model": m.get("goal_approach_speed_model") or "",
                 "goal_approach_speed_diff":  m.get("goal_approach_speed_diff")  or "",
-                "overshoot_rate":            m.get("overshoot_rate")    or "",
-                "mean_overshoot_dist_m":     m.get("mean_overshoot_dist_m")  or "",
-                "mean_undershoot_dist_m":    m.get("mean_undershoot_dist_m") or "",
-                "mean_signed_dist_m":        m.get("mean_signed_dist_m")     or "",
                 "throughput_mean_bps":       m.get("throughput_mean_bps")    or "",
                 "approach_speed_mean_ms":    m.get("approach_speed_mean_ms") or "",
             })
@@ -955,11 +1061,11 @@ def write_aggregate_outputs(all_rows, aggregate_metrics, fitts_conditions,
     # ------------------------------------------------------------------
     # 4. fitts_regression.json
     # ------------------------------------------------------------------
-    model_rows = [r for r in all_rows if r["source"] == "model"]
+    model_rows = [r for r in all_rows if r["source"] != "human"]
     human_rows = [r for r in all_rows if r["source"] == "human"]
 
-    overall_reg   = _compute_fitts_regression(all_rows, label="model")
-    per_width_reg = _per_width_regression(all_rows, label="model")
+    overall_reg   = _compute_fitts_regression(model_rows)
+    per_width_reg = _per_width_regression(model_rows)
 
     m_tps = [r["TP"] for r in model_rows if r["TP"] is not None]
     tp_cv = (float(np.std(m_tps)) / float(np.mean(m_tps))
@@ -1188,6 +1294,7 @@ def main():
             p_folder.mkdir(exist_ok=True)
 
             futures = {}
+            condition_segment_data = {}   # {(tid, r_mult): segment_data}
             with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
                 for (tid, r_mult), cond in sorted(fitts_conditions.items()):
                     cache_key    = condition_cache_key(tid, r_mult)
@@ -1221,6 +1328,7 @@ def main():
                             m["n_valid_runs"]  = result["n_model"]
                             m["n_human_rounds"] = result["n_human"]
                             aggregate_metrics[(pid, tid, r_mult)] = m
+                            condition_segment_data[(tid, r_mult)] = result["segment_data"]
 
                             cor_str = (f"spd_corr={m.get('speed_corr_mean','?'):.3f}"
                                        if m.get("speed_corr_mean") is not None else "spd_corr=–")
@@ -1237,6 +1345,34 @@ def main():
                         f.cancel()
 
             save_sim_cache(sim_cache, cache_path)
+
+            # ---- per-width speed-profile summary plots (one per tid/width) ----
+            # Lays every R/W condition's speed-vs-progress profile side by
+            # side, all on the same y-axis scale, so deceleration depth near
+            # the goal is visually comparable across R values for this width.
+            for tid in trial_ids:
+                width_mm = BASE_CONDITIONS[tid]["width"] * 1000
+                r_segment_data = {
+                    r_mult: condition_segment_data[(tid, r_mult)]
+                    for r_mult in r_mults
+                    if (tid, r_mult) in condition_segment_data
+                }
+                if not r_segment_data:
+                    continue
+                fitts_conditions_for_width = {
+                    r_mult: fitts_conditions[(tid, r_mult)]
+                    for r_mult in r_mults
+                    if (tid, r_mult) in fitts_conditions
+                }
+                out_path = p_folder / f"speed_profiles_W{width_mm:.0f}mm.png"
+                try:
+                    plot_speed_profiles_by_width(
+                        width_mm, r_segment_data, fitts_conditions_for_width,
+                        centerlines[tid], out_path, bin_size=0.1,
+                    )
+                except Exception as e:
+                    print(f"    ERROR plotting speed_profiles_W{width_mm:.0f}mm.png: {e}")
+
 
     # ---- collect rows from saved summaries (supports --aggregate-only) ----
     print("\n[4/4] Generating aggregate outputs ...")
