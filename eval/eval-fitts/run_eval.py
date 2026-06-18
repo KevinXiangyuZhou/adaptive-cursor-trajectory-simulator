@@ -120,7 +120,7 @@ BASE_CONDITIONS = {
     15: {"type": "sigmoidal", "width": 0.05, "curvature": 0.0, "label": "Straight W=50mm"},
 }
 
-DEFAULT_R_MULTIPLIERS = [0.1, 0.25, 0.5, 1.0, 2.0]
+DEFAULT_R_MULTIPLIERS = [0.25, 0.375, 0.5, 0.75, 1.0]
 
 
 def build_fitts_conditions(trial_ids, r_mults):
@@ -575,8 +575,9 @@ def _build_condition_summary(
                     "avg_speed":       r["avg_speed"],
                     "approach_speed":  r["approach_speed"],
                     "target_radius":   r["target_radius"],  # verification
+                    "path_length":     r["path_length"],
                 }
-                for j, r in enumerate(all_records)
+                for j, r in enumerate(valid_records)
             ],
         },
         "metrics": agg,
@@ -911,6 +912,58 @@ def _per_width_regression(rows):
         }
     return out
 
+def plot_fitts_regression(model_rows, human_rows, model_reg, human_reg, output_path):
+    """
+    ID (bits) vs MT (s) scatter for every individual model and human run,
+    with each side's fitted Fitts' line (MT = a + b*ID) overlaid.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    palette = {"Human": "tab:blue", "Simulator": "tab:orange"}
+
+    def _scatter(rows, label):
+        pts = [(r["ID"], r["MT_s"]) for r in rows if r["MT_s"] is not None]
+        if not pts:
+            return
+        ids, mts = zip(*pts)
+        ax.scatter(ids, mts, s=22, alpha=0.5, color=palette[label],
+                edgecolors="none", label=f"{label} (n={len(pts)})")
+
+    _scatter(human_rows, "Human")
+    _scatter(model_rows, "Simulator")
+
+    def _line(reg, rows, label):
+        if not reg:
+            return
+        ids = [r["ID"] for r in rows if r["MT_s"] is not None]
+        if not ids:
+            return
+        a, b = reg["a_intercept"], reg["b_slope_s_per_bit"]
+        x = np.linspace(min(ids), max(ids), 100)
+        y = a + b * x
+        r2 = reg.get("r_squared")
+        sign = "+" if b >= 0 else "-"
+        eq = f"MT={a:.2f}{sign}{abs(b):.2f}\u00b7ID"
+        r2_str = f", R\u00b2={r2:.2f}" if r2 is not None else ""
+        ax.plot(x, y, color=palette[label], linewidth=2,
+                label=f"{label} fit: {eq}{r2_str}")
+
+    _line(human_reg, human_rows, "Human")
+    _line(model_reg, model_rows, "Simulator")
+
+    ax.set_xlabel("ID (bits)", fontsize=11)
+    ax.set_ylabel("MT (s)", fontsize=11)
+    ax.set_title("Fitts' Law: MT vs. ID \u2014 Simulator vs. Human", fontsize=12)
+    ax.legend(fontsize=9, loc="best")
+    ax.grid(alpha=0.3)
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {output_path}")
 
 # ---------------------------------------------------------------------------
 # Aggregate CSV + JSON outputs
@@ -1066,6 +1119,12 @@ def write_aggregate_outputs(all_rows, aggregate_metrics, fitts_conditions,
 
     overall_reg   = _compute_fitts_regression(model_rows)
     per_width_reg = _per_width_regression(model_rows)
+    human_reg     = _compute_fitts_regression(human_rows)
+
+    plot_fitts_regression(                                   # NEW plotting
+        model_rows, human_rows, overall_reg, human_reg,
+        RESULTS_DIR / "fitts_regression_plot.png",
+    )
 
     m_tps = [r["TP"] for r in model_rows if r["TP"] is not None]
     tp_cv = (float(np.std(m_tps)) / float(np.mean(m_tps))
@@ -1123,6 +1182,7 @@ def write_aggregate_outputs(all_rows, aggregate_metrics, fitts_conditions,
             },
         },
         "overall":         overall_reg,
+        "human_overall":   human_reg, 
         "throughput_cv":   round(tp_cv, 4) if tp_cv is not None else None,
         "per_width_mm":    per_width_reg,
         "human_reference": sorted(human_ref_out, key=lambda x: x["width_mm"]),
