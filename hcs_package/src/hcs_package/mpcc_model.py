@@ -24,6 +24,64 @@ def reset_warm_start():
     _warm_start_cache['num_steps'] = None
 
 
+def evaluate_tracking_errors(ref_path, state_0, controls, num_steps, dt):
+    """Compute per-horizon contour/lag errors used in the MPCC objective.
+
+    Useful for diagnosing whether the lag term is still driving catch-up when
+    virtual progress ``s_traj`` has reached the end of the reference path.
+
+    Args:
+        ref_path: ReferencePath instance.
+        state_0: Initial state [px, py, vx, vy, ax, ay, s].
+        controls: (N, 3) array of [jx, jy, vs] from generate_mpcc.
+        num_steps: Horizon length N.
+        dt: Time step.
+
+    Returns:
+        dict with arrays ``px``, ``py``, ``s_traj``, ``e_contour``, ``e_lag``,
+        and boolean mask ``at_path_end`` (True where s_traj >= path length).
+    """
+    px0, py0, vx0, vy0, ax0, ay0, s0 = state_0
+    jx = controls[:, 0]
+    jy = controls[:, 1]
+    vs = controls[:, 2]
+
+    A_pos_mat = _build_A_pos_from_jerk(num_steps, dt)
+    t_vec = np.arange(1, num_steps + 1) * dt
+    t2_vec = 0.5 * t_vec ** 2
+
+    px = px0 + vx0 * t_vec + ax0 * t2_vec + A_pos_mat @ jx
+    py = py0 + vy0 * t_vec + ay0 * t2_vec + A_pos_mat @ jy
+
+    S_mat = np.tril(np.ones((num_steps, num_steps))) * dt
+    s_traj = s0 + S_mat @ vs
+    s_end = ref_path.total_length
+
+    e_contour = np.zeros(num_steps)
+    e_lag = np.zeros(num_steps)
+    for k in range(num_steps):
+        ref_k = ref_path(float(s_traj[k]))
+        tangent = ref_path.tangent(s_traj[k])
+        cos_phi, sin_phi = tangent[0], tangent[1]
+        pos_error = np.array([px[k], py[k]], dtype=float) - ref_k
+        R = np.array([
+            [sin_phi, -cos_phi],
+            [-cos_phi, -sin_phi],
+        ], dtype=float)
+        e_k = R @ pos_error
+        e_contour[k] = e_k[0]
+        e_lag[k] = e_k[1]
+
+    return {
+        'px': px,
+        'py': py,
+        's_traj': s_traj,
+        'e_contour': e_contour,
+        'e_lag': e_lag,
+        'at_path_end': s_traj >= s_end - 1e-9,
+    }
+
+
 def _build_A_acc(num_steps, dt):
     """Matrix mapping jerk to acceleration via integration."""
     A_acc = np.tril(np.ones((num_steps, num_steps))) * dt
