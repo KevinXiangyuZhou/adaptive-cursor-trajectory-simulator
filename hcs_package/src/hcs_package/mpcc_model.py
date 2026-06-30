@@ -307,22 +307,36 @@ def generate_mpcc(
                             if inside:
                                 tracking_cost += w_constraint * dist_to_boundary**2
 
-        # 5. Goal precision — speed-accuracy (Fitts) tradeoff. Signal-dependent
-        # motor noise scatters the landing by ~nc*v, so penalize speed at the
-        # goal relative to the target radius: (nc*v / R)^2. Small target -> slow,
-        # careful approach; large target -> fast, casual.
+        # 5. Goal precision — continuous potential-well formulation.
+        # Signal-dependent motor noise variance (nc * v)^2 is penalized at every
+        # horizon node, weighted by proximity to the target.  Nodes far from the
+        # target contribute little; nodes close to it are strongly penalised,
+        # naturally encouraging slow, accurate arrivals without any arc-length gate.
         w_precision = weights.get('goal_precision', 0.0)
         target_radius = weights.get('target_radius', 0.01)
         if w_precision > 0.0:
-            s_end = ref_path.total_length
-            #both nc0 and nc1 are signal-dependent
+            # both nc0 and nc1 are signal-dependent noise coefficients
             nc0 = weights.get('nc0', 0.2)
             nc1 = weights.get('nc1', 0.02)
-            # predicted endpoint-scatter variance at each node: (nc * v)^2
+            # predicted velocity-scatter variance at each node: (nc * v)^2
             scatter_var = (nc0**2 + nc1**2) * (vx**2 + vy**2)
-            at_goal = s_traj >= s_end
-            scatter_at_goal = np.sum(np.where(at_goal, scatter_var, 0.0))
-            goal_cost = w_precision * scatter_at_goal / (target_radius**2)
+
+
+            # physical (x, y) of the path endpoint — no arc-length gating needed
+            p_end = ref_path(ref_path.total_length)
+            x_target, y_target = float(p_end[0]), float(p_end[1])
+
+
+            # squared Euclidean distance from every predicted position to the target
+            dist_sq = (px - x_target)**2 + (py - y_target)**2
+
+
+            # potential-well: penalty is large near the target, fades with distance
+            r2 = target_radius**2
+            per_node_penalty = scatter_var / (dist_sq + r2)
+
+
+            goal_cost = w_precision * np.sum(per_node_penalty)
         else:
             goal_cost = 0.0
 
