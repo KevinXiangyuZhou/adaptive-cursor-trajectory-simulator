@@ -13,6 +13,10 @@ from .constraints import ConstraintConfig, ConstraintRegion, ConstraintType, Pat
 from .constraint_utils import parse_constraints_from_json, convert_constraints_to_corridor_bounds
 from .adapt import compute_clearance_profile, compute_curvature_rate_profile, compute_curvature_spike_profile
 
+#imports for baseline
+from .baseline_model import generate_baseline_mpc
+from .mpcc_model import _build_A_vel_from_jerk, _build_A_pos_from_jerk
+
 
 class CursorSimulator:
     """
@@ -60,7 +64,7 @@ class CursorSimulator:
                 "constraint": 50,
                 "contour": 20,
                 "lag": 0.05,
-                "desired_speed": 0.2,
+                "desired_speed": 0.4, #default 0.2
                 "goal_precision": 0.00015  # fallback; overridden per-user via user_configurations
             },
             "planner_margin": 0.0,
@@ -439,4 +443,280 @@ class CursorSimulator:
 
         if return_reference_path:
             return trajectory, reference_path
+        return trajectory
+
+    def generate_trajectory_with_start_and_end(
+        self,
+        task_file: Optional[Union[str, Path]] = None,
+        waypoints: Optional[List[Tuple[float, float]]] = None,
+        constraints: Optional[Union[Dict[str, Any], str, Path]] = None,
+        screen_width: float = 1920.0,
+        screen_height: float = 1080.0,
+        max_steps: int = 2000,
+        target_radius: float = 0.01,
+        use_optimal_path: bool = True,  # Ignored internally, but kept for signature parity
+        return_timestamps: bool = False,
+        return_reference_path: bool = False
+    ) -> Union[List[Tuple[float, float, float]], Tuple[List[Tuple[float, float, float]], Any]]:
+        """
+        Generate a point-to-point pointing trajectory (Fitts' Law baseline).
+    
+        Signature and unit conventions mirror generate_trajectory_with_waypoints
+        exactly (same task_file/waypoints/screen_width/screen_height loading,
+        same target_radius units — normalized meters, NOT pixels). Only the
+        FIRST and LAST waypoints are used as the pointing start/end; any
+        intermediate waypoints are ignored, since this baseline flies straight
+        to the target rather than following a multi-waypoint tunnel.
+    
+        This baseline is intentionally constraint-free (see baseline_model.py):
+        `constraints` is accepted only for signature parity and is not applied,
+        and `use_optimal_path` is ignored (there is no tunnel corridor to
+        optimize against for a two-point straight-line path).
+    
+        Args:
+            task_file: Path to task.json file containing "waypoints" and
+                optionally "screen_width"/"screen_height". If provided, these
+                values override the corresponding parameters below.
+            waypoints: Optional list of (x, y) waypoints in screen pixels.
+                Ignored if task_file is provided. Only waypoints[0] and
+                waypoints[-1] are used (start and end of the point-to-point move).
+            constraints: Accepted for signature parity with
+                generate_trajectory_with_waypoints; NOT applied — this baseline
+                has no boundary/corridor constraints.
+            screen_width: Screen width in pixels (default: 1920). Overridden by
+                task_file if present.
+            screen_height: Screen height in pixels (default: 1080). Overridden
+                by task_file if present.
+            max_steps: Maximum simulation steps (default: 2000).
+            target_radius: Target radius, in normalized meters (default: 0.01)
+                — same units as generate_trajectory_with_waypoints, NOT pixels.
+            use_optimal_path: Accepted for signature parity; ignored (no tunnel
+                corridor exists to optimize for a straight point-to-point path).
+            return_timestamps: If True, return timestamps instead of delays
+                (default: False).
+            return_reference_path: If True, also return the reference path
+                object (default: False).
+    
+        Returns:
+            If return_reference_path is False: List of tuples (x, y, delay) or
+                (x, y, timestamp) in screen pixels.
+            If return_reference_path is True: Tuple of (trajectory, reference_path).
+        """
+        # --- Task/waypoint loading: identical to generate_trajectory_with_waypoints ---
+        if task_file is not None:
+            task_path = Path(task_file)
+            if not task_path.exists():
+                raise FileNotFoundError(f"Task file not found: {task_file}")
+    
+            with open(task_path, 'r') as f:
+                task_data = json.load(f)
+    
+            if "waypoints" not in task_data:
+                raise ValueError("task.json must contain 'waypoints' key")
+    
+            waypoints = [tuple(wp) for wp in task_data["waypoints"]]
+    
+            if "constraints" in task_data:
+                constraints = task_data["constraints"]
+    
+            # task_file overrides screen_width/screen_height parameters
+            if "screen_width" in task_data:
+                screen_width = float(task_data["screen_width"])
+            if "screen_height" in task_data:
+                screen_height = float(task_data["screen_height"])
+    
+        if waypoints is None or len(waypoints) < 2:
+            raise ValueError("At least 2 waypoints are required (either from task_file or waypoints parameter)")
+    
+        # This baseline is point-to-point: only the endpoints matter. Any
+        # intermediate waypoints are accepted (for signature/task_file parity)
+        # but ignored.
+        start_point = waypoints[0]
+        end_point = waypoints[-1]
+    
+        # `constraints` and `use_optimal_path` are intentionally unused from here
+        # on — this baseline is constraint-free by design (see baseline_model.py).
+    
+        # Screen pixels → normalized meters (identical conversion to
+        # generate_trajectory_with_waypoints).
+        screen_width_m = 0.46
+        screen_height_m = screen_height / screen_width * screen_width_m
+    
+        start_norm = (
+            start_point[0] / screen_width * screen_width_m,
+            start_point[1] / screen_height * screen_height_m,
+        )
+        end_norm = (
+            end_point[0] / screen_width * screen_width_m,
+            end_point[1] / screen_height * screen_height_m,
+        )
+    
+        # Straight-line reference path (k=1: linear spline through the two points).
+        ref_path = ReferencePath([start_norm, end_norm], s=0.0, k=1)
+    
+        # Massive static "tunnel" so any internal boundary checks pass through
+        # without rejecting or scaling anything.
+        tunnel_path = [start_norm, end_norm]
+        tunnel_width = 10.0
+    
+        path_length = float(np.hypot(end_norm[0] - start_norm[0], end_norm[1] - start_norm[1]))
+        desired_speed = self.planner_weights.get('desired_speed', 0.2)
+        planning_T = max(0.5, path_length / desired_speed)
+    
+        t_nodes = np.arange(1, self.pred_horizon + 1) * self.interval
+        tau = t_nodes / planning_T
+        # Minimum-jerk bell-shaped velocity profile: v(t) = (L/T)(30τ²-60τ³+30τ⁴)
+        speed_profile = np.where(
+            tau < 1.0,
+            (path_length / planning_T) * (30 * tau**2 - 60 * tau**3 + 30 * tau**4),
+            0.0,
+        )
+    
+        reset_warm_start()
+    
+        cursor_pos = np.array([start_norm[0], start_norm[1]], dtype=float)
+        cursor_vel = np.array([0.0, 0.0], dtype=float)
+        cursor_acc = np.array([0.0, 0.0], dtype=float)
+        hand_pos = np.array([0.0, 0.0], dtype=float)
+        s = 0.0
+    
+        planner_weights = dict(self.planner_weights)
+        planner_weights.setdefault('acceleration', 1e-4)
+    
+        limits = {'acc_max': 100.0}
+    
+        trajectory = []
+        current_time = 0.0
+        final_target = np.array(end_norm)
+    
+        dwell_required = int(round(1.0 / self.interval))
+        dwell_steps = 0
+    
+        for step in range(max_steps):
+            dist_to_target = np.linalg.norm(cursor_pos - final_target)
+            # target_radius is in normalized meters here (NOT pixels) — matches
+            # generate_trajectory_with_waypoints's units exactly.
+            if dist_to_target < target_radius:
+                dwell_steps += 1
+                if dwell_steps >= dwell_required:
+                    break
+            else:
+                dwell_steps = 0
+    
+            state_0 = [
+                float(cursor_pos[0]), float(cursor_pos[1]),
+                float(cursor_vel[0]), float(cursor_vel[1]),
+                float(cursor_acc[0]), float(cursor_acc[1]),
+                s,
+            ]
+    
+            model_input = SteeringModelInput(
+                state_cog=(
+                    float(cursor_pos[0]), float(cursor_pos[1]),
+                    float(cursor_vel[0]), float(cursor_vel[1]),
+                ),
+                bump=BumpParams(
+                    pred_horizon=self.pred_horizon,
+                    Tp=self.tp,
+                    nc=self.nc
+                ),
+                env=EnvParams(interval=self.interval),
+                tunnel=TunnelInfo(
+                    tunnel_path=tunnel_path,
+                    tunnel_width=tunnel_width,
+                    top_wall=None,
+                    bottom_wall=None
+                ),
+                planner_weights=planner_weights,
+                planner_margin=self.planner_margin,
+                reference_path=ref_path,
+                current_acc=(float(cursor_acc[0]), float(cursor_acc[1])),
+                corridor_bounds=None,
+                cartesian_constraints=None,
+                clearance_profile=None,
+                curvature_rate_profile=None,
+                curvature_profile=None,
+                speed_model=self.speed_model,
+                target_radius=target_radius,
+            )
+    
+            controls, opt_info = generate_baseline_mpc(
+                ref_path=ref_path,
+                state_0=state_0,
+                num_steps=self.pred_horizon,
+                dt=self.interval,
+                weights=model_input.planner_weights,
+                limits=limits,
+                speed_profile=speed_profile,
+                desired_speed=desired_speed,
+            )
+    
+            jx = controls[:, 0]
+            jy = controls[:, 1]
+            vs = controls[:, 2]
+    
+            A_vel = _build_A_vel_from_jerk(self.pred_horizon, self.interval)
+            A_pos = _build_A_pos_from_jerk(self.pred_horizon, self.interval)
+    
+            t_vec = np.arange(1, self.pred_horizon + 1) * self.interval
+    
+            vx_free = cursor_vel[0] + cursor_acc[0] * t_vec
+            vy_free = cursor_vel[1] + cursor_acc[1] * t_vec
+            px_free = cursor_pos[0] + cursor_vel[0] * t_vec + 0.5 * cursor_acc[0] * (t_vec**2)
+            py_free = cursor_pos[1] + cursor_vel[1] * t_vec + 0.5 * cursor_acc[1] * (t_vec**2)
+    
+            pos_x = px_free + A_pos @ jx
+            pos_y = py_free + A_pos @ jy
+            vel_x = vx_free + A_vel @ jx
+            vel_y = vy_free + A_vel @ jy
+    
+            c_vel_x = np.insert(vel_x, 0, cursor_vel[0])
+            c_vel_y = np.insert(vel_y, 0, cursor_vel[1])
+    
+            all_pos_x = np.insert(pos_x, 0, cursor_pos[0])
+            all_pos_y = np.insert(pos_y, 0, cursor_pos[1])
+            c_pos_dx = np.diff(all_pos_x)
+            c_pos_dy = np.diff(all_pos_y)
+    
+            # c_vel_x has length pred_horizon+1: [v0, v1, ..., vN]; index 1 = first planned step
+            planned_vel_idx = min(1, len(c_vel_x) - 1)
+    
+            if self.add_noise:
+                c_pos_dx_step, c_pos_dy_step, c_vel_x_step, c_vel_y_step, \
+                hand_pos[0], hand_pos[1], _, _ = single_step_motor_and_device_noise(
+                    c_vel_x[planned_vel_idx], c_vel_y[planned_vel_idx],
+                    hand_pos[0], hand_pos[1],
+                    self.nc,
+                    self.interval,
+                    self.forearm,
+                    c_vel_x_prev=c_vel_x[0], c_vel_y_prev=c_vel_y[0],
+                )
+            else:
+                c_pos_dx_step = c_pos_dx[0]
+                c_pos_dy_step = c_pos_dy[0]
+                c_vel_x_step = c_vel_x[planned_vel_idx]
+                c_vel_y_step = c_vel_y[planned_vel_idx]
+    
+            cursor_pos[0] += c_pos_dx_step
+            cursor_pos[1] += c_pos_dy_step
+            cursor_vel[0] = c_vel_x_step
+            cursor_vel[1] = c_vel_y_step
+            # cursor_acc is intentionally left at (0.0, 0.0): each replanning step
+            # starts from zero acceleration, matching the convention already used
+            # by generate_trajectory_with_waypoints (which hardcodes
+            # current_acc=(0.0, 0.0) every step rather than carrying it forward).
+            s += float(vs[0]) * self.interval
+    
+            screen_x = cursor_pos[0] / screen_width_m * screen_width
+            screen_y = cursor_pos[1] / screen_height_m * screen_height
+    
+            if return_timestamps:
+                trajectory.append((screen_x, screen_y, current_time))
+            else:
+                trajectory.append((screen_x, screen_y, self.interval))
+    
+            current_time += self.interval
+    
+        if return_reference_path:
+            return trajectory, ref_path
         return trajectory
