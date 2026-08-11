@@ -98,6 +98,8 @@ def create_environment(env_config: Dict) -> Dict:
         return _create_lasso_env(env_config)
     elif env_type in ("cascading_menu", "menu"):
         return _create_menu_env(env_config)
+    elif env_type in ("unconstrained_pointing_mpcc", "pointing_mpcc"):
+        return _create_pointing_bypass_env(env_config)
     else:
         raise ValueError(f"Unknown env_type: {env_type}")
 
@@ -166,6 +168,69 @@ def _create_tunnel_env(env_config: Dict) -> Dict:
     }
 
 
+# Vertical target offset (metres) by target_position, derived empirically
+# from the collected unconstrained_pointing trial data (mean over n=10
+# rounds per position): start is always at y=0.13 (window vertical center).
+POINTING_Y_OFFSET = {"top": -0.075, "middle": 0.0, "bottom": 0.08}
+
+
+# Very wide "bypass" tunnel width for approximating unconstrained pointing
+# with the MPCC model: >> the ~0.46m screen and >> any realistic target
+# radius, so the corridor constraint is never actually binding, while still
+# giving generate_trajectory_with_waypoints a (non-binding) boundary/
+# reference-path structure to track against.
+BYPASS_TUNNEL_WIDTH_M = 10.0
+
+
+def _create_pointing_bypass_env(env_config: Dict) -> Dict:
+    """Unconstrained-pointing environment for the MPCC model
+    (generate_trajectory_with_waypoints): a straight, very wide ("bypass")
+    tunnel between two arbitrary 2D points, so MPCC's corridor/contour
+    tracking machinery is active. Supports arbitrary diagonal start/end
+    points (needed since "top"/"bottom" targets aren't on a horizontal
+    centerline) — _create_tunnel_env can't be reused directly since it
+    only supports a horizontal start_x/end_x path at a fixed y_base."""
+    screen_width = env_config.get("screen_width", 460)
+    screen_height = env_config.get("screen_height", 260)
+    start_x = env_config.get("start_x", 0.0)
+    start_y = env_config.get("start_y", 0.13)
+    distance = env_config.get("distance", 0.307)
+    target_position = env_config.get("target_position", "middle")
+    y_offset = env_config.get("target_y_offset", POINTING_Y_OFFSET.get(target_position, 0.0))
+    target_radius = env_config.get("target_radius", 0.01)
+    max_steps = env_config.get("max_steps", 800)
+    tunnel_width = env_config.get("tunnel_width", BYPASS_TUNNEL_WIDTH_M)
+
+    start_pos = (start_x, start_y)
+    target_pos = (start_x + distance, start_y + y_offset)
+    centerline = [start_pos, target_pos]
+
+    left_boundary, right_boundary = generateTunnelBoundaries(centerline, tunnel_width)
+
+    window_width_m = SCREEN_WIDTH_METERS
+    window_height_m = window_width_m * screen_height / screen_width
+
+    return {
+        # Internal env_type is "tunnel_steering_smooth" so downstream code
+        # (_generate_constraints, pygame_experiment.py's "tunnel" in env_type
+        # dispatch) treats this exactly like any other tunnel task, with no
+        # special-casing needed anywhere else.
+        "env_type": "tunnel_steering_smooth",
+        "screen_width": screen_width,
+        "screen_height": screen_height,
+        "window_width_m": window_width_m,
+        "window_height_m": window_height_m,
+        "centerline": centerline,
+        "left_boundary": left_boundary.tolist() if hasattr(left_boundary, 'tolist') else list(left_boundary),
+        "right_boundary": right_boundary.tolist() if hasattr(right_boundary, 'tolist') else list(right_boundary),
+        "tunnel_width": tunnel_width,
+        "target_pos": target_pos,
+        "target_radius": target_radius,
+        "max_steps": max_steps,
+        "description": env_config.get("description", ""),
+    }
+
+
 def _create_corner_env(env_config: Dict) -> Dict:
     """Create a corner/turning tunnel environment."""
     screen_width = env_config.get("screen_width", 460)
@@ -191,16 +256,18 @@ def _create_corner_env(env_config: Dict) -> Dict:
         step_size=step_size
     )
     
-    # Generate boundaries for rendering
-    left_boundary, right_boundary = generateTunnelBoundaries(centerline, width_profile if width_profile is not None else tunnel_width)
-    
+    # Generate boundaries for rendering. Corner tunnels have no segment1/
+    # segment2 width-split concept (unlike _create_tunnel_env), so this
+    # always uses the single tunnel_width.
+    left_boundary, right_boundary = generateTunnelBoundaries(centerline, tunnel_width)
+
     # Target is at end of centerline
     target_pos = centerline[-1] if centerline else (end_x, y_base)
-    
+
     # Compute window dimensions in meters
     window_width_m = SCREEN_WIDTH_METERS
     window_height_m = window_width_m * screen_height / screen_width
-    
+
     return {
         "env_type": env_config.get("env_type", "tunnel_steering_corner"),
         "screen_width": screen_width,

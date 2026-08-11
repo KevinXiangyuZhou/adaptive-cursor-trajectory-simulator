@@ -64,7 +64,7 @@ class CursorSimulator:
                 "constraint": 50,
                 "contour": 20,
                 "lag": 0.05,
-                "desired_speed": 0.4, #default 0.2
+                "desired_speed": 0.2, #default 0.2
                 "goal_precision": 0.00015  # fallback; overridden per-user via user_configurations
             },
             "planner_margin": 0.0,
@@ -460,19 +460,28 @@ class CursorSimulator:
     ) -> Union[List[Tuple[float, float, float]], Tuple[List[Tuple[float, float, float]], Any]]:
         """
         Generate a point-to-point pointing trajectory (Fitts' Law baseline).
-    
+
+        ⚠️ RULED OUT for pointing tasks (2026-08): shows jittery start/end
+        behavior and a severe distance-driven completion-time blowup vs.
+        human data. Replaced by MPCC-in-a-bypass-tunnel — use
+        generate_trajectory_with_waypoints with an
+        experiment.environment._create_pointing_bypass_env-built task
+        instead (see eval/eval-new-data/run_eval.py::build_fitts_bypass_config).
+        Its pygame visual debugger was removed; do not use this method as
+        the default pointing-task model in new code.
+
         Signature and unit conventions mirror generate_trajectory_with_waypoints
         exactly (same task_file/waypoints/screen_width/screen_height loading,
         same target_radius units — normalized meters, NOT pixels). Only the
         FIRST and LAST waypoints are used as the pointing start/end; any
         intermediate waypoints are ignored, since this baseline flies straight
         to the target rather than following a multi-waypoint tunnel.
-    
+
         This baseline is intentionally constraint-free (see baseline_model.py):
         `constraints` is accepted only for signature parity and is not applied,
         and `use_optimal_path` is ignored (there is no tunnel corridor to
         optimize against for a two-point straight-line path).
-    
+
         Args:
             task_file: Path to task.json file containing "waypoints" and
                 optionally "screen_width"/"screen_height". If provided, these

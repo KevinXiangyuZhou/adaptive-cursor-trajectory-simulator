@@ -1,6 +1,15 @@
 """
 Fitts' Law Evaluation Experiment — Simulator Only (Baseline vs. MPCC).
 
+⚠️ RULED OUT for pointing tasks (2026-08): the "baseline" (--model-type
+baseline, hcs_package.baseline_model.generate_baseline_mpc) side of this
+comparison shows jittery start/end behavior and a severe distance-driven
+completion-time blowup vs. human data. Do not use the baseline model as the
+default pointing-task model in new code — MPCC-in-a-bypass-tunnel replaced
+it (see eval/eval-new-data/run_eval.py's module docstring for the full
+writeup). This script itself is a pre-existing historical artifact, kept
+as-is for reference.
+
 Systematically sweeps an ABSOLUTE target radius R (in meters — NOT a
 multiplier of tunnel width) inside a single, identical 10-meter-wide bypass
 tunnel, to compare the constraint-free BUMP-style Pointing Baseline model

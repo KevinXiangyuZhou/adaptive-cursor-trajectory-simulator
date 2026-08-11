@@ -9,6 +9,16 @@ goal-precision potential well, path-relative corridor penalties, and
 cartesian (rectangle/polygon) keep-in/keep-out constraints. In their place it
 adds a direct acceleration-magnitude penalty, matching the classic
 minimum-jerk/minimum-acceleration compromise used in BUMP-style OTG models.
+
+⚠️ RULED OUT for pointing tasks (2026-08): shows jittery start/end behavior
+(the desired-speed reference fed into this solver never re-anchors to real
+elapsed time or progress) and a severe distance-driven completion-time
+blowup vs. human data. Replaced by MPCC-in-a-bypass-tunnel (see
+``experiment.environment._create_pointing_bypass_env`` /
+``eval/eval-new-data/run_eval.py::build_fitts_bypass_config``). Its pygame
+visual debugger was removed; do not use this as the default pointing-task
+model in new code. See ``eval/eval-new-data/run_eval.py``'s module
+docstring for the full writeup.
 """
 
 import numpy as np

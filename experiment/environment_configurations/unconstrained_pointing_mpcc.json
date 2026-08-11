@@ -1,0 +1,12 @@
+{
+  "_description": "Unconstrained pointing (Fitts) via MPCC in a wide bypass tunnel - compare against unconstrained_pointing.json (baseline model)",
+  "env_type": "unconstrained_pointing_mpcc",
+  "screen_width": 460,
+  "screen_height": 260,
+  "target_position": "top",
+  "distance": 0.46,
+  "target_radius": 0.005,
+  "tunnel_width": 10.0,
+  "max_steps": 800,
+  "description": "farthest distance tier (D), top target position, 5mm radius, MPCC bypass-tunnel model"
+}
