@@ -598,7 +598,7 @@ class CursorSimulator:
         current_time = 0.0
         final_target = np.array(end_norm)
     
-        dwell_required = int(round(1.0 / self.interval))
+        dwell_required = int(round(0.25 / self.interval))
         dwell_steps = 0
     
         for step in range(max_steps):
