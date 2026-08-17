@@ -1,0 +1,67 @@
+{
+  "extractionDate": "2026-08-17T18:54:50.386Z",
+  "sourceFile": "user_study_results_2026-08-17T18-52-50-032Z.json",
+  "totalParticipants": 10,
+  "participants": [
+    {
+      "participantId": "P6a0aa037f7816b7befeb15e6",
+      "filename": "participant_P6a0aa037f7816b7befeb15e6.json",
+      "sessions": 1,
+      "trials": 146
+    },
+    {
+      "participantId": "P5e9c3ff1cf719d151612648f",
+      "filename": "participant_P5e9c3ff1cf719d151612648f.json",
+      "sessions": 1,
+      "trials": 146
+    },
+    {
+      "participantId": "P69f1b200d44045f2d287e0ad",
+      "filename": "participant_P69f1b200d44045f2d287e0ad.json",
+      "sessions": 1,
+      "trials": 146
+    },
+    {
+      "participantId": "P698082f6dfbf6cd0a3d6584b",
+      "filename": "participant_P698082f6dfbf6cd0a3d6584b.json",
+      "sessions": 1,
+      "trials": 146
+    },
+    {
+      "participantId": "P698d07b83998d1b686c8dedf",
+      "filename": "participant_P698d07b83998d1b686c8dedf.json",
+      "sessions": 1,
+      "trials": 146
+    },
+    {
+      "participantId": "P6a00d9031edd8554ba4f83d4",
+      "filename": "participant_P6a00d9031edd8554ba4f83d4.json",
+      "sessions": 1,
+      "trials": 146
+    },
+    {
+      "participantId": "P6134d182408816f4c1284496",
+      "filename": "participant_P6134d182408816f4c1284496.json",
+      "sessions": 1,
+      "trials": 146
+    },
+    {
+      "participantId": "P606cf604adbb6982bb382881",
+      "filename": "participant_P606cf604adbb6982bb382881.json",
+      "sessions": 1,
+      "trials": 146
+    },
+    {
+      "participantId": "P6a147aeeb40f744cbd50b8c5",
+      "filename": "participant_P6a147aeeb40f744cbd50b8c5.json",
+      "sessions": 1,
+      "trials": 146
+    },
+    {
+      "participantId": "P5e84bd7c34d5d9072128fac1",
+      "filename": "participant_P5e84bd7c34d5d9072128fac1.json",
+      "sessions": 1,
+      "trials": 146
+    }
+  ]
+}
