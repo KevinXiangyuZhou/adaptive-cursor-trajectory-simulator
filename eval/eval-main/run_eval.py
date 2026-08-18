@@ -80,7 +80,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "hcs_package" / "src"))
 sys.path.insert(0, str(PROJECT_ROOT / "eval"))
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from experiment.environment import create_environment, generate_task_config  # noqa: E402
+from experiment.environment import create_environment, generate_task_config, POINTING_Y_OFFSET  # noqa: E402
 from experiment.utils import generateTunnelBoundaries  # noqa: E402
 from hcs_package.cursor_simulator import CursorSimulator  # noqa: E402
 
@@ -386,13 +386,67 @@ def make_width_profile(centerline, w1, w2):
 BYPASS_TUNNEL_WIDTH_M = 10.0
 
 
+def pointing_target_center(human_round):
+    """Nominal target centre of a pointing round: start + (distance, y-offset
+    of the round's own targetPosition) — the same rule the web experiment
+    uses (experiment.environment.POINTING_Y_OFFSET). targetPosition varies
+    across participants for the same trial_id, so this must be per round.
+    Falls back to the recorded end point when the condition lacks the fields."""
+    traj = human_round["trajectory"]
+    cond = human_round.get("condition", {}) or {}
+    start = traj[0]
+    if "distance" in cond:
+        off = POINTING_Y_OFFSET.get(cond.get("targetPosition", "middle"), 0.0)
+        return [float(start[0] + cond["distance"]), float(start[1] + off)]
+    return [float(traj[-1][0]), float(traj[-1][1])]
+
+
+# ---------------------------------------------------------------------------
+# Human/model time alignment for pointing
+#   onset      : last sample before the cursor has moved > ONSET_DISP_M from
+#                its start (strips the per-round reaction latency)
+#   final entry: first sample of the last uninterrupted stay inside the target
+#   MT_kin     : final entry - onset  (kinematic movement time, no click/dwell)
+#   click_lat  : end - final entry    (human: click latency; model: dwell)
+# ---------------------------------------------------------------------------
+ONSET_DISP_M = 0.002
+
+
+def movement_onset_time(traj, times):
+    p0 = np.asarray(traj[0], dtype=float)
+    disp = np.linalg.norm(np.asarray(traj, dtype=float) - p0, axis=1)
+    idx = np.argmax(disp > ONSET_DISP_M) if (disp > ONSET_DISP_M).any() else 0
+    return float(times[max(idx - 1, 0)])
+
+
+def final_entry_time(traj, times, center, radius):
+    d = np.linalg.norm(np.asarray(traj, dtype=float) - np.asarray(center, dtype=float), axis=1)
+    r_eff = max(float(radius), float(d[-1]) * 1.001)   # click/end registered just outside -> tolerate
+    outside = np.where(d > r_eff)[0]
+    if len(outside) == 0:
+        return float(times[0])
+    idx = outside[-1] + 1
+    return float(times[min(idx, len(times) - 1)])
+
+
+def align_round(traj, times, center, radius):
+    """Returns dict(onset_s, final_entry_s, mt_kin_s, end_lat_s, total_s)."""
+    t0 = float(times[0])
+    onset = movement_onset_time(traj, times) - t0
+    fe = final_entry_time(traj, times, center, radius) - t0
+    total = float(times[-1]) - t0
+    return {"onset_s": onset, "final_entry_s": fe, "mt_kin_s": max(fe - onset, 0.0),
+            "end_lat_s": max(total - fe, 0.0), "total_s": total}
+
+
 def build_fitts_bypass_config(human_round, target_radius, max_steps=800):
     """MPCC-based unconstrained-pointing task: a straight, very wide
-    ('bypass') tunnel between a human round's actual recorded start/end
-    points, so generate_trajectory_with_waypoints has a (non-binding)
-    corridor to track against. Returns (task_config, centerline, tunnel_width)."""
+    ('bypass') tunnel from a human round's recorded start point to the
+    round's nominal target centre, so generate_trajectory_with_waypoints has
+    a (non-binding) corridor to track against. Returns (task_config,
+    centerline, tunnel_width)."""
     traj = human_round["trajectory"]
-    start_m, end_m = traj[0], traj[-1]
+    start_m, end_m = traj[0], pointing_target_center(human_round)
     env_dict = {
         "env_type": "unconstrained_pointing_mpcc",
         "screen_width": 460, "screen_height": 260,
@@ -587,14 +641,13 @@ def build_condition_job(pid, tid, bucket, cond, human_rounds, cached_records,
             "W1": W1, "W2": W2, "A1": A1, "A2": A2,
         })
     elif bucket == "fitts":
-        target_position = cond.get("targetPosition", "unknown")
         starts = [r["trajectory"][0] for r in human_rounds]
-        ends = [r["trajectory"][-1] for r in human_rounds]
+        centers = [pointing_target_center(r) for r in human_rounds]
         start_mean = [float(np.mean([s[0] for s in starts])), float(np.mean([s[1] for s in starts]))]
-        end_mean = [float(np.mean([e[0] for e in ends])), float(np.mean([e[1] for e in ends]))]
+        end_mean = [float(np.mean([e[0] for e in centers])), float(np.mean([e[1] for e in centers]))]
         job.update({
             "canonical_path": [start_mean, end_mean],
-            "folder_name": f"trial_{tid}_{target_position}",
+            "folder_name": f"trial_{tid}",   # targetPosition varies per round/participant
         })
     elif bucket == "excluded":
         # constrained_to_unconstrained (human-only visualisation): a straight
@@ -712,28 +765,47 @@ def _run_condition_job(job):
         })
 
     elif bucket == "fitts":
-        target_position = cond.get("targetPosition", "unknown")
-
-        def _fitts_row(source, mt, traj, timed_out=None):
-            D = math.hypot(traj[-1][0] - traj[0][0], traj[-1][1] - traj[0][1])
+        def _fitts_row(source, mt, human_r, al, timed_out=None):
+            center = pointing_target_center(human_r)
+            s0 = human_r["trajectory"][0]
+            D = math.hypot(center[0] - s0[0], center[1] - s0[1])
             ID = law_stats.fitts_id(D, target_radius)
-            TP = ID / mt if mt and mt > 0 else None
-            row = {"source": source, "tid": tid, "ID": ID, "MT_s": mt, "TP": TP,
-                   "D_m": D, "target_position": target_position}
+            mtk = al["mt_kin_s"]
+            row = {"source": source, "tid": tid, "ID": ID, "MT_s": mt, "MT_kin_s": mtk,
+                   "TP": ID / mt if mt and mt > 0 else None,
+                   "TP_kin": ID / mtk if mtk and mtk > 0 else None,
+                   "onset_s": al["onset_s"], "final_entry_s": al["final_entry_s"],
+                   "end_lat_s": al["end_lat_s"], "D_m": D,
+                   "target_position": (human_r.get("condition") or {}).get("targetPosition", "")}
             if timed_out is not None:
                 row["timed_out"] = timed_out
             return row
 
+        h_al, m_al = [], []
         for r in human_rounds:
-            rows.append(_fitts_row("Human", r["completion_time"], r["trajectory"]))
+            ts = [(t - r["timestamps"][0]) / 1000.0 for t in r["timestamps"]]
+            al = align_round(r["trajectory"], ts, pointing_target_center(r), target_radius)
+            h_al.append(al)
+            rows.append(_fitts_row("Human", r["completion_time"], r, al))
+        interval = 0.05
         for human_r, model_r in zip(human_rounds, model_records):
-            rows.append(_fitts_row("Simulator", model_r["completion_time"], human_r["trajectory"],
+            mtraj = model_r["trajectory"]
+            ts = [i * interval for i in range(len(mtraj))]
+            al = align_round(mtraj, ts, pointing_target_center(human_r), target_radius)
+            m_al.append(al)
+            rows.append(_fitts_row("Simulator", model_r["completion_time"], human_r, al,
                                     model_r.get("timed_out", False)))
 
         model_tps = [r["TP"] for r in rows if r["source"] == "Simulator" and r["TP"] is not None]
         cond_summary_row.update({
-            "target_position": target_position, "target_radius_mm": round(target_radius * 1000, 2),
+            "target_position": "/".join(sorted({(r.get("condition") or {}).get("targetPosition", "?") for r in human_rounds})),
+            "target_radius_mm": round(target_radius * 1000, 2),
             "throughput_mean_bps": round(float(np.mean(model_tps)), 4) if model_tps else None,
+            "human_onset_mean_s": round(float(np.mean([a["onset_s"] for a in h_al])), 3),
+            "human_click_lat_mean_s": round(float(np.mean([a["end_lat_s"] for a in h_al])), 3),
+            "human_mt_kin_mean_s": round(float(np.mean([a["mt_kin_s"] for a in h_al])), 3),
+            "model_mt_kin_mean_s": round(float(np.mean([a["mt_kin_s"] for a in m_al])), 3) if m_al else None,
+            "model_dwell_mean_s": round(float(np.mean([a["end_lat_s"] for a in m_al])), 3) if m_al else None,
         })
 
     else:  # excluded (constrained_to_unconstrained): raw completion times only
@@ -912,13 +984,13 @@ def write_fitts_outputs(rows, condition_summaries):
     _write_dict_rows_csv(sorted(condition_summaries, key=lambda r: r["tid"]),
                           FITTS_DIR / "fitts_condition_summary.csv")
 
-    def _fit(rows_sub):
-        sub = [r for r in rows_sub if r["MT_s"] is not None and not r.get("timed_out")]
+    def _fit(rows_sub, mt_key="MT_s", tp_key="TP"):
+        sub = [r for r in rows_sub if r.get(mt_key) is not None and not r.get("timed_out")]
         if len(sub) < 3:
             return {}
         ids = np.array([r["ID"] for r in sub])
-        mts = np.array([r["MT_s"] for r in sub])
-        tps = np.array([r["TP"] for r in sub if r.get("TP") is not None])
+        mts = np.array([r[mt_key] for r in sub])
+        tps = np.array([r[tp_key] for r in sub if r.get(tp_key) is not None])
         b, a = np.polyfit(ids, mts, 1)
         pred = a + b * ids
         ss_res = np.sum((mts - pred) ** 2)
@@ -938,20 +1010,45 @@ def write_fitts_outputs(rows, condition_summaries):
     human_rows = [r for r in clean_rows if r["source"] == "Human"]
     model_reg = _fit(model_rows)
     human_reg = _fit(human_rows)
+    # Aligned (kinematic) MT: onset -> final target entry, for both sides.
+    model_reg_kin = _fit(model_rows, "MT_kin_s", "TP_kin")
+    human_reg_kin = _fit(human_rows, "MT_kin_s", "TP_kin")
 
     law_plot.plot_fitts_regression(
-        model_rows, human_rows, model_reg, human_reg, FITTS_DIR / "fitts_regression_plot.png"
+        model_rows, human_rows, model_reg, human_reg, FITTS_DIR / "fitts_regression_plot_raw.png"
     )
+    def _as_kin(rs):
+        return [dict(r, MT_s=r.get("MT_kin_s"), TP=r.get("TP_kin")) for r in rs]
+    law_plot.plot_fitts_regression(
+        _as_kin(model_rows), _as_kin(human_rows), model_reg_kin, human_reg_kin,
+        FITTS_DIR / "fitts_regression_plot.png"
+    )
+    h_on = [r["onset_s"] for r in human_rows if r.get("onset_s") is not None]
+    h_cl = [r["end_lat_s"] for r in human_rows if r.get("end_lat_s") is not None]
+    m_dw = [r["end_lat_s"] for r in model_rows if r.get("end_lat_s") is not None]
 
     n_excluded = sum(1 for r in rows if r["source"] == "Simulator" and r.get("timed_out"))
     regression_out = {
         "notes": {
             "ID_formula": "log2(D/(2R) + 1)  [Shannon; 2R = target width]",
-            "D_formula": "Euclidean sqrt(x^2+y^2) between each round's recorded "
-                         "trajectory start/end points (not the nominal 'distance' field)",
+            "D_formula": "Euclidean distance from each round's recorded start point to the "
+                         "round's nominal target centre (start + (distance, y-offset[targetPosition]))",
             "MT_model": "MT = a + b * ID",
+            "aligned": "MT_kin = final target entry - movement onset (>2 mm displacement), "
+                       "both sides; strips human reaction latency and click latency, and the "
+                       "model's dwell. 'raw' uses human click time vs model time incl. dwell.",
             "timed_out_runs_excluded": n_excluded,
         },
+        "aligned": {"model": model_reg_kin, "human": human_reg_kin},
+        "raw": {"model": model_reg, "human": human_reg},
+        "latencies": {
+            "human_onset_s": {"mean": round(float(np.mean(h_on)), 3), "median": round(float(np.median(h_on)), 3),
+                              "sd": round(float(np.std(h_on)), 3)} if h_on else None,
+            "human_click_lat_s": {"mean": round(float(np.mean(h_cl)), 3), "median": round(float(np.median(h_cl)), 3),
+                                  "sd": round(float(np.std(h_cl)), 3)} if h_cl else None,
+            "model_dwell_s": {"mean": round(float(np.mean(m_dw)), 3)} if m_dw else None,
+        },
+        # backwards-compatible top-level keys = raw
         "model": model_reg,
         "human": human_reg,
     }
@@ -959,6 +1056,13 @@ def write_fitts_outputs(rows, condition_summaries):
     with open(reg_path, "w") as f:
         json.dump(regression_out, f, indent=2)
     print(f"  Saved: {reg_path}")
+    if human_reg_kin and model_reg_kin:
+        print(f"  Fitts (aligned MT_kin): human MT={human_reg_kin['a_intercept']:.3f}+{human_reg_kin['b_slope_s_per_bit']:.3f}*ID "
+              f"(R2={human_reg_kin['r_squared']:.2f}) | model MT={model_reg_kin['a_intercept']:.3f}+{model_reg_kin['b_slope_s_per_bit']:.3f}*ID "
+              f"(R2={model_reg_kin['r_squared']:.2f})")
+    if h_on:
+        print(f"  Human onset latency: mean {np.mean(h_on):.2f}s (sd {np.std(h_on):.2f}); "
+              f"click latency: mean {np.mean(h_cl):.2f}s (sd {np.std(h_cl):.2f}); model dwell: {np.mean(m_dw) if m_dw else float('nan'):.2f}s")
     if n_excluded:
         print(f"  ({n_excluded} timed-out simulator run(s) excluded from the regression/plot; "
               f"still counted in fitts_condition_summary.csv's n_timed_out and present in fitts_results.csv)")
@@ -1168,6 +1272,9 @@ def main():
                              "overview grid and a per-round QC CSV under results/overview/.")
     parser.add_argument("--data-dir", type=str, default=str(HUMAN_DATA_DIR),
                         help="Directory of per-participant human data JSON files")
+    parser.add_argument("--buckets", type=str, nargs="+", default=None,
+                        choices=["steering", "id4scs_w2n", "id4scs_n2w", "fitts", "excluded"],
+                        help="Restrict processing to these task buckets (default: all)")
     parser.add_argument("--fresh-sim", action="store_true", default=False,
                         help="Ignore any cached simulator runs and resimulate every condition "
                              "from scratch. The simulator applies stochastic per-step motor/"
@@ -1209,7 +1316,8 @@ def main():
           f"{len(tid_to_bucket)} scanned")
 
     included_tids = sorted(t for t, b in tid_to_bucket.items()
-                           if b != "excluded" or human_only)
+                           if (b != "excluded" or human_only)
+                           and (args.buckets is None or b in args.buckets))
 
     print("\n[2/4] Loading human data ...")
     all_human_data = load_trials_by_participant(included_tids, data_dir)
