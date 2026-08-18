@@ -12,6 +12,12 @@ from .mpcc_model import (
 )
 
 
+# Clearance above which a horizon node is treated as unconstrained space.
+# Study tunnels are <= 5 cm wide (clearance <= 2.5 cm) and the GAM speed
+# model saturates at its ceiling well below 0.1 m of clearance.
+FREE_SPACE_CLEARANCE_M = 0.1
+
+
 def model(model_input: SteeringModelInput):
     """Steering model using structured parameters with reference path MPC."""
 
@@ -93,6 +99,11 @@ def model(model_input: SteeringModelInput):
         s_estimated, clearance_at_s, kappa_at_s, dkappa_at_s,
     )
 
+    # Horizon nodes in unconstrained space (clearance far beyond any tunnel
+    # half-width; the tunnel-adaptive speed model is saturated there) switch
+    # the MPCC from corridor-following to goal-directed pointing.
+    free_space_mask = clearance_at_s > FREE_SPACE_CLEARANCE_M
+
     weights_with_nc = dict(model_input.planner_weights) if model_input.planner_weights else {}
     weights_with_nc['nc0'] = model_input.bump.nc[0]
     weights_with_nc['nc1'] = model_input.bump.nc[1]
@@ -109,6 +120,7 @@ def model(model_input: SteeringModelInput):
         desired_speed=desired_speed,
         corridor_bounds=corridor_bounds,
         cartesian_constraints=cartesian_constraints,
+        free_space_mask=free_space_mask,
     )
 
     jx = controls[:, 0]

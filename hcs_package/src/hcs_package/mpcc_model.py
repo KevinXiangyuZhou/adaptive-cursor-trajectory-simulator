@@ -82,6 +82,26 @@ def evaluate_tracking_errors(ref_path, state_0, controls, num_steps, dt):
     }
 
 
+_lqr_cache = {}
+
+
+def _free_space_lqr_value(dt, q, r, rho, w_jerk):
+    """Infinite-horizon discrete LQR value matrix P (3x3) for one axis of the
+    jerk-driven triple integrator x=[e, v, a], u=j, with stage cost
+    q e^2 + r v^2 + rho a^2 + w_jerk j^2. Cached per weight tuple."""
+    key = (round(dt, 6), q, r, rho, w_jerk)
+    P = _lqr_cache.get(key)
+    if P is None:
+        from scipy.linalg import solve_discrete_are
+        A = np.array([[1.0, dt, 0.5 * dt * dt], [0.0, 1.0, dt], [0.0, 0.0, 1.0]])
+        B = np.array([[dt ** 3 / 6.0], [0.5 * dt * dt], [dt]])
+        Q = np.diag([max(q, 0.0), max(r, 0.0), max(rho, 0.0)])
+        R = np.array([[max(w_jerk, 1e-12)]])
+        P = solve_discrete_are(A, B, Q, R)
+        _lqr_cache[key] = P
+    return P
+
+
 def _build_A_acc(num_steps, dt):
     """Matrix mapping jerk to acceleration via integration."""
     A_acc = np.tril(np.ones((num_steps, num_steps))) * dt
@@ -123,6 +143,7 @@ def generate_mpcc(
     desired_speed=1.0,
     corridor_bounds=None,
     cartesian_constraints=None,
+    free_space_mask=None,
 ):
     """
     Generate MPCC (Model Predictive Contouring Control) plan.
@@ -140,6 +161,23 @@ def generate_mpcc(
         corridor_bounds: Tuple (bound_left, bound_right) for path-relative
             corridor constraints.
         cartesian_constraints: List[ConstraintRegion] for world-space constraints.
+        free_space_mask: Optional bool array (N,). True at horizon nodes that
+            lie in unconstrained space (clearance far larger than any tunnel).
+            At those nodes the corridor-following machinery is replaced by
+            goal-directed pointing with a linear-quadratic objective:
+              * stage cost  goal*|p-goal|^2 + free_velocity*|v|^2
+                            + free_accel*|a|^2 + jerk*|j|^2
+                (the tunnel speed-profile term and the lag term are off);
+              * terminal cost x_N' P x_N (per axis, x=[p-goal, v, a]) where P
+                is the infinite-horizon LQR value function of that same stage
+                cost for the jerk-driven triple integrator. With it the
+                receding-horizon planner reproduces the infinite-horizon LQR
+                regardless of horizon length, so free-space behaviour is set
+                by the closed-loop poles of (goal, free_velocity, free_accel,
+                jerk) alone: straight paths, peak speed proportional to
+                distance, MT growing with log(D/R), a single-peaked bell whose
+                shape does not depend on D. Nothing prescribes a cruise speed
+                and no per-horizon heuristics are needed.
 
     Returns:
         controls: (N, 3) array of [jx, jy, vs].
@@ -154,6 +192,25 @@ def generate_mpcc(
     w_corridor = w_constraint  # one fitted weight for all boundary penalties
     w_contour = weights.get('contour', 1.0)
     w_lag = weights.get('lag', 0.1)
+    # Free-space (pointing) LQ weights: q on |p-goal|^2, r on |v|^2, rho on
+    # |a|^2 (jerk weight shared with the tunnel objective). Provisional
+    # defaults; to be replaced by formal fitting to the pointing data.
+    w_goal = weights.get('goal', 1.0)
+    w_free_velocity = weights.get('free_velocity', 0.08)
+    w_free_accel = weights.get('free_accel', 0.0)
+    if free_space_mask is None:
+        free_mask = np.zeros(num_steps, dtype=bool)
+    else:
+        free_mask = np.asarray(free_space_mask, dtype=bool)
+        if free_mask.shape[0] != num_steps:
+            free_mask = np.resize(free_mask, num_steps)
+    any_free = bool(free_mask.any())
+    terminal_lqr = any_free and bool(free_mask[-1])
+    if any_free:
+        _p_goal = ref_path(ref_path.total_length)
+        goal_xy = np.array([float(_p_goal[0]), float(_p_goal[1])])
+    if terminal_lqr:
+        P_lqr = _free_space_lqr_value(dt, w_goal, w_free_velocity, w_free_accel, w_jerk)
 
     # Light Gaussian smoothing prevents chasing step-like changes over the short horizon
     speed_target = np.asarray(speed_profile, dtype=float).copy()
@@ -205,8 +262,13 @@ def generate_mpcc(
     def objective(x):
         jx, jy, vs = unpack_x(x)
 
-        # 1. Jerk smoothness
+        # 1. Jerk smoothness (+ free-space acceleration/effort cost)
         j_cost = np.sum(jx**2 + jy**2) * w_jerk
+        if any_free:
+            ax_h = ax_free + A_acc_mat @ jx
+            ay_h = ay_free + A_acc_mat @ jy
+            if w_free_accel > 0.0:
+                j_cost += w_free_accel * float(np.sum(np.where(free_mask, ax_h**2 + ay_h**2, 0.0)))
 
         # 2. Progress / speed tracking
         s_traj = s0 + S_mat @ vs
@@ -215,7 +277,12 @@ def generate_mpcc(
         physical_speed = np.sqrt(vx**2 + vy**2)
 
         speed_error = physical_speed - speed_target
-        prog_cost = np.sum(speed_error**2) * w_progress
+        if any_free:
+            v_sq = vx**2 + vy**2
+            prog_cost = float(np.sum(np.where(
+                free_mask, w_free_velocity * v_sq, w_progress * speed_error**2)))
+        else:
+            prog_cost = np.sum(speed_error**2) * w_progress
 
         # 3. Contour + lag tracking error
         px = px_free + A_pos_mat @ jx
@@ -248,7 +315,14 @@ def generate_mpcc(
             e_contour = e_k[0]
             e_lag = e_k[1]
 
-            tracking_cost += (w_contour * e_contour**2) + (w_lag * e_lag**2)
+            if any_free and free_mask[k]:
+                # Goal-directed pointing: lateral error stays w.r.t. the path
+                # (keeps the movement on the straight line); the drive is the
+                # squared distance to the goal.
+                g_err = pos_k - goal_xy
+                tracking_cost += (w_contour * e_contour**2) + (w_goal * float(g_err @ g_err))
+            else:
+                tracking_cost += (w_contour * e_contour**2) + (w_lag * e_lag**2)
 
             # 4a. Path-relative corridor penalty
             if corridor_bounds is not None:
@@ -320,27 +394,28 @@ def generate_mpcc(
             nc1 = weights.get('nc1', 0.02)
             # predicted velocity-scatter variance at each node: (nc * v)^2
             scatter_var = (nc0**2 + nc1**2) * (vx**2 + vy**2)
-
-
             # physical (x, y) of the path endpoint — no arc-length gating needed
             p_end = ref_path(ref_path.total_length)
             x_target, y_target = float(p_end[0]), float(p_end[1])
-
-
             # squared Euclidean distance from every predicted position to the target
             dist_sq = (px - x_target)**2 + (py - y_target)**2
-
-
             # potential-well: penalty is large near the target, fades with distance
             r2 = target_radius**2
             per_node_penalty = scatter_var / (dist_sq + r2)
-
-
             goal_cost = w_precision * np.sum(per_node_penalty)
         else:
             goal_cost = 0.0
 
-        return j_cost + prog_cost + tracking_cost + goal_cost
+        # 6. Free-space terminal cost = LQR value function of the stage cost
+        #    (per axis, state [p-goal, v, a]) — makes the short-horizon plan
+        #    equal to the infinite-horizon optimum.
+        term_cost = 0.0
+        if terminal_lqr:
+            xN = np.array([px[-1] - goal_xy[0], vx[-1], ax_h[-1]])
+            yN = np.array([py[-1] - goal_xy[1], vy[-1], ay_h[-1]])
+            term_cost = float(xN @ P_lqr @ xN + yN @ P_lqr @ yN)
+
+        return j_cost + prog_cost + tracking_cost + goal_cost + term_cost
 
     bounds = []
     bounds.extend([(None, None)] * 3 * num_steps)

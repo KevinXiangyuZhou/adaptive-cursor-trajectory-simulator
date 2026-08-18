@@ -148,7 +148,13 @@ def single_step_motor_and_device_noise(
 
     if abs(dx) > 1e-10 or abs(dy) > 1e-10:
         hand_pos_prev = np.array((h_pos_x, h_pos_y), dtype=float)
-        hand_dx, hand_dy = mouse.rot_mat(dx, dy, -hand_ori_prev)
+        # dx/dy are CURSOR-space displacements; the hand moves in DEVICE space
+        # (cursor / gain). get_cursor_displacement below multiplies by the gain
+        # again, so feeding cursor-space dx here made the executed step
+        # gain-times (1.2x-4.8x, growing with speed) larger than planned while
+        # the velocity state stayed at the planned value — a planner/plant
+        # gain mismatch that produced systematic overshoot.
+        hand_dx, hand_dy = mouse.rot_mat(dx * inv_gain, dy * inv_gain, -hand_ori_prev)
         h_pos_x_out += float(hand_dx)
         h_pos_y_out += float(hand_dy)
 

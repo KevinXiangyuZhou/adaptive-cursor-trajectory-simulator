@@ -67,18 +67,18 @@ class ReferencePath:
         if waypoints.shape[0] < 2:
             raise ValueError(f"Need at least 2 distinct waypoints, got {waypoints.shape[0]}")
 
-        # Pad to >= 4 points so cubic splprep can fit
-        if waypoints.shape[0] == 2:
-            mid_point = (waypoints[0] + waypoints[1]) / 2.0
-            waypoints = np.vstack([waypoints[0:1], mid_point.reshape(1, -1), waypoints[1:2]])
-
-        if waypoints.shape[0] == 3:
-            mid_point = waypoints[1]
-            dir_vec = waypoints[2] - waypoints[0]
-            perp = np.array([-dir_vec[1], dir_vec[0]])
-            perp = perp / (np.linalg.norm(perp) + 1e-10)
-            offset_point = mid_point + perp * 1e-6
-            waypoints = np.vstack([waypoints[0:1], waypoints[1:2], offset_point.reshape(1, -1), waypoints[2:3]])
+        # Pad to >= 4 points so cubic splprep can fit. Resample each segment
+        # with EVENLY spaced points: the previous scheme inserted a point
+        # 1e-6 away from an existing one, and two near-coincident interior
+        # points make the chord-length parametrisation degenerate — the
+        # cubic then bulges (a 2-point straight path came out ~39% longer
+        # with cm-scale lateral swings).
+        if waypoints.shape[0] < 4:
+            n_seg = waypoints.shape[0] - 1
+            per_seg = int(np.ceil(4 / n_seg))  # points per segment (excl. segment end)
+            pieces = [np.linspace(waypoints[i], waypoints[i + 1], per_seg + 1)[:-1]
+                      for i in range(n_seg)]
+            waypoints = np.vstack(pieces + [waypoints[-1:]])
 
         # Break collinearity to avoid degenerate splprep fits
         if waypoints.shape[0] >= 3:
@@ -416,7 +416,13 @@ def generate_optimal_reference_path(
 
     kappa_sm_abs = np.abs(kappa_smoothed)
     kappa_sm_max = float(np.max(kappa_sm_abs))
-    kappa_factor = (kappa_sm_abs / kappa_sm_max) if kappa_sm_max > 1e-6 else np.zeros_like(kappa)
+    # Normalising by max|κ| turns the numerical-noise curvature of a
+    # (near-)straight centreline (~1e-3..1e-2 1/m from the spline fit) into an
+    # O(1) cutting profile; with a wide corridor that becomes cm-scale wobble
+    # on a path that should be straight. Only cut when there is a physically
+    # meaningful bend (radius of curvature < KAPPA_CUT_MIN^-1 = 10 m).
+    KAPPA_CUT_MIN = 0.1
+    kappa_factor = (kappa_sm_abs / kappa_sm_max) if kappa_sm_max > KAPPA_CUT_MIN else np.zeros_like(kappa)
 
     cut_fraction = np.clip(w_cut, 0.0, 1.0) * width_factor * kappa_factor * np.exp(-w_suppress * phi)
 

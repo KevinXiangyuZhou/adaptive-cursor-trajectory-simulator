@@ -65,9 +65,21 @@ class CursorSimulator:
                 "contour": 20,
                 "lag": 0.05,
                 "desired_speed": 0.2, #default 0.2
-                "goal_precision": 0.00015  # fallback; overridden per-user via user_configurations
+                "goal_precision": 0.0001  # fallback; overridden per-user via user_configurations.
+                                          # 2026-08: with the free-space LQR objective, the well at
+                                          # ~1e-4 gives the human endpoint-depth trend and target
+                                          # re-entry rate; ~3e-4+ over-slows R=5 mm targets.
             },
             "planner_margin": 0.0,
+            # Carry the realised cursor acceleration into the next MPC solve.
+            # The planner is a jerk-driven 3rd-order model; if the plant is
+            # re-seeded with a=0 every step, the acceleration the plan builds
+            # up over the horizon is never realised (per-step dv is only
+            # 0.5*j0*dt^2), so braking is much weaker than planned -> late,
+            # overshooting arrivals in free space.
+            "carry_acceleration": True,
+            # Consecutive time inside the target that ends a trajectory (s).
+            "dwell_s": 0.25,
             "add_noise": True,
             "ddm_enabled": False,
             "random_seed": 1000
@@ -110,6 +122,8 @@ class CursorSimulator:
         self.nc = list(config['nc'])
         self.planner_weights = config['planner_weights']
         self.planner_margin = config['planner_margin']
+        self.carry_acceleration = bool(config.get('carry_acceleration', True))
+        self.dwell_s = float(config.get('dwell_s', 0.25))
         self.add_noise = config['add_noise']
 
         seed = config['random_seed']
@@ -344,6 +358,7 @@ class CursorSimulator:
 
         cursor_pos = np.array([waypoints_norm[0][0], waypoints_norm[0][1]], dtype=float)
         cursor_vel = np.array([0.0, 0.0], dtype=float)
+        cursor_acc = np.array([0.0, 0.0], dtype=float)
         hand_pos = np.array([0.0, 0.0], dtype=float)
 
         reset_warm_start()
@@ -357,7 +372,10 @@ class CursorSimulator:
             if dist_to_target < target_radius:
                 break
         '''
-        dwell_required = int(round(1.0 / self.interval))
+        # Termination: DWELL_S of consecutive samples inside the target
+        # (stands in for the human click latency; the pointing data show
+        # ~0.3 s median from final target entry to click).
+        dwell_required = int(round(self.dwell_s / self.interval))
         dwell_steps = 0
         for step in range(max_steps):
             dist_to_target = np.linalg.norm(cursor_pos - final_target)
@@ -365,6 +383,8 @@ class CursorSimulator:
                 dwell_steps += 1
                 if dwell_steps >= dwell_required:
                     break
+            else:
+                dwell_steps = 0
 
             tunnel_path = waypoints_norm
             model_input = SteeringModelInput(
@@ -398,6 +418,7 @@ class CursorSimulator:
                 speed_model=self.speed_model,
                 target_radius=target_radius,  # added for pointing model
             )
+            model_input.current_acc = (float(cursor_acc[0]), float(cursor_acc[1]))
 
             cursor_info, plan_debug = model(model_input)
             c_pos_dx, c_pos_dy, c_vel_x, c_vel_y = cursor_info
@@ -428,6 +449,11 @@ class CursorSimulator:
 
             cursor_pos[0] += c_pos_dx_step
             cursor_pos[1] += c_pos_dy_step
+            if self.carry_acceleration:
+                # Planned (pre-noise) acceleration over the executed step —
+                # the motor/device noise is unobservable to the planner.
+                cursor_acc[0] = (c_vel_x[planned_vel_idx] - c_vel_x[0]) / self.interval
+                cursor_acc[1] = (c_vel_y[planned_vel_idx] - c_vel_y[0]) / self.interval
             cursor_vel[0] = c_vel_x_step
             cursor_vel[1] = c_vel_y_step
 
