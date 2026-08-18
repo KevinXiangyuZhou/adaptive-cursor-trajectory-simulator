@@ -3,7 +3,8 @@ Per-participant model fitting — revised 2026-08 for the aug-26-prolific
 dataset (steering + ID4SCS + unconstrained pointing) and the current model
 (fixed plant, free-space LQR objective, dwell termination).
 
-Pipeline (all simulation noiseless, nc = [0, 0], as in the original fitting):
+Pipeline (all simulation noiseless — add_noise=False; the persona's nc is kept so
+the goal-precision well, which is scaled by nc^2, stays active during fitting):
 
   Phase 0  Reference-path params (spatial-only, no simulation).
            Loss: lateral RMSE of human trajectories w.r.t. the generated
@@ -469,7 +470,7 @@ def _eval_tunnel(args):
     """One CMA-ES candidate on the tunnel training set. Top-level for Pool."""
     vec, base_config, gam_path, train_data, tasks, scales = args
     TUNNEL_SCALES.update(scales)
-    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, TUNNEL_PARAM_SPEC)); cfg["nc"] = [0, 0]
+    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, TUNNEL_PARAM_SPEC)); cfg["add_noise"] = False   # noiseless sim, but keep nc: the precision well is scaled by nc^2
     try:
         sim = _make_sim(cfg, gam_path)
     except Exception:
@@ -554,7 +555,7 @@ def _eval_pointing(args):
     """One CMA-ES candidate on the pointing training set (one noiseless sim per human round)."""
     vec, base_config, gam_path, train_data, scales = args
     POINT_SCALES.update(scales)
-    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, POINTING_PARAM_SPEC)); cfg["nc"] = [0, 0]
+    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, POINTING_PARAM_SPEC)); cfg["add_noise"] = False   # noiseless sim, but keep nc: the precision well is scaled by nc^2
     try:
         sim = _make_sim(cfg, gam_path)
     except Exception:
