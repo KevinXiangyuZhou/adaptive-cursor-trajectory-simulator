@@ -97,7 +97,8 @@ import plot as law_plot  # noqa: E402
 # Constants
 # ---------------------------------------------------------------------------
 HUMAN_DATA_DIR = PROJECT_ROOT / "human_data" / "aug-26-prolific"  # overridable via --data-dir
-RESULTS_DIR = SCRIPT_DIR / "results"
+# Override with HCS_EVAL_RESULTS_DIR (Great Lakes: .../projects/chi-27/results/eval-main)
+RESULTS_DIR = Path(os.environ.get("HCS_EVAL_RESULTS_DIR", SCRIPT_DIR / "results"))
 SIM_CACHE_DIR = RESULTS_DIR / "sim_cache"
 DEFAULT_CONFIG = (
     PROJECT_ROOT / "hcs_package" / "src" / "hcs_package" / "user_configurations" / "office_worker.json"
@@ -1275,6 +1276,11 @@ def main():
     parser.add_argument("--buckets", type=str, nargs="+", default=None,
                         choices=["steering", "id4scs_w2n", "id4scs_n2w", "fitts", "excluded"],
                         help="Restrict processing to these task buckets (default: all)")
+    parser.add_argument("--per-participant", action="store_true", default=False,
+                        help="Use each participant's fitted persona from "
+                             "eval/model_fitting/results/{pid}_gam_config_s{seed}.json "
+                             "(participants without a fitted config are skipped)")
+    parser.add_argument("--seed", type=int, default=42, help="seed suffix of fitted configs (--per-participant)")
     parser.add_argument("--fresh-sim", action="store_true", default=False,
                         help="Ignore any cached simulator runs and resimulate every condition "
                              "from scratch. The simulator applies stochastic per-step motor/"
@@ -1288,7 +1294,7 @@ def main():
     if not data_dir.is_dir():
         print(f"Data dir not found: {data_dir}")
         return
-    if not human_only and not config_path.exists():
+    if not human_only and not args.per_participant and not config_path.exists():
         print(f"Config not found: {config_path}")
         return
 
@@ -1354,8 +1360,16 @@ def main():
         print("\n[3/4] Running simulations ...")
     else:
         print("\n[3/4] Aggregating from cached simulator runs (--aggregate-only) ...")
+    fitting_dir = Path(os.environ.get("HCS_FIT_RESULTS_DIR", PROJECT_ROOT / "eval" / "model_fitting" / "results"))
     for pid, participant_data in sorted(all_human_data.items()):
         print(f"\n  Participant: {pid}")
+        pid_config_path = config_path
+        if args.per_participant and not human_only:
+            pid_config_path = fitting_dir / f"{pid}_gam_config_s{args.seed}.json"
+            if not pid_config_path.exists():
+                print(f"    no fitted config {pid_config_path.name} — skipped", flush=True)
+                continue
+            print(f"    persona: {pid_config_path.name}")
         cache_path = SIM_CACHE_DIR / f"{pid}_sim_cache.json"
         sim_cache = {} if (args.fresh_sim or human_only) else load_sim_cache(cache_path)
         if args.fresh_sim:
@@ -1363,7 +1377,7 @@ def main():
                   "(stochastic noise means these will differ from the previous cached run)")
 
         rows_by_bucket, condition_summaries = process_participant(
-            pid, participant_data, str(config_path), tid_to_condition, tid_to_bucket, tid_geometry,
+            pid, participant_data, str(pid_config_path), tid_to_condition, tid_to_bucket, tid_geometry,
             sim_cache, simulate=simulate, human_only=human_only,
         )
         if simulate:

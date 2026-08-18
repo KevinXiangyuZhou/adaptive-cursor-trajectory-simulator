@@ -1,13 +1,43 @@
 """
-Three-stage model fitting with GAM speed model.
+Per-participant model fitting — revised 2026-08 for the aug-26-prolific
+dataset (steering + ID4SCS + unconstrained pointing) and the current model
+(fixed plant, free-space LQR objective, dwell termination).
 
-Phase 0: Fit reference path params (spatial-only, no simulation needed) (~10-30s).
-Stage 1: Fit GAM speed model directly from human speed data (seconds).
-Stage 2: Fit MPCC tracking params via CMA-ES with fixed speed model (minutes).
+Pipeline (all simulation noiseless, nc = [0, 0], as in the original fitting):
+
+  Phase 0  Reference-path params (spatial-only, no simulation).
+           Loss: lateral RMSE of human trajectories w.r.t. the generated
+           reference path, on the steering training tasks.
+  Stage 1  GAM speed model fitted directly from human tunnel data (all
+           steering widths incl. straight, plus ID4SCS), using samples in the
+           central 10–90 % of progress (cruise) with the features computed on
+           the fitted reference path exactly as the simulator does.
+  Stage 2  MPCC tunnel weights via CMA-ES (contour, lag, jerk, constraint,
+           progress, Th) on the steering training widths {10, 30, 50} mm.
+           Loss = human-variability-normalised lateral RMSE + speed-profile
+           RMSE + (1 - speed corr) + relative time diff + wall margin.
+  Stage 3  Free-space (pointing) LQ weights via CMA-ES (goal, free_velocity,
+           goal_precision; jerk fixed from Stage 2) on the pointing training
+           radii {5, 15, 25} mm. Loss = normalised |relative MT_kin diff| +
+           speed-profile RMSE + (1 - corr) + endpoint-depth diff + lateral
+           RMSE, with MT_kin = movement onset -> final target entry on both
+           sides (human reaction and click latency are NOT fitted; the model
+           dwell_s stands in for click latency).
+
+Held-out evaluation: steering widths {20, 40} mm, ID4SCS (both directions),
+pointing radii {10, 20} mm. Constrained->unconstrained trials are not used.
+
+Outputs (eval/model_fitting/results/):
+    {pid}_gam_s{seed}.pkl           fitted GAM speed model
+    {pid}_gam_config_s{seed}.json   persona config with all fitted params
+                                    (loadable by CursorSimulator / eval-main
+                                    --per-participant)
+    {pid}_gam_fit_s{seed}.json      full record: params, losses, train/test tids
 
 Usage:
-    python -m eval.model_fitting.fit_speed_model --pid P111602
-    python -m eval.model_fitting.fit_speed_model --pid P111602 --time-limit 1800
+    python -m eval.model_fitting.fit_speed_model --pid P6a0aa037f7816b7befeb15e6 --time-limit 43200
+    python -m eval.model_fitting.fit_speed_model --pid ... --stages tunnel      # skip pointing
+    python -m eval.model_fitting.fit_speed_model --pid ... --stages pointing    # reuse tunnel fit
 """
 
 import argparse
@@ -19,54 +49,56 @@ import os
 import sys
 import tempfile
 import time
-from collections import OrderedDict
+import warnings
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
 
-# Ensure project root on path
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from hcs_package import CursorSimulator
-from hcs_package.speed_model import GAMSpeedModel
-from hcs_package.reference_path import ReferencePath, generate_optimal_reference_path
-from hcs_package.constraints import PathConstraint, RectangleConstraint, PolygonConstraint
-from hcs_package.constraint_utils import parse_constraints_from_json, convert_constraints_to_corridor_bounds
-
-from eval.model_fitting.extract_speed_data import (
-    extract_all_speed_data,
-    extract_all_speed_data_v2,
-)
-from eval.model_fitting.run_fitting import (
-    TRIAL_CONDITIONS,
-    HUMAN_DATA_DIR,
-    MAX_SIM_STEPS,
-    N_PROGRESS_BINS,
-    LOSS_WEIGHTS,
-    WALL_MARGIN_WEIGHT,
-    INCOMPLETE_PENALTY,
-    load_participant_data,
-    split_train_test,
-    build_all_tasks,
-    build_task,
-    run_single_sim,
-    compute_trial_metrics,
-    metrics_to_loss,
-    _apply_params,
-    _TOP_LEVEL_PARAMS,
-    TRAIN_TIDS,
-    TEST_TIDS,
-    CMAES_TIDS,
-    STEERING_TIDS,
-    compute_human_variability_scales,
-)
-from eval.utils.stats import resample_by_progress
-
+warnings.filterwarnings("ignore")
+os.environ.setdefault("MPLBACKEND", "Agg")
 
 # ---------------------------------------------------------------------------
-# Phase 0: Fit reference path params (spatial-only, no simulation)
+# Paths
 # ---------------------------------------------------------------------------
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parents[1]
+for p in (PROJECT_ROOT, PROJECT_ROOT / "hcs_package" / "src", PROJECT_ROOT / "eval",
+          PROJECT_ROOT / "eval" / "eval-main", SCRIPT_DIR):
+    sys.path.insert(0, str(p))
+
+import run_eval as em  # eval/eval-main/run_eval.py: data loading, task builders, alignment  # noqa: E402
+from hcs_package.cursor_simulator import CursorSimulator  # noqa: E402
+from hcs_package.speed_model import GAMSpeedModel  # noqa: E402
+from hcs_package.reference_path import ReferencePath, generate_optimal_reference_path  # noqa: E402
+from hcs_package.constraints import PathConstraint, RectangleConstraint, PolygonConstraint  # noqa: E402
+from hcs_package.constraint_utils import parse_constraints_from_json, convert_constraints_to_corridor_bounds  # noqa: E402
+from utils.stats import (  # noqa: E402
+    resample_by_progress, resample_speeds_by_progress,
+    trajectory_rmse, speed_profile_rmse, speed_profile_correlation,
+)
+from extract_speed_data import extract_all_speed_data_v2  # noqa: E402  (same dir)
+
+HUMAN_DATA_DIR = em.HUMAN_DATA_DIR
+DEFAULT_BASE_CONFIG = PROJECT_ROOT / "hcs_package" / "src" / "hcs_package" / "user_configurations" / "office_worker.json"
+POPULATION_GAM = DEFAULT_BASE_CONFIG.parent / "population_gam.pkl"
+# Override with HCS_FIT_RESULTS_DIR (Great Lakes: .../projects/chi-27/results/model_fitting)
+RESULTS_DIR = Path(os.environ.get("HCS_FIT_RESULTS_DIR", SCRIPT_DIR / "results"))
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+MAX_SIM_STEPS = 600            # 30 s at 50 ms; narrow tunnels can take 15-25 s
+N_PROGRESS_BINS = 100
+SPEED_TRIM_START, SPEED_TRIM_END = 10, 90   # tunnel speed metrics: central 10-90 % of progress
+GAM_PROGRESS_WINDOW = (0.10, 0.90)          # cruise samples for the GAM
+INCOMPLETE_PENALTY = 100.0
+WALL_MARGIN_WEIGHT = 20.0
+
+TRAIN_WIDTHS = {0.01, 0.03, 0.05}
+TEST_WIDTHS = {0.02, 0.04}
+POINT_TRAIN_R = {0.005, 0.015, 0.025}
+POINT_TEST_R = {0.010, 0.020}
 
 REF_PATH_PARAM_SPEC = [
     {"name": "w_cut",                "bounds": (0.0, 1.0)},
@@ -75,813 +107,620 @@ REF_PATH_PARAM_SPEC = [
     {"name": "cut_window_frac",      "bounds": (0.02, 0.20)},
     {"name": "global_clearance_ref", "bounds": (0.005, 0.05)},
 ]
-
-
-def _encode_ref_params(params):
-    """Encode ref path params to [0,1] vector."""
-    vec = np.zeros(len(REF_PATH_PARAM_SPEC))
-    for i, spec in enumerate(REF_PATH_PARAM_SPEC):
-        lo, hi = spec["bounds"]
-        vec[i] = (params[spec["name"]] - lo) / (hi - lo)
-    return np.clip(vec, 0.0, 1.0)
-
-
-def _decode_ref_params(vec):
-    """Decode [0,1] vector to ref path param dict."""
-    params = {}
-    for i, spec in enumerate(REF_PATH_PARAM_SPEC):
-        lo, hi = spec["bounds"]
-        params[spec["name"]] = lo + float(vec[i]) * (hi - lo)
-    return params
-
-
-def _normalize_waypoints_to_meters(task_config):
-    """Convert task config waypoints from pixels to meters.
-
-    Replicates CursorSimulator's coordinate normalization.
-    """
-    screen_width = task_config["screen_width"]
-    screen_height = task_config["screen_height"]
-    screen_width_m = 0.46
-    screen_height_m = screen_height / screen_width * screen_width_m
-    return [
-        (x / screen_width * screen_width_m, y / screen_height * screen_height_m)
-        for x, y in task_config["waypoints"]
-    ]
-
-
-def _precompute_task_geometry(task_configs, margin=0.0):
-    """Pre-compute per-task geometry that is invariant to ref path params.
-
-    This avoids re-parsing constraints, building centerline splines, and
-    computing corridor bounds on every CMA-ES evaluation.
-
-    Returns:
-        dict {tid: {waypoints_norm, tunnel_width, centerline_spline,
-                     corridor_bounds, cartesian_regions}}
-    """
-    geometry = {}
-    for tid, task_config in task_configs.items():
-        waypoints_norm = _normalize_waypoints_to_meters(task_config)
-
-        constraints_dict = task_config.get("constraints")
-        constraint_config = None
-        cartesian_regions = []
-        tunnel_width = None
-
-        if constraints_dict is not None:
-            constraint_config = parse_constraints_from_json(constraints_dict)
-            for region in constraint_config.regions:
-                if isinstance(region.geometry, PathConstraint):
-                    tunnel_width = float(region.geometry.width)
-                elif isinstance(region.geometry, (RectangleConstraint, PolygonConstraint)):
-                    cartesian_regions.append(region)
-
-        if tunnel_width is None:
-            distances = [
-                np.linalg.norm(np.array(waypoints_norm[i + 1]) - np.array(waypoints_norm[i]))
-                for i in range(len(waypoints_norm) - 1)
-            ]
-            avg_distance = np.mean(distances) if distances else 0.1
-            tunnel_width = min(0.1, max(0.02, avg_distance * 0.3))
-
-        centerline_spline = ReferencePath(waypoints_norm, s=0.0, k=3)
-
-        corridor_bounds = None
-        if constraint_config is not None:
-            corridor_bounds = convert_constraints_to_corridor_bounds(
-                constraint_config, centerline_spline, default_margin=margin,
-            )
-
-        geometry[tid] = {
-            "waypoints_norm": waypoints_norm,
-            "tunnel_width": tunnel_width,
-            "centerline_spline": centerline_spline,
-            "corridor_bounds": corridor_bounds,
-            "cartesian_regions": cartesian_regions,
-            "margin": margin,
-        }
-    return geometry
-
-
-def _build_ref_path_from_geometry(geom, ref_params):
-    """Generate reference path from pre-computed geometry and ref path params.
-
-    Returns:
-        (ref_polyline, ref_path) where ref_polyline is an (M,2) array
-        of densely sampled points, and ref_path is the ReferencePath object.
-    """
-    ref_path = generate_optimal_reference_path(
-        tunnel_path=geom["waypoints_norm"],
-        tunnel_width=geom["tunnel_width"],
-        margin=geom["margin"],
-        w_cut=ref_params["w_cut"],
-        w_suppress=ref_params["w_suppress"],
-        w_width_exp=ref_params["w_width_exp"],
-        cut_window_frac=ref_params["cut_window_frac"],
-        global_clearance_ref=ref_params["global_clearance_ref"],
-        cartesian_constraints=geom["cartesian_regions"] or None,
-        corridor_bounds=geom["corridor_bounds"],
-        centerline_cache=geom["centerline_spline"],
-    )
-
-    n_samples = 200
-    thetas = np.linspace(0, ref_path.total_length, n_samples)
-    ref_polyline = np.array([ref_path(t) for t in thetas])
-
-    return ref_polyline, ref_path
-
-
-def _build_ref_path_for_task(task_config, ref_params, margin=0.0):
-    """Generate reference path for a task using given ref path params.
-
-    Convenience wrapper that builds geometry on the fly.  For repeated
-    evaluations (e.g. CMA-ES), prefer _precompute_task_geometry +
-    _build_ref_path_from_geometry.
-    """
-    geometry = _precompute_task_geometry({0: task_config}, margin=margin)
-    return _build_ref_path_from_geometry(geometry[0], ref_params)
-
-
-def _eval_ref_path_spatial(param_vec, train_data, task_geometry):
-    """Evaluate one reference path parameter vector using spatial-only loss.
-
-    For each trial condition, generates the reference path then computes
-    lateral RMSE of human trajectories projected onto that reference path.
-    No simulation is run.
-
-    Args:
-        task_geometry: Pre-computed geometry from _precompute_task_geometry.
-    """
-    ref_params = _decode_ref_params(param_vec)
-
-    total_loss = 0.0
-    n_tasks = 0
-
-    for tid in sorted(train_data.keys()):
-        rounds = train_data[tid]
-        if not rounds:
-            continue
-
-        try:
-            ref_polyline, _ = _build_ref_path_from_geometry(
-                task_geometry[tid], ref_params
-            )
-        except Exception:
-            total_loss += 1e6
-            n_tasks += 1
-            continue
-
-        n_tasks += 1
-        round_rmses = []
-        for human_trial in rounds:
-            h_traj = human_trial["trajectory"]
-            # Project human trajectory onto the reference path (not centerline).
-            # Lateral deviation from the reference path is the spatial error.
-            # Use fewer bins than full eval — spatial alignment doesn't
-            # need fine granularity and resample_by_progress is the bottleneck.
-            _, _, lat_h = resample_by_progress(h_traj, ref_polyline, 50)
-            lat_rmse = float(np.sqrt(np.mean(np.asarray(lat_h) ** 2)))
-            round_rmses.append(lat_rmse)
-
-        total_loss += sum(round_rmses) / len(round_rmses)
-
-    if n_tasks > 0:
-        total_loss = total_loss * 4 / n_tasks
-
-    return total_loss
-
-
-def fit_reference_path_params(train_data, task_configs, base_config,
-                              time_limit=60.0, seed=42, sigma0=0.3,
-                              popsize=8):
-    """Phase 0: Fit reference path params using spatial-only loss.
-
-    Optimizes corner-cutting / race-tracing parameters by minimizing
-    lateral RMSE between human trajectories and the generated reference
-    path.  No simulation needed — reference path generation is deterministic
-    and fast (~ms per evaluation).
-
-    Returns:
-        fitted_params, best_loss, loss_history
-    """
-    import cma
-
-    print("\n--- Phase 0: Fitting reference path params (spatial-only) ---")
-
-    # Pre-compute task geometry (centerline splines, corridor bounds, etc.)
-    # so that each CMA-ES evaluation only runs generate_optimal_reference_path.
-    task_geometry = _precompute_task_geometry(task_configs)
-    print(f"  Pre-computed geometry for {len(task_geometry)} tasks")
-
-    # Initial params from config
-    rp = base_config.get("reference_path", {})
-    pw = base_config.get("planner_weights", {})
-    initial_params = {}
-    for spec in REF_PATH_PARAM_SPEC:
-        name = spec["name"]
-        lo, hi = spec["bounds"]
-        initial_params[name] = rp.get(name, pw.get(name, (lo + hi) / 2))
-
-    x0 = _encode_ref_params(initial_params)
-    n_params = len(REF_PATH_PARAM_SPEC)
-
-    def obj_fn(x):
-        return _eval_ref_path_spatial(x, train_data, task_geometry)
-
-    initial_loss = obj_fn(x0)
-    print(f"  Initial loss: {initial_loss:.6f}")
-    print(f"  Initial params: { {k: round(v, 5) for k, v in initial_params.items()} }")
-
-    es = cma.CMAEvolutionStrategy(x0.tolist(), sigma0, {
-        "bounds": [[0.0] * n_params, [1.0] * n_params],
-        "popsize": popsize,
-        "seed": seed,
-        "maxiter": 300,
-        "verb_disp": 0, "verb_log": 0, "verb_filenameprefix": "",
-        "verbose": -9,
-    })
-
-    best_x = x0.copy()
-    best_loss = initial_loss
-    loss_history = [{"generation": 0, "best_loss": initial_loss,
-                     "mean_loss": initial_loss, "elapsed_sec": 0.0}]
-
-    start = time.time()
-    generation = 0
-
-    # No multiprocessing — evaluations are ~10ms each
-    while not es.stop():
-        elapsed = time.time() - start
-        if elapsed > time_limit:
-            print(f"  Time limit reached ({elapsed:.0f}s)")
-            break
-
-        solutions = es.ask()
-        fitness = [obj_fn(x) for x in solutions]
-        es.tell(solutions, fitness)
-
-        generation += 1
-        gen_best_idx = int(np.argmin(fitness))
-        if fitness[gen_best_idx] < best_loss:
-            best_loss = fitness[gen_best_idx]
-            best_x = np.array(solutions[gen_best_idx]).copy()
-
-        elapsed = time.time() - start
-        loss_history.append({
-            "generation": generation,
-            "best_loss": float(best_loss),
-            "mean_loss": float(np.mean(fitness)),
-            "elapsed_sec": round(elapsed, 1),
-        })
-
-        if generation % 20 == 0 or generation <= 3:
-            print(f"  Gen {generation:3d}: best={best_loss:.6f}  "
-                  f"mean={np.mean(fitness):.6f}  elapsed={elapsed:.1f}s",
-                  flush=True)
-
-    fitted_params = _decode_ref_params(best_x)
-    total_elapsed = time.time() - start
-    print(f"\n  Phase 0 complete: {generation} generations, {total_elapsed:.1f}s")
-    for name, val in fitted_params.items():
-        print(f"    {name:25s}: {initial_params[name]:.6g} -> {val:.6g}")
-
-    return fitted_params, best_loss, loss_history
-
-
-# ---------------------------------------------------------------------------
-# Stage 1: Fit GAM speed model from human data
-# ---------------------------------------------------------------------------
-
-def fit_gam_speed_model(participant_data, centerlines, trial_conditions,
-                        task_geometry=None, ref_path_params=None,
-                        lam_grid=None):
-    """Fit GAM speed model from human speed observations.
-
-    Args:
-        participant_data: dict {trial_id: [round dicts]}.
-        centerlines: dict {trial_id: centerline_pts}.
-        trial_conditions: dict {trial_id: condition_dict}.
-        task_geometry: dict from _precompute_task_geometry (optional).
-        ref_path_params: fitted reference path params dict (optional).
-        lam_grid: smoothing parameter grid for gridsearch.
-
-    When task_geometry and ref_path_params are provided, features are
-    extracted using the reference path (matching simulation-time computation).
-    Otherwise falls back to legacy extraction with constant clearance.
-
-    Returns:
-        Fitted GAMSpeedModel.
-    """
-    print("\n--- Stage 1: Fitting GAM speed model from human data ---")
-    t0 = time.time()
-
-    # Extract (geometry, speed) pairs
-    if task_geometry is not None and ref_path_params is not None:
-        print("  Using reference-path-aligned feature extraction (v2)")
-        data = extract_all_speed_data_v2(
-            participant_data, task_geometry, ref_path_params,
-            build_ref_path_fn=_build_ref_path_from_geometry,
-        )
-    else:
-        print("  Using legacy feature extraction (constant clearance)")
-        data = extract_all_speed_data(participant_data, centerlines, trial_conditions)
-    if data is None:
-        raise ValueError("No speed data extracted from participant trials")
-
-    n_total = len(data["speed"])
-    n_trials = len(np.unique(data["trial_id"]))
-    print(f"  Extracted {n_total} observations from {n_trials} trial types")
-
-    # Filter out very low speeds (start/end of trials where cursor is stationary)
-    speed_threshold = 0.005  # 5 mm/s
-    valid = data["speed"] > speed_threshold
-    n_valid = np.sum(valid)
-    print(f"  After filtering stationary points: {n_valid} observations")
-
-    clearance = data["clearance"][valid]
-    kappa = data["kappa"][valid]
-    dkappa_ds = data["dkappa_ds"][valid]
-    speeds = data["speed"][valid]
-
-    # Report feature ranges (useful for diagnosing train-test mismatch)
-    print(f"  Clearance range: [{clearance.min():.4f}, {clearance.max():.4f}] m"
-          f"  (unique levels: {len(np.unique(np.round(clearance, 4)))})")
-    print(f"  Kappa range:     [{kappa.min():.2f}, {kappa.max():.2f}]")
-
-    # Estimate base speed as median of observed speeds
-    base_speed = float(np.median(speeds))
-    print(f"  Estimated base speed: {base_speed:.4f} m/s")
-
-    # Fit GAM
-    gam_model = GAMSpeedModel(
-        base_speed=base_speed,
-        floor=0.01,    # 10 mm/s minimum
-        ceil=0.50,     # 500 mm/s maximum
-    )
-    gam_model.fit(clearance, kappa, dkappa_ds, speeds, lam_grid=lam_grid)
-
-    elapsed = time.time() - t0
-    print(f"  GAM fitted in {elapsed:.1f}s")
-
-    # Report prediction quality
-    predicted = gam_model.compute_speed_profile(
-        np.arange(n_valid), clearance, kappa, dkappa_ds
-    )
-    corr = np.corrcoef(speeds, predicted)[0, 1]
-    rmse = np.sqrt(np.mean((speeds - predicted) ** 2))
-    print(f"  Training fit: corr={corr:.3f}, RMSE={rmse:.4f} m/s")
-
-    return gam_model
-
-
-# ---------------------------------------------------------------------------
-# Stage 2: Fit MPCC params with GAM speed model fixed
-# ---------------------------------------------------------------------------
-
-# Only MPCC tracking params — speed is handled by the GAM,
-# reference path params are handled by Phase 0.
-MPCC_PARAM_SPEC = [
-    {"name": "contour",    "log_scale": True,  "bounds": (0.5, 2.5)},   # ~3-316
-    {"name": "lag",        "log_scale": True,  "bounds": (-2.0, 1.0)},  # 0.01-10
-    {"name": "jerk",       "log_scale": True,  "bounds": (-8.0, -4.0)}, # 1e-8-1e-4
-    {"name": "constraint", "log_scale": True,  "bounds": (1.5, 2.5)},   # ~30-316
-    {"name": "progress",   "log_scale": True,  "bounds": (-4.0, 0.5)},  # 1e-4 to ~3.0
-    {"name": "Th",         "log_scale": False, "bounds": (0.35, 0.6),
-     "discrete_step": 0.05, "config_key": "top_level"},
+REF_PATH_KEYS = {s["name"] for s in REF_PATH_PARAM_SPEC}
+
+# Stage 2: tunnel MPCC weights (log10 bounds unless noted)
+TUNNEL_PARAM_SPEC = [
+    {"name": "contour",    "log_scale": True,  "bounds": (0.5, 2.5)},     # 3 - 316
+    {"name": "lag",        "log_scale": True,  "bounds": (-2.0, 1.0)},    # 0.01 - 10
+    {"name": "jerk",       "log_scale": True,  "bounds": (-7.0, -4.5)},   # 1e-7 - 3e-5
+    {"name": "constraint", "log_scale": True,  "bounds": (1.0, 2.5)},     # 10 - 316
+    {"name": "progress",   "log_scale": True,  "bounds": (-8.0, -3.0)},   # 1e-8 - 1e-3
+    {"name": "Th",         "log_scale": False, "bounds": (0.2, 0.6), "discrete_step": 0.05,
+     "config_key": "top_level"},
+]
+# Stage 3: free-space LQ weights (jerk fixed from Stage 2 — only ratios matter for the LQR)
+POINTING_PARAM_SPEC = [
+    {"name": "goal",           "log_scale": True, "bounds": (-1.0, 1.0)},   # 0.1 - 10
+    {"name": "free_velocity",  "log_scale": True, "bounds": (-2.5, 0.0)},   # 0.003 - 1
+    {"name": "goal_precision", "log_scale": True, "bounds": (-7.0, -3.0)},  # 1e-7 (~off) - 1e-3
 ]
 
-_MPCC_SPEC_BY_NAME = {s["name"]: s for s in MPCC_PARAM_SPEC}
+TUNNEL_LOSS_WEIGHTS = {"lateral_rmse": 1.0, "speed_rmse": 1.0, "speed_corr": 1.0, "time_diff": 1.0}
+POINT_LOSS_WEIGHTS = {"mt_rel": 1.0, "speed_rmse": 1.0, "speed_corr": 1.0, "end_depth": 1.0, "lateral_rmse": 1.0}
+DEFAULT_TUNNEL_SCALES = {"lateral_rmse": 0.003, "speed_rmse": 0.05, "speed_corr": 0.3, "time_diff": 0.15}
+DEFAULT_POINT_SCALES = {"mt_rel": 0.2, "speed_rmse": 0.1, "speed_corr": 0.2, "end_depth": 0.2, "lateral_rmse": 0.004}
 
 
-def _encode_mpcc(params):
-    """Encode MPCC param dict to [0,1] vector."""
-    vec = np.zeros(len(MPCC_PARAM_SPEC))
-    for i, spec in enumerate(MPCC_PARAM_SPEC):
-        val = params[spec["name"]]
-        lo, hi = spec["bounds"]
-        if spec["log_scale"]:
-            val = math.log10(val)
+# ---------------------------------------------------------------------------
+# Generic [0,1] encoding for a param spec
+# ---------------------------------------------------------------------------
+
+def encode(params, spec):
+    vec = np.zeros(len(spec))
+    for i, s in enumerate(spec):
+        val = params[s["name"]]
+        lo, hi = s["bounds"]
+        if s.get("log_scale"):
+            val = math.log10(max(val, 1e-300))
         vec[i] = (val - lo) / (hi - lo)
     return np.clip(vec, 0.0, 1.0)
 
 
-def _decode_mpcc(vec):
-    """Decode [0,1] vector to MPCC param dict."""
-    params = {}
-    for i, spec in enumerate(MPCC_PARAM_SPEC):
-        lo, hi = spec["bounds"]
-        val = lo + vec[i] * (hi - lo)
-        if spec["log_scale"]:
+def decode(vec, spec):
+    out = {}
+    for i, s in enumerate(spec):
+        v = float(np.clip(vec[i], 0.0, 1.0))
+        lo, hi = s["bounds"]
+        val = lo + v * (hi - lo)
+        if s.get("log_scale"):
             val = 10.0 ** val
-        if "discrete_step" in spec:
-            val = round(val / spec["discrete_step"]) * spec["discrete_step"]
-        params[spec["name"]] = val
-    return params
+        if "discrete_step" in s:
+            st = s["discrete_step"]
+            val = max(lo, min(hi, round(round(val / st) * st, 6)))
+        out[s["name"]] = val
+    return out
 
 
-def _eval_mpcc_single(args):
-    """Evaluate one MPCC parameter vector with GAM speed model."""
-    (param_vec, base_config, gam_model_path, train_data,
-     task_configs, centerlines) = args
+def apply_params(cfg, params):
+    """Apply fitted params to a persona config (in place)."""
+    for k, v in params.items():
+        if k == "Th":
+            cfg["Th"] = v
+        elif k in REF_PATH_KEYS:
+            cfg.setdefault("reference_path", {})[k] = v
+        else:
+            cfg.setdefault("planner_weights", {})[k] = v
 
-    params = _decode_mpcc(param_vec)
 
-    cfg = copy.deepcopy(base_config)
-    _apply_params(cfg, params)
-    cfg["nc"] = [0, 0]
+# ---------------------------------------------------------------------------
+# Data + tasks
+# ---------------------------------------------------------------------------
 
-    # Load GAM model
-    gam_model = GAMSpeedModel.load(gam_model_path)
+def load_participant(pid):
+    """Returns (rounds_by_tid, tid_to_condition, tid_to_bucket).
+    rounds_by_tid: {tid: [round dict with trajectory, speeds, timestamps, completion_time, condition]}"""
+    tid_to_condition, tid_to_bucket = em.scan_conditions(HUMAN_DATA_DIR)
+    tids = [t for t, b in tid_to_bucket.items() if b in ("steering", "id4scs_w2n", "id4scs_n2w", "fitts")]
+    all_data = em.load_trials_by_participant(tids, HUMAN_DATA_DIR)
+    if pid not in all_data:
+        raise FileNotFoundError(f"No data for participant {pid} in {HUMAN_DATA_DIR}")
+    rounds_by_tid = {tid: [d[k] for k in sorted(d)] for tid, d in all_data[pid].items() if d}
+    return rounds_by_tid, tid_to_condition, tid_to_bucket
 
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".json", prefix="gam_fit_")
-    os.close(tmp_fd)
+
+def build_tunnel_tasks(tid_to_condition, tid_to_bucket):
+    """{tid: (task_config, centerline, half_width)} for steering + ID4SCS."""
+    out = {}
+    for tid, b in tid_to_bucket.items():
+        cond = tid_to_condition[tid]
+        if b == "steering":
+            tc, cl = em.build_steering_task_config(cond)
+            hw = cond["tunnelWidth"] * 0.5
+        elif b in ("id4scs_w2n", "id4scs_n2w"):
+            tc, cl = em._build_wide_to_narrow_config(cond["segment1Width"], cond["segment2Width"], cond.get("curvature", 0.0))
+            hw = min(cond["segment1Width"], cond["segment2Width"]) * 0.5
+        else:
+            continue
+        tc = dict(tc); tc["max_steps"] = MAX_SIM_STEPS
+        out[tid] = (tc, [list(map(float, p)) for p in cl], hw)
+    return out
+
+
+def split_tunnel(rounds_by_tid, tid_to_condition, tid_to_bucket):
+    train, test = {}, {}
+    for tid, rounds in rounds_by_tid.items():
+        b = tid_to_bucket.get(tid)
+        if b == "steering":
+            w = round(tid_to_condition[tid]["tunnelWidth"], 3)
+            (train if w in TRAIN_WIDTHS else test)[tid] = rounds
+        elif b in ("id4scs_w2n", "id4scs_n2w"):
+            test[tid] = rounds
+    return train, test
+
+
+def split_pointing(rounds_by_tid, tid_to_condition, tid_to_bucket):
+    train, test = {}, {}
+    for tid, rounds in rounds_by_tid.items():
+        if tid_to_bucket.get(tid) != "fitts":
+            continue
+        R = round(tid_to_condition[tid]["targetRadius"], 4)
+        (train if R in POINT_TRAIN_R else test)[tid] = rounds
+    return train, test
+
+
+# ---------------------------------------------------------------------------
+# Simulation helpers
+# ---------------------------------------------------------------------------
+
+def _smooth_speeds(traj, interval):
+    n = len(traj)
+    raw = []
+    for i in range(n):
+        if n < 2:
+            raw.append(0.0); continue
+        if i == 0:
+            p0, p1, dt = traj[0], traj[1], interval
+        elif i == n - 1:
+            p0, p1, dt = traj[-2], traj[-1], interval
+        else:
+            p0, p1, dt = traj[i - 1], traj[i + 1], 2.0 * interval
+        raw.append(math.hypot(p1[0] - p0[0], p1[1] - p0[1]) / dt)
+    half = 2
+    return [sum(raw[max(0, i - half):min(n, i + half + 1)]) / (min(n, i + half + 1) - max(0, i - half)) for i in range(n)]
+
+
+def run_single_sim(sim, task_config, target_radius=None):
+    """One noiseless-or-not simulation. Returns (traj_m, speeds, interval)."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
+        json.dump(task_config, tf)
+        path = tf.name
     try:
-        with open(tmp_path, "w") as f:
-            json.dump(cfg, f)
-
-        sim = CursorSimulator(str(tmp_path))
-        sim.speed_model = gam_model
-
-        total_loss = 0.0
-        n_tasks = 0
-        for tid in sorted(train_data.keys()):
-            rounds = train_data[tid]
-            n_tasks += 1
-
-            try:
-                model_traj, model_speeds, sim_interval = run_single_sim(
-                    sim, task_configs[tid]
-                )
-            except Exception:
-                total_loss += 1e6
-                continue
-
-            if len(model_traj) < 5:
-                total_loss += 1e6
-                continue
-
-            # Check completion
-            cl = np.array(centerlines[tid])
-            last_pt = np.array(model_traj[-1])
-            cl_diffs = np.diff(cl, axis=0)
-            cl_lens = np.linalg.norm(cl_diffs, axis=1)
-            cl_cum = np.concatenate([[0.0], np.cumsum(cl_lens)])
-            cl_total = cl_cum[-1]
-            best_arc = 0.0
-            for i in range(len(cl) - 1):
-                seg = cl[i + 1] - cl[i]
-                seg_len2 = np.dot(seg, seg)
-                t = (0.0 if seg_len2 < 1e-18
-                     else float(np.clip(np.dot(last_pt - cl[i], seg) / seg_len2, 0.0, 1.0)))
-                arc = cl_cum[i] + t * cl_lens[i]
-                if arc > best_arc:
-                    best_arc = arc
-            completion = best_arc / cl_total if cl_total > 0 else 0.0
-
-            if len(model_traj) >= MAX_SIM_STEPS and completion < 0.95:
-                total_loss += INCOMPLETE_PENALTY * (1.0 - completion)
-                continue
-
-            half_w = TRIAL_CONDITIONS[tid]["width"] * 0.5
-            round_losses = []
-            for human_trial in rounds:
-                metrics = compute_trial_metrics(
-                    model_traj, model_speeds, human_trial, centerlines[tid],
-                    sim_interval=sim_interval, tunnel_half_width=half_w,
-                )
-                round_losses.append(metrics_to_loss(metrics))
-            total_loss += sum(round_losses) / len(round_losses)
-
-        if n_tasks > 0:
-            total_loss = total_loss / n_tasks
-
-        return total_loss
-    finally:
-        os.unlink(tmp_path)
-
-
-def fit_mpcc_params(base_config, gam_model_path, train_data,
-                    task_configs, centerlines, time_limit, seed,
-                    cmaes_task_ids=None, n_workers=None, sigma0=0.15,
-                    popsize=12):
-    """Stage 2: Fit MPCC tracking params with CMA-ES.
-
-    The GAM speed model is fixed; only MPCC params are optimized.
-
-    Returns:
-        fitted_params, best_loss, loss_history
-    """
-    import cma
-
-    print("\n--- Stage 2: Fitting MPCC params via CMA-ES ---")
-
-    # Initial MPCC params from config
-    initial_params = {}
-    for spec in MPCC_PARAM_SPEC:
-        name = spec["name"]
-        ck = spec.get("config_key")
-        if ck == "top_level" or name in _TOP_LEVEL_PARAMS:
-            initial_params[name] = base_config.get(
-                name, base_config.get("planner_weights", {}).get(name))
-        elif ck == "reference_path":
-            initial_params[name] = base_config.get("reference_path", {}).get(
-                name, base_config.get("planner_weights", {}).get(name))
-        else:
-            initial_params[name] = base_config["planner_weights"][name]
-
-    x0 = _encode_mpcc(initial_params)
-
-    if n_workers is None:
-        n_workers = min(multiprocessing.cpu_count(), popsize)
-
-    # Optionally restrict CMA-ES to a task subset for efficiency
-    if cmaes_task_ids is not None:
-        cmaes_data = {tid: rounds for tid, rounds in train_data.items()
-                      if tid in cmaes_task_ids}
-        print(f"  CMA-ES task subset: {sorted(cmaes_data.keys())} "
-              f"({len(cmaes_data)} of {len(train_data)} train tasks)")
-    else:
-        cmaes_data = train_data
-
-    shared_args = (base_config, gam_model_path, cmaes_data,
-                   task_configs, centerlines)
-
-    def obj_fn(x):
-        return _eval_mpcc_single((x, *shared_args))
-
-    initial_loss = obj_fn(x0)
-    print(f"  Initial loss: {initial_loss:.6f}")
-    print(f"  Using {n_workers} workers, {len(MPCC_PARAM_SPEC)} params")
-
-    n_params = len(MPCC_PARAM_SPEC)
-    es = cma.CMAEvolutionStrategy(x0.tolist(), sigma0, {
-        "bounds": [[0.0] * n_params, [1.0] * n_params],
-        "popsize": popsize,
-        "seed": seed,
-        "verb_disp": 0, "verb_log": 0, "verb_filenameprefix": "",
-        "verbose": -9,
-    })
-
-    best_x = x0.copy()
-    best_loss = initial_loss
-    loss_history = [{"generation": 0, "best_loss": initial_loss,
-                     "mean_loss": initial_loss, "elapsed_sec": 0.0}]
-
-    start = time.time()
-    generation = 0
-
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        while not es.stop():
-            elapsed = time.time() - start
-            if elapsed > time_limit:
-                print(f"  Time limit reached ({elapsed:.0f}s)")
-                break
-
-            solutions = es.ask()
-            eval_args = [(x, *shared_args) for x in solutions]
-            fitness = pool.map(_eval_mpcc_single, eval_args)
-            es.tell(solutions, fitness)
-
-            generation += 1
-            gen_best_idx = int(np.argmin(fitness))
-            if fitness[gen_best_idx] < best_loss:
-                best_loss = fitness[gen_best_idx]
-                best_x = np.array(solutions[gen_best_idx]).copy()
-
-            elapsed = time.time() - start
-            loss_history.append({
-                "generation": generation,
-                "best_loss": float(best_loss),
-                "mean_loss": float(np.mean(fitness)),
-                "elapsed_sec": round(elapsed, 1),
-            })
-            print(f"  Gen {generation:3d}: best={best_loss:.6f}  "
-                  f"mean={np.mean(fitness):.6f}  elapsed={elapsed:.0f}s",
-                  flush=True)
-
-    fitted_params = _decode_mpcc(best_x)
-    total_elapsed = time.time() - start
-    print(f"\n  Stage 2 complete: {generation} generations, {total_elapsed:.0f}s")
-    for name, val in fitted_params.items():
-        print(f"    {name:20s}: {initial_params[name]:.6g} -> {val:.6g}")
-
-    return fitted_params, best_loss, loss_history
-
-
-# ---------------------------------------------------------------------------
-# Full three-stage pipeline
-# ---------------------------------------------------------------------------
-
-def run_two_stage_fitting(pid, base_config_path, time_limit=1800, seed=42,
-                          popsize=12, n_workers=None):
-    """Run complete three-stage fitting: ref path + GAM + MPCC.
-
-    Phase 0: Fit reference path params (spatial-only, ~10-30s).
-    Stage 1: Fit GAM speed model from human data (~1s).
-    Stage 2: Fit MPCC tracking params with GAM fixed (remaining time).
-
-    Args:
-        pid: Participant ID.
-        base_config_path: Path to initial config JSON.
-        time_limit: Total time limit in seconds.
-        seed: Random seed.
-
-    Returns:
-        results dict with fitted config, GAM model path, metrics.
-    """
-    print(f"Three-stage GAM fitting for {pid}")
-    print(f"Time limit: {time_limit}s, seed: {seed}")
-
-    # Load config
-    with open(base_config_path) as f:
-        base_config = json.load(f)
-
-    # Load human data
-    participant_data = load_participant_data(pid)
-    train_data, test_data = split_train_test(participant_data)
-    print(f"Train/test split (width-based):")
-    print(f"  Train tasks ({len(train_data)}): {sorted(train_data.keys())}")
-    print(f"  Test tasks  ({len(test_data)}): {sorted(test_data.keys())}")
-
-    # Build tasks
-    task_configs, centerlines = build_all_tasks()
-
-    total_start = time.time()
-
-    # Phase 0: Fit reference path params (spatial-only, ~60-300s)
-    # Use 5% of budget (capped at 300s). Each generation takes ~48s,
-    # so 300s ≈ 6 generations.
-    ref_time_budget = min(300.0, time_limit * 0.05)
-    fitted_ref, ref_loss, ref_history = fit_reference_path_params(
-        train_data, task_configs, base_config,
-        time_limit=ref_time_budget, seed=seed,
-    )
-
-    # Apply fitted ref path params to base config for downstream stages
-    base_config.setdefault("reference_path", {}).update(fitted_ref)
-
-    phase0_elapsed = time.time() - total_start
-
-    # Stage 1: Fit GAM (~1s)
-    # Use ALL steering data (train + test) — fast direct fit, no overfitting risk.
-    # Exclude straight tunnels: GAM can't model their inverted-U speed profile
-    # (kappa=0 everywhere gives constant output).
-    task_geometry = _precompute_task_geometry(task_configs)
-    all_steering = {tid: rounds for tid, rounds in {**train_data, **test_data}.items()
-                    if tid in STEERING_TIDS}
-    print(f"  GAM training on {len(all_steering)} steering tasks "
-          f"(excluded {len(train_data) + len(test_data) - len(all_steering)} straight)")
-    gam_model = fit_gam_speed_model(
-        all_steering, centerlines, TRIAL_CONDITIONS,
-        task_geometry=task_geometry, ref_path_params=fitted_ref,
-    )
-
-    # Save GAM model
-    results_dir = Path(__file__).parent / "results"
-    results_dir.mkdir(exist_ok=True)
-    gam_path = str(results_dir / f"{pid}_gam_s{seed}.pkl")
-    gam_model.save(gam_path)
-    print(f"  GAM model saved to {gam_path}")
-
-    stage1_elapsed = time.time() - total_start - phase0_elapsed
-
-    # Compute human variability scales for loss normalization
-    compute_human_variability_scales(train_data, centerlines)
-
-    remaining = time_limit - (time.time() - total_start)
-
-    # Stage 2: Fit MPCC params (ref path params fixed from Phase 0)
-    if remaining > 30:
-        fitted_mpcc, best_loss, history = fit_mpcc_params(
-            base_config, gam_path, train_data,
-            task_configs, centerlines,
-            time_limit=remaining, seed=seed,
-            cmaes_task_ids=TRAIN_TIDS,  # use full training set
-            n_workers=n_workers, popsize=popsize,
+        traj_raw = sim.generate_trajectory_with_waypoints(
+            task_file=path,
+            max_steps=task_config.get("max_steps", MAX_SIM_STEPS),
+            target_radius=target_radius if target_radius is not None else task_config.get("target_radius", 0.01),
+            use_optimal_path=True,
         )
+    finally:
+        os.unlink(path)
+    traj = [[x * 0.001, y * 0.001] for x, y, _ in traj_raw]
+    return traj, _smooth_speeds(traj, sim.interval), sim.interval
 
-        # Build final config
-        final_config = copy.deepcopy(base_config)
-        _apply_params(final_config, fitted_mpcc)
 
-        # Validation: evaluate on full train set and test set
-        best_x = _encode_mpcc(fitted_mpcc)
-        val_args = (base_config, gam_path, train_data, task_configs, centerlines)
-        train_loss = _eval_mpcc_single((best_x, *val_args))
-        print(f"\n  Validation — full train loss ({len(train_data)} tasks): {train_loss:.6f}")
+def _make_sim(cfg, gam_path=None):
+    fd, path = tempfile.mkstemp(suffix=".json", prefix="fit_cfg_")
+    os.close(fd)
+    with open(path, "w") as f:
+        json.dump(cfg, f)
+    try:
+        sim = CursorSimulator(path)
+    finally:
+        os.unlink(path)
+    if gam_path is not None:
+        sim.speed_model = GAMSpeedModel.load(gam_path)
+    return sim
 
-        if test_data:
-            test_args = (base_config, gam_path, test_data, task_configs, centerlines)
-            test_loss = _eval_mpcc_single((best_x, *test_args))
-            print(f"  Validation — test loss ({len(test_data)} tasks): {test_loss:.6f}")
-        else:
-            test_loss = None
-    else:
-        print("  Skipping Stage 2: insufficient time remaining")
-        fitted_mpcc = {}
-        best_loss = float('inf')
-        train_loss = float('inf')
-        test_loss = None
-        history = []
-        final_config = base_config
 
-    total_elapsed = time.time() - total_start
+def _completion(traj, centerline):
+    cl = np.asarray(centerline, float); last = np.asarray(traj[-1], float)
+    lens = np.linalg.norm(np.diff(cl, axis=0), axis=1); cum = np.concatenate([[0.0], np.cumsum(lens)])
+    if cum[-1] <= 0:
+        return 0.0
+    best = 0.0
+    for i in range(len(cl) - 1):
+        seg = cl[i + 1] - cl[i]; l2 = float(seg @ seg)
+        t = 0.0 if l2 < 1e-18 else float(np.clip((last - cl[i]) @ seg / l2, 0.0, 1.0))
+        best = max(best, cum[i] + t * lens[i])
+    return best / cum[-1]
 
-    # Build a clean GAM config: only MPCC params + speed_model reference
-    # (no parametric speed params that would be ignored anyway)
-    _PARAMETRIC_SPEED_KEYS = {
-        "desired_speed", "speed_alpha", "speed_reference", "speed_floor",
-        "speed_ceil", "kappa_ref", "kappa_alpha", "kappa_floor",
-        "rate_percentile", "rate_scale", "rate_alpha", "rate_floor",
-        "rate_median_max", "straight_boost", "boost_sharpness", "rate_ceil",
-    }
-    _REF_PATH_KEYS = {
-        "w_cut", "w_suppress", "w_width_exp", "cut_window_frac",
-        "global_clearance_ref",
-    }
-    gam_config = copy.deepcopy(final_config)
-    gam_config.pop("_tuning_notes", None)
-    pw = gam_config.get("planner_weights", {})
-    # Migrate any ref path keys still in planner_weights to reference_path
-    rp = gam_config.setdefault("reference_path", {})
-    for key in _REF_PATH_KEYS:
-        if key in pw and key not in rp:
-            rp[key] = pw[key]
-    for key in _PARAMETRIC_SPEED_KEYS | _REF_PATH_KEYS:
-        pw.pop(key, None)
-    gam_config["speed_model"] = {
-        "type": "gam",
-        "path": f"{pid}_gam_s{seed}.pkl",
-    }
 
-    gam_config_path = results_dir / f"{pid}_gam_config_s{seed}.json"
-    with open(gam_config_path, "w") as f:
-        json.dump(gam_config, f, indent=2, default=str)
-    print(f"\nGAM config saved to {gam_config_path}")
+# ---------------------------------------------------------------------------
+# Phase 0: reference-path params (spatial only)
+# ---------------------------------------------------------------------------
 
-    # Save full results (with all details for reproducibility)
-    result = {
-        "participant_id": pid,
-        "seed": seed,
-        "gam_model_path": gam_path,
-        "gam_config_path": str(gam_config_path),
-        "fitted_ref_path_params": fitted_ref,
-        "ref_path_loss": ref_loss,
-        "fitted_mpcc_params": fitted_mpcc,
-        "best_loss": best_loss,
-        "train_loss": train_loss,
-        "test_loss": test_loss,
-        "train_tids": sorted(train_data.keys()),
-        "test_tids": sorted(test_data.keys()),
-        "cmaes_tids": sorted(CMAES_TIDS),
-        "total_elapsed_sec": round(total_elapsed, 1),
-        "phase0_elapsed_sec": round(phase0_elapsed, 1),
-        "stage1_elapsed_sec": round(stage1_elapsed, 1),
-        "final_config": final_config,
-    }
+def _waypoints_m(task_config):
+    sw, sh = task_config["screen_width"], task_config["screen_height"]
+    swm = 0.46; shm = sh / sw * swm
+    return [(x / sw * swm, y / sh * shm) for x, y in task_config["waypoints"]]
 
-    result_path = results_dir / f"{pid}_gam_fit_s{seed}.json"
-    with open(result_path, "w") as f:
+
+def _precompute_task_geometry(task_configs, margin=0.0):
+    geometry = {}
+    for tid, tc in task_configs.items():
+        wp = _waypoints_m(tc)
+        cc = None; cart = []; width = None
+        if tc.get("constraints") is not None:
+            cc = parse_constraints_from_json(tc["constraints"])
+            for region in cc.regions:
+                if isinstance(region.geometry, PathConstraint):
+                    w = region.geometry.width
+                    width = float(min(w) if isinstance(w, (list, tuple)) else w)
+                elif isinstance(region.geometry, (RectangleConstraint, PolygonConstraint)):
+                    cart.append(region)
+        if width is None:
+            width = 0.02
+        spline = ReferencePath(wp, s=0.0, k=3)
+        cb = convert_constraints_to_corridor_bounds(cc, spline, default_margin=margin) if cc is not None else None
+        geometry[tid] = {"waypoints_norm": wp, "tunnel_width": width, "centerline_spline": spline,
+                         "corridor_bounds": cb, "cartesian_regions": cart, "margin": margin}
+    return geometry
+
+
+def _build_ref_path_from_geometry(geom, rp):
+    ref = generate_optimal_reference_path(
+        tunnel_path=geom["waypoints_norm"], tunnel_width=geom["tunnel_width"], margin=geom["margin"],
+        w_cut=rp["w_cut"], w_suppress=rp["w_suppress"], w_width_exp=rp["w_width_exp"],
+        cut_window_frac=rp["cut_window_frac"], global_clearance_ref=rp["global_clearance_ref"],
+        cartesian_constraints=geom["cartesian_regions"] or None, corridor_bounds=geom["corridor_bounds"],
+        centerline_cache=geom["centerline_spline"])
+    thetas = np.linspace(0, ref.total_length, 200)
+    return np.array([ref(t) for t in thetas]), ref
+
+
+def _eval_ref_path_spatial(vec, train_data, geometry):
+    rp = decode(vec, REF_PATH_PARAM_SPEC)
+    total, n = 0.0, 0
+    for tid in sorted(train_data):
+        rounds = train_data[tid]
+        if not rounds or tid not in geometry:
+            continue
+        n += 1
+        try:
+            poly, _ = _build_ref_path_from_geometry(geometry[tid], rp)
+        except Exception:
+            total += 1e6; continue
+        rm = []
+        for h in rounds:
+            _, _, lat = resample_by_progress(h["trajectory"], poly, 50)
+            rm.append(float(np.sqrt(np.mean(np.asarray(lat) ** 2))))
+        total += float(np.mean(rm))
+    return total / max(n, 1)
+
+
+def fit_reference_path_params(train_data, task_configs, base_config, time_limit=120.0, seed=42, sigma0=0.3, popsize=8):
+    import cma
+    print("\n--- Phase 0: reference-path params (spatial-only) ---", flush=True)
+    geometry = _precompute_task_geometry(task_configs)
+    rp = base_config.get("reference_path", {}); pw = base_config.get("planner_weights", {})
+    sim_defaults = {"w_cut": 0.01, "w_suppress": 0.0, "w_width_exp": 1.0, "cut_window_frac": 0.05, "global_clearance_ref": 0.025}
+    init = {s["name"]: rp.get(s["name"], pw.get(s["name"], sim_defaults[s["name"]])) for s in REF_PATH_PARAM_SPEC}
+    x0 = encode(init, REF_PATH_PARAM_SPEC)
+    obj = lambda x: _eval_ref_path_spatial(x, train_data, geometry)
+    best_loss = obj(x0); best_x = x0.copy()
+    print(f"  initial loss {best_loss:.6f}  params {init}")
+    es = cma.CMAEvolutionStrategy(x0.tolist(), sigma0, {"bounds": [[0.0] * len(x0), [1.0] * len(x0)], "popsize": popsize,
+                                                        "seed": seed, "maxiter": 300, "verb_disp": 0, "verb_log": 0,
+                                                        "verb_filenameprefix": "", "verbose": -9})
+    t0 = time.time(); gen = 0; hist = [{"generation": 0, "best_loss": best_loss, "elapsed_sec": 0.0}]
+    while not es.stop() and time.time() - t0 < time_limit:
+        sols = es.ask(); fit = [obj(x) for x in sols]; es.tell(sols, fit); gen += 1
+        i = int(np.argmin(fit))
+        if fit[i] < best_loss:
+            best_loss, best_x = fit[i], np.array(sols[i]).copy()
+        hist.append({"generation": gen, "best_loss": float(best_loss), "mean_loss": float(np.mean(fit)), "elapsed_sec": round(time.time() - t0, 1)})
+        if gen % 20 == 0 or gen <= 3:
+            print(f"  gen {gen:3d} best {best_loss:.6f} mean {np.mean(fit):.6f} ({time.time() - t0:.0f}s)", flush=True)
+    fitted = decode(best_x, REF_PATH_PARAM_SPEC)
+    print(f"  Phase 0 done: {gen} generations, {time.time() - t0:.0f}s; fitted {fitted}")
+    return fitted, float(best_loss), hist
+
+
+# ---------------------------------------------------------------------------
+# Stage 1: GAM speed model
+# ---------------------------------------------------------------------------
+
+def fit_gam_speed_model(tunnel_data, task_configs, ref_params):
+    print("\n--- Stage 1: GAM speed model from human tunnel data ---", flush=True)
+    t0 = time.time()
+    geometry = _precompute_task_geometry(task_configs)
+    data = extract_all_speed_data_v2(tunnel_data, geometry, ref_params, _build_ref_path_from_geometry,
+                                     progress_window=GAM_PROGRESS_WINDOW)
+    if data is None:
+        raise ValueError("no speed data extracted")
+    valid = data["speed"] > 0.005
+    cl, ka, dk, sp = data["clearance"][valid], data["kappa"][valid], data["dkappa_ds"][valid], data["speed"][valid]
+    print(f"  {int(valid.sum())} observations from {len(np.unique(data['trial_id']))} tasks; "
+          f"clearance [{cl.min():.4f}, {cl.max():.4f}] m, kappa [{ka.min():.2f}, {ka.max():.2f}], median speed {np.median(sp):.3f} m/s")
+    gam = GAMSpeedModel(base_speed=float(np.median(sp)), floor=0.01, ceil=0.6)
+    gam.fit(cl, ka, dk, sp)
+    pred = gam.compute_speed_profile(np.arange(len(sp)), cl, ka, dk)
+    print(f"  fitted in {time.time() - t0:.1f}s; train corr {np.corrcoef(sp, pred)[0, 1]:.3f}, RMSE {np.sqrt(np.mean((sp - pred) ** 2)):.4f} m/s")
+    return gam
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: tunnel MPCC weights
+# ---------------------------------------------------------------------------
+TUNNEL_SCALES = dict(DEFAULT_TUNNEL_SCALES)
+POINT_SCALES = dict(DEFAULT_POINT_SCALES)
+
+
+def tunnel_metrics(model_traj, model_speeds, human, centerline, sim_interval, half_width):
+    _, _, lat_m = resample_by_progress(model_traj, centerline, N_PROGRESS_BINS)
+    _, _, lat_h = resample_by_progress(human["trajectory"], centerline, N_PROGRESS_BINS)
+    _, spd_m = resample_speeds_by_progress(model_speeds, model_traj, centerline, N_PROGRESS_BINS)
+    _, spd_h = resample_speeds_by_progress(human["speeds"], human["trajectory"], centerline, N_PROGRESS_BINS)
+    sm, sh = spd_m[SPEED_TRIM_START:SPEED_TRIM_END], spd_h[SPEED_TRIM_START:SPEED_TRIM_END]
+    ts = human["timestamps"]
+    human_time = (ts[-1] - ts[0]) / 1000.0 if len(ts) >= 2 else 1.0
+    model_time = len(model_traj) * sim_interval
+    wall = 0.0
+    if half_width:
+        prox = np.abs(np.asarray(lat_m)) / half_width
+        wall = float(np.mean(np.maximum(prox - 0.6, 0.0) ** 2))
+    return {"lateral_rmse": trajectory_rmse(lat_m, lat_h), "speed_rmse": speed_profile_rmse(sm, sh),
+            "speed_corr": speed_profile_correlation(sm, sh),
+            "time_diff": abs(model_time - human_time) / max(human_time, 0.1), "wall_margin": wall}
+
+
+def tunnel_loss(m):
+    loss = 0.0
+    for k in ("lateral_rmse", "speed_rmse", "time_diff"):
+        loss += TUNNEL_LOSS_WEIGHTS[k] * m[k] / TUNNEL_SCALES[k]
+    loss += TUNNEL_LOSS_WEIGHTS["speed_corr"] * (1.0 - m["speed_corr"]) / TUNNEL_SCALES["speed_corr"]
+    return loss + WALL_MARGIN_WEIGHT * m.get("wall_margin", 0.0)
+
+
+def compute_tunnel_scales(train_data, tasks):
+    pm = {"lateral_rmse": [], "speed_rmse": [], "speed_corr": [], "time_diff": []}
+    for tid, rounds in train_data.items():
+        if len(rounds) < 2 or tid not in tasks:
+            continue
+        cl = tasks[tid][1]
+        for a, b in combinations(rounds, 2):
+            _, _, la = resample_by_progress(a["trajectory"], cl, N_PROGRESS_BINS)
+            _, _, lb = resample_by_progress(b["trajectory"], cl, N_PROGRESS_BINS)
+            _, sa = resample_speeds_by_progress(a["speeds"], a["trajectory"], cl, N_PROGRESS_BINS)
+            _, sb = resample_speeds_by_progress(b["speeds"], b["trajectory"], cl, N_PROGRESS_BINS)
+            pm["lateral_rmse"].append(trajectory_rmse(la, lb))
+            sa, sb = sa[SPEED_TRIM_START:SPEED_TRIM_END], sb[SPEED_TRIM_START:SPEED_TRIM_END]
+            pm["speed_rmse"].append(speed_profile_rmse(sa, sb)); pm["speed_corr"].append(1.0 - speed_profile_correlation(sa, sb))
+            ta = (a["timestamps"][-1] - a["timestamps"][0]) / 1000.0; tb = (b["timestamps"][-1] - b["timestamps"][0]) / 1000.0
+            pm["time_diff"].append(abs(ta - tb) / max(tb, 0.1))
+    if pm["lateral_rmse"]:
+        for k in pm:
+            TUNNEL_SCALES[k] = max(float(np.median(pm[k])), 1e-6)
+    print(f"  tunnel human-variability scales: { {k: round(v, 4) for k, v in TUNNEL_SCALES.items()} }")
+    return TUNNEL_SCALES
+
+
+def _eval_tunnel(args):
+    """One CMA-ES candidate on the tunnel training set. Top-level for Pool."""
+    vec, base_config, gam_path, train_data, tasks, scales = args
+    TUNNEL_SCALES.update(scales)
+    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, TUNNEL_PARAM_SPEC)); cfg["nc"] = [0, 0]
+    try:
+        sim = _make_sim(cfg, gam_path)
+    except Exception:
+        return 1e6
+    total, n = 0.0, 0
+    for tid in sorted(train_data):
+        rounds = train_data[tid]; tc, cl, hw = tasks[tid]; n += 1
+        try:
+            traj, spd, dt = run_single_sim(sim, tc)
+        except Exception:
+            total += 1e6; continue
+        if len(traj) < 5:
+            total += 1e6; continue
+        comp = _completion(traj, cl)
+        if len(traj) >= MAX_SIM_STEPS and comp < 0.95:
+            total += INCOMPLETE_PENALTY * (1.0 - comp); continue
+        total += float(np.mean([tunnel_loss(tunnel_metrics(traj, spd, h, cl, dt, hw)) for h in rounds]))
+    return total / max(n, 1)
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: free-space (pointing) LQ weights
+# ---------------------------------------------------------------------------
+
+def _pointing_profile(traj, speeds, times, center, R):
+    """Aligned kinematic descriptors of one pointing round (human or model)."""
+    al = em.align_round(traj, times, center, R)
+    t = np.asarray(times, float)
+    i0 = int(np.searchsorted(t, al["onset_s"] + t[0])); i1 = int(np.searchsorted(t, al["final_entry_s"] + t[0]))
+    i1 = max(i1, i0 + 2); i0 = min(i0, len(traj) - 3)
+    seg_traj = traj[i0:i1 + 1]; seg_spd = speeds[i0:i1 + 1]
+    return {"mt_kin": al["mt_kin_s"], "traj": seg_traj, "speeds": seg_spd,
+            "end_depth": float(np.linalg.norm(np.asarray(traj[-1]) - np.asarray(center)) / R)}
+
+
+def pointing_metrics(model_prof, human_prof, canonical):
+    _, _, lat_m = resample_by_progress(model_prof["traj"], canonical, N_PROGRESS_BINS)
+    _, _, lat_h = resample_by_progress(human_prof["traj"], canonical, N_PROGRESS_BINS)
+    _, spd_m = resample_speeds_by_progress(model_prof["speeds"], model_prof["traj"], canonical, N_PROGRESS_BINS)
+    _, spd_h = resample_speeds_by_progress(human_prof["speeds"], human_prof["traj"], canonical, N_PROGRESS_BINS)
+    return {"mt_rel": abs(model_prof["mt_kin"] - human_prof["mt_kin"]) / max(human_prof["mt_kin"], 0.1),
+            "speed_rmse": speed_profile_rmse(spd_m, spd_h), "speed_corr": speed_profile_correlation(spd_m, spd_h),
+            "end_depth": abs(model_prof["end_depth"] - human_prof["end_depth"]),
+            "lateral_rmse": trajectory_rmse(lat_m, lat_h)}
+
+
+def pointing_loss(m):
+    loss = 0.0
+    for k in ("mt_rel", "speed_rmse", "end_depth", "lateral_rmse"):
+        loss += POINT_LOSS_WEIGHTS[k] * m[k] / POINT_SCALES[k]
+    return loss + POINT_LOSS_WEIGHTS["speed_corr"] * (1.0 - m["speed_corr"]) / POINT_SCALES["speed_corr"]
+
+
+def _human_pointing_profiles(rounds):
+    out = []
+    for h in rounds:
+        R = h["condition"]["targetRadius"]; ctr = em.pointing_target_center(h)
+        times = [(t - h["timestamps"][0]) / 1000.0 for t in h["timestamps"]]
+        prof = _pointing_profile(h["trajectory"], h["speeds"], times, ctr, R)
+        prof["center"] = ctr; prof["R"] = R; prof["start"] = list(map(float, h["trajectory"][0]))
+        prof["canonical"] = [prof["start"], list(map(float, ctr))]; prof["round"] = h
+        out.append(prof)
+    return out
+
+
+def compute_pointing_scales(train_data):
+    pm = {k: [] for k in POINT_LOSS_WEIGHTS}
+    for tid, rounds in train_data.items():
+        profs = _human_pointing_profiles(rounds)
+        for a, b in combinations(profs, 2):
+            m = pointing_metrics(a, b, b["canonical"])
+            for k in pm:
+                pm[k].append(1.0 - m[k] if k == "speed_corr" else m[k])
+    if pm["mt_rel"]:
+        for k in pm:
+            POINT_SCALES[k] = max(float(np.median(pm[k])), 1e-6)
+    print(f"  pointing human-variability scales: { {k: round(v, 4) for k, v in POINT_SCALES.items()} }")
+    return POINT_SCALES
+
+
+def _eval_pointing(args):
+    """One CMA-ES candidate on the pointing training set (one noiseless sim per human round)."""
+    vec, base_config, gam_path, train_data, scales = args
+    POINT_SCALES.update(scales)
+    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, POINTING_PARAM_SPEC)); cfg["nc"] = [0, 0]
+    try:
+        sim = _make_sim(cfg, gam_path)
+    except Exception:
+        return 1e6
+    total, n = 0.0, 0
+    for tid in sorted(train_data):
+        for hp in _human_pointing_profiles(train_data[tid]):
+            n += 1
+            try:
+                tc, _, _ = em.build_fitts_bypass_config(hp["round"], hp["R"], max_steps=MAX_SIM_STEPS)
+                traj, spd, dt = run_single_sim(sim, tc, target_radius=hp["R"])
+            except Exception:
+                total += 1e6; continue
+            if len(traj) < 5:
+                total += 1e6; continue
+            if len(traj) >= MAX_SIM_STEPS:
+                total += INCOMPLETE_PENALTY; continue
+            mp = _pointing_profile(traj, spd, [i * dt for i in range(len(traj))], hp["center"], hp["R"])
+            total += pointing_loss(pointing_metrics(mp, hp, hp["canonical"]))
+    return total / max(n, 1)
+
+
+# ---------------------------------------------------------------------------
+# CMA-ES driver (shared by Stages 2 and 3)
+# ---------------------------------------------------------------------------
+
+def run_cmaes(label, spec, initial_params, eval_fn, shared_args, time_limit, seed, popsize, n_workers, sigma0=0.15):
+    import cma
+    print(f"\n--- {label}: CMA-ES over {[s['name'] for s in spec]} ---", flush=True)
+    x0 = encode(initial_params, spec)
+    n_workers = n_workers or min(multiprocessing.cpu_count(), popsize)
+    initial_loss = eval_fn((x0, *shared_args))
+    print(f"  initial loss {initial_loss:.4f}; {n_workers} workers, popsize {popsize}, budget {time_limit:.0f}s", flush=True)
+    es = cma.CMAEvolutionStrategy(x0.tolist(), sigma0, {"bounds": [[0.0] * len(x0), [1.0] * len(x0)], "popsize": popsize,
+                                                        "seed": seed, "verb_disp": 0, "verb_log": 0, "verb_filenameprefix": "", "verbose": -9})
+    best_x, best_loss = x0.copy(), initial_loss
+    hist = [{"generation": 0, "best_loss": float(best_loss), "elapsed_sec": 0.0}]
+    t0 = time.time(); gen = 0
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        while not es.stop() and time.time() - t0 < time_limit:
+            sols = es.ask()
+            fit = pool.map(eval_fn, [(x, *shared_args) for x in sols])
+            es.tell(sols, fit); gen += 1
+            i = int(np.argmin(fit))
+            if fit[i] < best_loss:
+                best_loss, best_x = fit[i], np.array(sols[i]).copy()
+            hist.append({"generation": gen, "best_loss": float(best_loss), "mean_loss": float(np.mean(fit)), "elapsed_sec": round(time.time() - t0, 1)})
+            print(f"  gen {gen:3d} best {best_loss:.4f} mean {np.mean(fit):.4f} ({time.time() - t0:.0f}s)", flush=True)
+    fitted = decode(best_x, spec)
+    print(f"  {label} done: {gen} generations, {time.time() - t0:.0f}s")
+    for k, v in fitted.items():
+        print(f"    {k:16s}: {initial_params[k]:.6g} -> {v:.6g}")
+    return fitted, float(best_loss), hist
+
+
+# ---------------------------------------------------------------------------
+# Full pipeline
+# ---------------------------------------------------------------------------
+
+def run_fitting(pid, base_config_path, time_limit, seed, popsize, n_workers, stages="all"):
+    print(f"Fitting {pid} | base config {base_config_path} | budget {time_limit}s | seed {seed} | stages {stages}")
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(base_config_path) as f:
+        base = json.load(f)
+    base.pop("_description", None); base.pop("_tuning_notes", None)
+    sm = base.get("speed_model") or {}
+    if sm.get("path") and not Path(sm["path"]).is_absolute():   # temp configs are written elsewhere
+        sm["path"] = str((Path(base_config_path).resolve().parent / sm["path"]).resolve())
+
+    rounds_by_tid, tid_to_condition, tid_to_bucket = load_participant(pid)
+    tunnel_tasks = build_tunnel_tasks(tid_to_condition, tid_to_bucket)
+    tun_train, tun_test = split_tunnel(rounds_by_tid, tid_to_condition, tid_to_bucket)
+    pt_train, pt_test = split_pointing(rounds_by_tid, tid_to_condition, tid_to_bucket)
+    print(f"tunnel train {sorted(tun_train)}\ntunnel test  {sorted(tun_test)}\npointing train {sorted(pt_train)}\npointing test  {sorted(pt_test)}")
+
+    gam_path = str(RESULTS_DIR / f"{pid}_gam_s{seed}.pkl")
+    cfg_path = RESULTS_DIR / f"{pid}_gam_config_s{seed}.json"
+    fit_path = RESULTS_DIR / f"{pid}_gam_fit_s{seed}.json"
+    result = {"participant_id": pid, "seed": seed, "base_config": str(base_config_path),
+              "tunnel_train_tids": sorted(tun_train), "tunnel_test_tids": sorted(tun_test),
+              "pointing_train_tids": sorted(pt_train), "pointing_test_tids": sorted(pt_test)}
+    if fit_path.exists() and stages == "pointing":
+        with open(fit_path) as f:
+            prev = json.load(f)
+        result.update({k: v for k, v in prev.items() if k not in result})
+        with open(cfg_path) as f:
+            base = json.load(f)
+        base["speed_model"] = {"type": "gam", "path": gam_path}
+        print("  reusing tunnel fit from", cfg_path)
+    T0 = time.time()
+
+    if stages in ("all", "tunnel"):
+        # Phase 0
+        steer_train_tasks = {t: tunnel_tasks[t][0] for t in tun_train}
+        ref_params, ref_loss, ref_hist = fit_reference_path_params(
+            tun_train, steer_train_tasks, base, time_limit=min(300.0, 0.05 * time_limit), seed=seed)
+        base.setdefault("reference_path", {}).update(ref_params)
+        result.update({"fitted_ref_path_params": ref_params, "ref_path_loss": ref_loss})
+        # Stage 1
+        all_tunnel = {**tun_train, **tun_test}
+        gam = fit_gam_speed_model(all_tunnel, {t: tunnel_tasks[t][0] for t in all_tunnel}, ref_params)
+        gam.save(gam_path); print(f"  GAM saved to {gam_path}")
+        base["speed_model"] = {"type": "gam", "path": gam_path}
+        # Stage 2
+        compute_tunnel_scales(tun_train, tunnel_tasks)
+        init = {s["name"]: (base["Th"] if s["name"] == "Th" else base["planner_weights"][s["name"]]) for s in TUNNEL_PARAM_SPEC}
+        remaining = time_limit - (time.time() - T0)
+        budget = remaining * (0.80 if stages == "all" else 1.0)
+        fitted_t, best_t, hist_t = run_cmaes("Stage 2 (tunnel)", TUNNEL_PARAM_SPEC, init, _eval_tunnel,
+                                              (base, gam_path, tun_train, tunnel_tasks, dict(TUNNEL_SCALES)),
+                                              budget, seed, popsize, n_workers)
+        apply_params(base, fitted_t)
+        bx = encode(fitted_t, TUNNEL_PARAM_SPEC)
+        train_loss = _eval_tunnel((bx, base, gam_path, tun_train, tunnel_tasks, dict(TUNNEL_SCALES)))
+        test_loss = _eval_tunnel((bx, base, gam_path, tun_test, tunnel_tasks, dict(TUNNEL_SCALES))) if tun_test else None
+        print(f"  tunnel: train loss {train_loss:.4f}  test loss {test_loss}")
+        result.update({"fitted_tunnel_params": fitted_t, "tunnel_best_loss": best_t, "tunnel_train_loss": train_loss,
+                       "tunnel_test_loss": test_loss, "tunnel_scales": dict(TUNNEL_SCALES), "tunnel_history": hist_t})
+        _save_config(base, cfg_path, pid, seed)
+
+    if stages in ("all", "pointing") and pt_train:
+        compute_pointing_scales(pt_train)
+        init = {s["name"]: base["planner_weights"][s["name"]] for s in POINTING_PARAM_SPEC}
+        remaining = max(time_limit - (time.time() - T0), 60.0)
+        fitted_p, best_p, hist_p = run_cmaes("Stage 3 (pointing)", POINTING_PARAM_SPEC, init, _eval_pointing,
+                                              (base, gam_path, pt_train, dict(POINT_SCALES)), remaining, seed, popsize, n_workers)
+        apply_params(base, fitted_p)
+        bx = encode(fitted_p, POINTING_PARAM_SPEC)
+        p_train = _eval_pointing((bx, base, gam_path, pt_train, dict(POINT_SCALES)))
+        p_test = _eval_pointing((bx, base, gam_path, pt_test, dict(POINT_SCALES))) if pt_test else None
+        print(f"  pointing: train loss {p_train:.4f}  test loss {p_test}")
+        result.update({"fitted_pointing_params": fitted_p, "pointing_best_loss": best_p, "pointing_train_loss": p_train,
+                       "pointing_test_loss": p_test, "pointing_scales": dict(POINT_SCALES), "pointing_history": hist_p})
+        _save_config(base, cfg_path, pid, seed)
+
+    result["total_elapsed_sec"] = round(time.time() - T0, 1)
+    result["final_config"] = _clean_config(base, pid, seed)
+    with open(fit_path, "w") as f:
         json.dump(result, f, indent=2, default=str)
-    print(f"Full results saved to {result_path}")
-
+    print(f"\nSaved {cfg_path}\nSaved {fit_path}")
     return result
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+def _clean_config(cfg, pid, seed):
+    out = copy.deepcopy(cfg)
+    out["speed_model"] = {"type": "gam", "path": f"{pid}_gam_s{seed}.pkl"}   # relative to results dir
+    out["_description"] = f"Fitted persona for {pid} (seed {seed}); see {pid}_gam_fit_s{seed}.json"
+    return out
+
+
+def _save_config(cfg, path, pid, seed):
+    with open(path, "w") as f:
+        json.dump(_clean_config(cfg, pid, seed), f, indent=2, default=str)
+
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Three-stage model fitting: reference path + GAM speed model + MPCC params"
-    )
-    parser.add_argument("--pid", required=True, help="Participant ID")
-    parser.add_argument("--config", default=None,
-                        help="Path to initial config JSON")
-    parser.add_argument("--time-limit", type=int, default=1800,
-                        help="Total time limit in seconds (default: 1800)")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--popsize", type=int, default=12,
-                        help="CMA-ES population size for Stage 2 (default: 12)")
-    parser.add_argument("--n-workers", type=int, default=None,
-                        help="Number of parallel workers for Stage 2 (default: min(cpu_count, popsize))")
-
-    args = parser.parse_args()
-
-    config_path = args.config
-    if config_path is None:
-        config_path = str(Path(__file__).parent / "initial_user_config.json")
-
-    run_two_stage_fitting(
-        pid=args.pid,
-        base_config_path=config_path,
-        time_limit=args.time_limit,
-        seed=args.seed,
-        popsize=args.popsize,
-        n_workers=args.n_workers,
-    )
+    ap = argparse.ArgumentParser(description="Per-participant fitting: ref path + GAM + tunnel MPCC + pointing LQ weights")
+    ap.add_argument("--pid", required=True)
+    ap.add_argument("--config", default=str(DEFAULT_BASE_CONFIG), help="base persona JSON (default: office_worker.json)")
+    ap.add_argument("--time-limit", type=int, default=1800, help="total budget in seconds")
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--popsize", type=int, default=12)
+    ap.add_argument("--n-workers", type=int, default=None)
+    ap.add_argument("--stages", choices=["all", "tunnel", "pointing"], default="all")
+    a = ap.parse_args()
+    run_fitting(a.pid, a.config, a.time_limit, a.seed, a.popsize, a.n_workers, a.stages)
 
 
 if __name__ == "__main__":
