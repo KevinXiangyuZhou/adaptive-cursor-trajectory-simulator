@@ -12,7 +12,7 @@ module load python3.11-anaconda/2024.02
 python -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
-pip install "numpy<2.0" scipy cma pygam matplotlib pandas
+pip install "numpy<2.0" scipy cma pygam matplotlib pandas seaborn
 pip install -e hcs_package/
 
 echo "Setup complete. Next: sbatch fit_all_participants.sh   (then eval_all_participants.sh)"

@@ -27,7 +27,7 @@ Always `sbatch` from the repo root.
 ## 2. One-time setup
 
 ```bash
-bash setup.sh        # venv, deps (numpy<2, scipy, cma, pygam, matplotlib, pandas), pip install -e hcs_package/
+bash setup.sh        # venv, deps (numpy<2, scipy, cma, pygam, matplotlib, pandas, seaborn), pip install -e hcs_package/
 ```
 
 ## 3. Fitting jobs (one array task per line of participants.txt)
