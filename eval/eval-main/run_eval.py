@@ -961,9 +961,29 @@ def write_id4scs_outputs(rows, condition_summaries, direction_label, out_dir, fi
     _write_dict_rows_csv(sorted(condition_summaries, key=lambda r: r["tid"]),
                           out_dir / f"{filename_prefix}_condition_summary.csv")
 
-    clean_rows = _exclude_timed_out(rows)
-    for source, tag in (("Human", "human"), ("Simulator", "model")):
-        sub_rows = [r for r in clean_rows if r["source"] == source]
+    # Averaged-across-participants points, same intent as Steering/Fitts, but
+    # collapsed only to one point per (participant, tid) — i.e. averaging away
+    # each participant's within-condition repetitions — not all the way down
+    # to one point per tid. With only 3 distinct trial_ids for ID4SCS, a full
+    # per-tid collapse leaves 3 points, below fit_id4scs's minimum of 5 to fit
+    # a,b,c,d at all. condition_summaries already has exactly this granularity
+    # (one row per participant x tid); S1/C/S2 recomputed here with the same
+    # formula _mk_row uses above (W1/W2 in metres).
+    def _agg_points(mt_key):
+        pts = []
+        for r in condition_summaries:
+            if r.get("n_timed_out", 0) not in (0, "0"):
+                continue
+            W1, W2 = r["W1_mm"] / 1000.0, r["W2_mm"] / 1000.0
+            A1, A2 = r["A1_m"], r["A2_m"]
+            s1 = (A1 - 5 * W1) / W1 if W1 > 0 else 0.0
+            c = math.log2(5 * W1 / W2 + 1) if W2 > 0 else 0.0
+            s2 = A2 / W2 if W2 > 0 else 0.0
+            pts.append({"S1": s1, "C": c, "S2": s2, "MT": r[mt_key]})
+        return pts
+
+    for source, tag, mt_key in (("Human", "human", "human_time_mean_s"), ("Simulator", "model", "model_time_mean_s")):
+        sub_rows = _agg_points(mt_key)
         reg = law_stats.fit_id4scs(sub_rows)
         reg_path = out_dir / f"{filename_prefix}_{tag}_regression.json"
         with open(reg_path, "w") as f:
@@ -974,7 +994,7 @@ def write_id4scs_outputs(rows, condition_summaries, direction_label, out_dir, fi
             law_plot.plot_id4scs_regression(sub_rows, reg, plot_path, f"{direction_label} ({source})")
         else:
             print(f"  Skipped {tag} regression plot for {direction_label}: "
-                  f"only {len(sub_rows)} rows (need >= 5)")
+                  f"only {len(sub_rows)} rows (need >= 5) after averaging within participants")
 
 
 def write_fitts_outputs(rows, condition_summaries):
@@ -1006,22 +1026,46 @@ def write_fitts_outputs(rows, condition_summaries):
             "n_runs": len(sub),
         }
 
+    def _collapse_by_tid(rows_sub, value_keys):
+        """One point per trial condition, averaged across ALL participants —
+        matches the Steering Law plot's methodology (and the original paper's
+        Fig. 3: "each point represents one task condition averaged across
+        participants"). Flat pooled mean per key (not a per-participant-first
+        hierarchical mean) — identical to steering_law_plot's mechanism."""
+        groups = dd(lambda: dd(list))
+        for r in rows_sub:
+            for k in value_keys:
+                if r.get(k) is not None:
+                    groups[r["tid"]][k].append(r[k])
+        return [
+            {"tid": tid, **{k: float(np.mean(v)) for k, v in vals.items() if v}}
+            for tid, vals in groups.items()
+        ]
+
     clean_rows = _exclude_timed_out(rows)
     model_rows = [r for r in clean_rows if r["source"] == "Simulator"]
     human_rows = [r for r in clean_rows if r["source"] == "Human"]
-    model_reg = _fit(model_rows)
-    human_reg = _fit(human_rows)
+
+    # Collapse to one point per trial_id, averaged across participants, before
+    # fitting/plotting — raw per-round rows (fitts_results.csv) are unaffected.
+    model_rows_agg = _collapse_by_tid(model_rows, ["ID", "MT_s", "TP"])
+    human_rows_agg = _collapse_by_tid(human_rows, ["ID", "MT_s", "TP"])
+    model_rows_kin_agg = _collapse_by_tid(model_rows, ["ID", "MT_kin_s", "TP_kin"])
+    human_rows_kin_agg = _collapse_by_tid(human_rows, ["ID", "MT_kin_s", "TP_kin"])
+
+    model_reg = _fit(model_rows_agg)
+    human_reg = _fit(human_rows_agg)
     # Aligned (kinematic) MT: onset -> final target entry, for both sides.
-    model_reg_kin = _fit(model_rows, "MT_kin_s", "TP_kin")
-    human_reg_kin = _fit(human_rows, "MT_kin_s", "TP_kin")
+    model_reg_kin = _fit(model_rows_kin_agg, "MT_kin_s", "TP_kin")
+    human_reg_kin = _fit(human_rows_kin_agg, "MT_kin_s", "TP_kin")
 
     law_plot.plot_fitts_regression(
-        model_rows, human_rows, model_reg, human_reg, FITTS_DIR / "fitts_regression_plot_raw.png"
+        model_rows_agg, human_rows_agg, model_reg, human_reg, FITTS_DIR / "fitts_regression_plot_raw.png"
     )
     def _as_kin(rs):
         return [dict(r, MT_s=r.get("MT_kin_s"), TP=r.get("TP_kin")) for r in rs]
     law_plot.plot_fitts_regression(
-        _as_kin(model_rows), _as_kin(human_rows), model_reg_kin, human_reg_kin,
+        _as_kin(model_rows_kin_agg), _as_kin(human_rows_kin_agg), model_reg_kin, human_reg_kin,
         FITTS_DIR / "fitts_regression_plot.png"
     )
     h_on = [r["onset_s"] for r in human_rows if r.get("onset_s") is not None]
@@ -1038,6 +1082,11 @@ def write_fitts_outputs(rows, condition_summaries):
             "aligned": "MT_kin = final target entry - movement onset (>2 mm displacement), "
                        "both sides; strips human reaction latency and click latency, and the "
                        "model's dwell. 'raw' uses human click time vs model time incl. dwell.",
+            "aggregation": "Regression/plot fit on one point per trial_id, averaged across all "
+                           "participants (flat pooled mean, not a per-participant-first hierarchical "
+                           "mean) — matches the Steering Law plot's methodology and the original "
+                           "paper's Fig. 3 ('each point represents one task condition averaged "
+                           "across participants'). fitts_results.csv retains every raw per-round row.",
             "timed_out_runs_excluded": n_excluded,
         },
         "aligned": {"model": model_reg_kin, "human": human_reg_kin},

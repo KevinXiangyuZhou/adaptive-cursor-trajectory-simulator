@@ -1,0 +1,12 @@
+{
+  "_description": "Unconstrained pointing (Fitts) via MPCC in a wide bypass tunnel - matches human_data trial 55 (P005628)",
+  "env_type": "unconstrained_pointing_mpcc",
+  "screen_width": 460,
+  "screen_height": 260,
+  "target_position": "top",
+  "distance": 0.46,
+  "target_radius": 0.02,
+  "tunnel_width": 10.0,
+  "max_steps": 800,
+  "description": "trial 55: longest distance tier (D), top target position, 20mm radius (easy contrast to trial 52)"
+}
