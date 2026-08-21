@@ -16,7 +16,7 @@
     "desired_speed": 0.2,
     "goal": 1.0,
     "free_velocity": 0.08,
-    "goal_precision": 0.0001
+    "goal_precision": 0.0
   },
   "speed_model": {
     "type": "gam",

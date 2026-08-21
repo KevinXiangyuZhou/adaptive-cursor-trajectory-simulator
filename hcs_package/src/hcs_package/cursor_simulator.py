@@ -4,7 +4,7 @@ import json
 import numpy as np
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any, Union
-from .model import model
+from .model import model, FREE_SPACE_CLEARANCE_M
 from .mpcc_model import reset_warm_start
 from .params import SteeringModelInput, BumpParams, EnvParams, TunnelInfo
 from .reference_path import ReferencePath, generate_optimal_reference_path
@@ -66,10 +66,13 @@ class CursorSimulator:
                 "contour": 20,
                 "lag": 0.05,
                 "desired_speed": 0.2, #default 0.2
-                "goal_precision": 0.0001  # fallback; overridden per-user via user_configurations.
-                                          # 2026-08: with the free-space LQR objective, the well at
-                                          # ~1e-4 gives the human endpoint-depth trend and target
-                                          # re-entry rate; ~3e-4+ over-slows R=5 mm targets.
+                "goal_precision": 0.0  # OFF by default (2026-08-21, matching the gaze-cursor
+                                       # branch decision): seed-averaged ablation on the gaze
+                                       # cohort shows the well explains only ~10% of the Fitts
+                                       # slope at 1e-4 and nothing in steering. The guarded term
+                                       # is kept as a fittable switch — on the Prolific data it
+                                       # was the only term reproducing the endpoint-depth-by-R
+                                       # trend (deeper settling in larger targets).
             },
             "planner_margin": 0.0,
             # Carry the realised cursor acceleration into the next MPC solve.
@@ -116,6 +119,11 @@ class CursorSimulator:
             "replan_latency_s": 0.19,
             "replan_latency_cv": 0.89,
             "replan_deviation_frac": 0.15,
+            # Explicit minimum open-loop interval (s): after a replan no
+            # feedback-driven trigger (deviation, arrival) fires until this
+            # much of the plan has executed — the psychological refractory
+            # period (IC literature fits 0.03-0.05 s). Exhaustion is exempt.
+            "min_open_loop_s": 0.05,
             # Solve-horizon clamp (steps). The fixed-mode default (Th=0.3 ->
             # 6 steps) lies inside the clamp, so the baseline is unaffected.
             # With budget T_min > 0 the binding floor is ceil(T_min/dt), not
@@ -182,6 +190,7 @@ class CursorSimulator:
         self.replan_latency_s = float(config.get('replan_latency_s', 0.19))
         self.replan_latency_cv = float(config.get('replan_latency_cv', 0.89))
         self.replan_deviation_frac = float(config.get('replan_deviation_frac', 0.15))
+        self.min_open_loop_s = float(config.get('min_open_loop_s', 0.05))
         self.horizon_min_steps = int(config.get('horizon_min_steps', 2))
         self.horizon_max_steps = int(config.get('horizon_max_steps', 40))
         # Diagnostics of the most recent generate_* call (replan events etc.).
@@ -190,6 +199,10 @@ class CursorSimulator:
         seed = config['random_seed']
         if seed is not None:
             np.random.seed(seed)
+        # Dedicated generator for replan-latency draws — decoupled from the
+        # global stream so toggling add_noise does not change the latency
+        # sequence (and vice versa).
+        self._replan_rng = np.random.default_rng(seed)
 
         rp_cfg = config.get('reference_path', {})
         pw = self.planner_weights
@@ -458,6 +471,8 @@ class CursorSimulator:
             mode=self.replan_mode, latency_steps=tau_steps,
             latency_cv=self.replan_latency_cv,
             deviation_frac=self.replan_deviation_frac,
+            min_open_loop_steps=max(0, int(round(self.min_open_loop_s / self.interval))),
+            rng=self._replan_rng,
         )
         plan = None            # planned velocity/displacement sequences of the current solve
         theta_track = 0.0      # warm guess for arc-length projection
@@ -489,12 +504,12 @@ class CursorSimulator:
             if (scheduler.mode == 'intermittent'
                     and self.replan_deviation_frac > 0.0
                     and plan is not None and scheduler.plan_idx >= 2
-                    and plan.get('w_solve')):
+                    and plan.get('dev_scale')):
                 k_exec = min(scheduler.plan_idx - 2, plan['n_steps'] - 1)
                 dev = float(np.hypot(
                     cursor_pos[0] - plan['pos_x'][k_exec],
                     cursor_pos[1] - plan['pos_y'][k_exec]))
-                deviation_ratio = dev / plan['w_solve']
+                deviation_ratio = dev / plan['dev_scale']
             trigger = scheduler.needs_replan(
                 theta_now if theta_now is not None else -np.inf,
                 deviation_ratio=deviation_ratio)
@@ -569,19 +584,29 @@ class CursorSimulator:
 
                 cursor_info, plan_debug = model(model_input)
                 c_pos_dx, c_pos_dy, c_vel_x, c_vel_y = cursor_info
-                # Absolute planned positions after each step, and the usable
-                # width at the solve position — the deviation trigger's scale.
+                # Absolute planned positions after each step, and the
+                # deviation trigger's scale: the local usable width in a
+                # corridor. In unconstrained space the clearance saturates
+                # far above any tunnel width and a width-scaled trigger could
+                # never fire — there the scale is the plan's own span (a plan
+                # that has drifted by deviation_frac of the distance it set
+                # out to cover is invalid), floored at the target diameter so
+                # terminal micro-plans keep a sane threshold.
                 w_solve = None
                 if clearance_profile is not None:
                     s_cl, c_cl = clearance_profile
                     w_solve = float(np.interp(theta0, s_cl, c_cl))
+                dev_scale = w_solve if (w_solve and w_solve > 0) else None
+                if dev_scale is not None and dev_scale >= FREE_SPACE_CLEARANCE_M:
+                    span = float(np.hypot(np.sum(c_pos_dx), np.sum(c_pos_dy)))
+                    dev_scale = max(span, 2.0 * target_radius)
                 plan = {
                     'c_pos_dx': c_pos_dx, 'c_pos_dy': c_pos_dy,
                     'c_vel_x': c_vel_x, 'c_vel_y': c_vel_y,
                     'n_steps': len(c_pos_dx),
                     'pos_x': cursor_pos[0] + np.cumsum(c_pos_dx),
                     'pos_y': cursor_pos[1] + np.cumsum(c_pos_dy),
-                    'w_solve': w_solve if w_solve and w_solve > 0 else None,
+                    'dev_scale': dev_scale,
                 }
                 if anchor_s is None:
                     # Fixed-horizon anchor: the plan's own progress at the
@@ -658,6 +683,7 @@ class CursorSimulator:
             'budget_T_min': self.budget_T_min,
             'replan_latency_cv': self.replan_latency_cv,
             'replan_deviation_frac': self.replan_deviation_frac,
+            'min_open_loop_s': self.min_open_loop_s,
             'interval': self.interval,
             'n_steps_executed': len(trajectory),
             'n_solves': len(scheduler.events),

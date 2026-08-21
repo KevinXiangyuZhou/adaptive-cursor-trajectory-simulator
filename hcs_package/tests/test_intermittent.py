@@ -383,3 +383,42 @@ def test_sim_stochastic_latency_varies_cycles(sinusoidal_task):
     assert len(arrivals) >= 2
     cycles = np.diff([e["step"] for e in ev])
     assert len(set(cycles.tolist())) > 1
+
+
+def test_scheduler_refractory_blocks_feedback_triggers():
+    sch = ReplanScheduler(mode="intermittent", latency_steps=0,
+                          deviation_frac=0.15, min_open_loop_steps=3)
+    assert sch.needs_replan(-np.inf) == "init"
+    sch.on_replan(_event(anchor=1.0, n_steps=20), anchor=1.0, plan_len=20)
+    # During the refractory window neither a huge deviation nor arrival fires
+    for _ in range(3):
+        assert sch.needs_replan(2.0, deviation_ratio=10.0) is None
+        assert not sch.wants_theta
+        sch.on_step_executed()
+    # First post-refractory check: the deviation interrupt (higher priority
+    # than arrival) fires immediately
+    assert sch.needs_replan(2.0, deviation_ratio=10.0) == "deviation"
+
+
+def test_scheduler_refractory_exempts_exhaustion():
+    sch = ReplanScheduler(mode="intermittent", min_open_loop_steps=5)
+    assert sch.needs_replan(-np.inf) == "init"
+    sch.on_replan(_event(anchor=np.inf, n_steps=2), anchor=np.inf, plan_len=2)
+    sch.on_step_executed(); sch.on_step_executed()
+    # plan exhausted after 2 steps, well inside the 5-step refractory window
+    assert sch.needs_replan(0.0) == "exhausted"
+
+
+def test_scheduler_dedicated_rng_reproducible_and_decoupled():
+    def draws(rng):
+        sch = ReplanScheduler(mode="intermittent", latency_steps=4,
+                              latency_cv=0.9, rng=rng)
+        return [sch._sample_latency_steps() for _ in range(20)]
+    a = draws(np.random.default_rng(7))
+    b = draws(np.random.default_rng(7))
+    assert a == b and len(set(a)) > 1
+    # dedicated-RNG draws leave the global stream untouched
+    np.random.seed(123); before = np.random.standard_normal()
+    np.random.seed(123); draws(np.random.default_rng(7))
+    after = np.random.standard_normal()
+    assert before == after

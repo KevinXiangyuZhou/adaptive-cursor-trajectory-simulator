@@ -1,0 +1,37 @@
+{
+ "_description": "goal_precision=0 (== gaze-cursor branch objective: well removed, R enters only via dwell termination); otherwise: office_worker + gamma-budget horizon (refit_floor.py sim_params: gamma=0.7, T_min=0.15, lam=0.0, D0=1.021, W_ref=0.026) + intermittent replanning (tau=0.1701s, cv=1.0889, deviation_frac=0.15) for P160254 (C)",
+ "Tp": 0.05,
+ "Th": 0.3,
+ "nc": [
+  0.2,
+  0.02
+ ],
+ "forearm": 0.35,
+ "planner_weights": {
+  "jerk": 2e-06,
+  "progress": 3e-07,
+  "constraint": 50,
+  "contour": 10,
+  "lag": 1.0,
+  "desired_speed": 0.2,
+  "goal": 1.0,
+  "free_velocity": 0.08,
+  "goal_precision": 0.0
+ },
+ "speed_model": {
+  "type": "gam",
+  "path": "/Users/xiangyz/Desktop/adaptive-cursor-trajectory-simulator/hcs_package/src/hcs_package/user_configurations/population_gam.pkl"
+ },
+ "horizon_mode": "budget",
+ "replan_mode": "intermittent",
+ "budget": {
+  "D0": 1.021,
+  "lam": 0.0,
+  "T_min": 0.15,
+  "gamma": 0.7,
+  "W_ref": 0.026
+ },
+ "replan_latency_s": 0.1701,
+ "replan_latency_cv": 1.0889,
+ "replan_deviation_frac": 0.15
+}

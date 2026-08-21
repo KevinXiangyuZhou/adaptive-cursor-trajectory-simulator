@@ -124,6 +124,39 @@ BUCKET_LAW_DIR = {
 }
 
 
+def _set_results_dir(base):
+    """Redirect every output/cache path to `base` (for --results-dir, so
+    model variants can be evaluated side by side without clobbering)."""
+    global RESULTS_DIR, SIM_CACHE_DIR, FITTS_DIR, STEERING_DIR, ID4SCS_DIR
+    global ID4SCS_W2N_DIR, ID4SCS_N2W_DIR, C2U_DIR, OVERVIEW_DIR, BUCKET_LAW_DIR
+    RESULTS_DIR = Path(base)
+    SIM_CACHE_DIR = RESULTS_DIR / "sim_cache"
+    FITTS_DIR = RESULTS_DIR / "Fitts"
+    STEERING_DIR = RESULTS_DIR / "Steering"
+    ID4SCS_DIR = RESULTS_DIR / "ID4SCS"
+    ID4SCS_W2N_DIR = ID4SCS_DIR / "wide_to_narrow"
+    ID4SCS_N2W_DIR = ID4SCS_DIR / "narrow_to_wide"
+    C2U_DIR = RESULTS_DIR / "ConstrainedToUnconstrained"
+    OVERVIEW_DIR = RESULTS_DIR / "overview"
+    BUCKET_LAW_DIR = {
+        "steering": STEERING_DIR,
+        "id4scs_w2n": ID4SCS_W2N_DIR,
+        "id4scs_n2w": ID4SCS_N2W_DIR,
+        "fitts": FITTS_DIR,
+        "excluded": C2U_DIR,
+    }
+
+
+def _resolve_pid_config(config_dir, pid, seed):
+    """Per-participant config lookup in --config-dir: fitted-config naming
+    first, then plain {pid}.json, then a shared default.json."""
+    for name in (f"{pid}_gam_config_s{seed}.json", f"{pid}.json", "default.json"):
+        cand = Path(config_dir) / name
+        if cand.exists():
+            return cand
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Bucketing (field-presence driven — see plan: trial_ids 1-5 have no
 # "tunnelType" key at all, so a naive tunnelType string match would drop them)
@@ -612,14 +645,24 @@ POOL_TIMEOUT_S = 3600
 
 
 def build_condition_job(pid, tid, bucket, cond, human_rounds, cached_records,
-                         config_path_str, tid_geometry, simulate, human_only=False):
-    """Prepare a picklable job dict for one (pid, tid) condition."""
+                         config_path_str, tid_geometry, simulate, human_only=False,
+                         min_runs=0):
+    """Prepare a picklable job dict for one (pid, tid) condition.
+
+    min_runs > len(human_rounds) simulates extra model runs per condition
+    (cycling over the human rounds' geometry) so aggregate statistics and
+    regressions average over more noise realisations than the human round
+    count — the per-condition simulator stream is deterministic under the
+    config's random_seed, so single-draw comparisons conflate realisation
+    noise with model differences.
+    """
     law_dir = BUCKET_LAW_DIR[bucket]
-    n_needed = (len(human_rounds) - len(cached_records)) if (simulate and not human_only) else 0
+    n_target = max(len(human_rounds), int(min_runs))
+    n_needed = (n_target - len(cached_records)) if (simulate and not human_only) else 0
     n_needed = max(n_needed, 0)
 
     job = {
-        "pid": pid, "tid": tid, "bucket": bucket, "cond": cond,
+        "pid": pid, "tid": tid, "bucket": bucket, "cond": cond, "n_model_runs": n_target,
         "human_rounds": human_rounds, "cached_records": cached_records,
         "n_needed": n_needed, "config_path": config_path_str,
         "law_dir": str(law_dir), "human_only": human_only,
@@ -700,7 +743,7 @@ def _run_condition_job(job):
         if n_needed > 0:
             sim = CursorSimulator(job["config_path"])
             for i in range(n_needed):
-                round_idx = len(cached) + i
+                round_idx = (len(cached) + i) % len(human_rounds)
                 task_config, _centerline, _width = build_fitts_bypass_config(
                     human_rounds[round_idx], target_radius
                 )
@@ -712,7 +755,7 @@ def _run_condition_job(job):
         tunnel_path = job["canonical_path"]
         tunnel_width = job["tunnel_width"]
 
-    model_records = (cached + new_records)[: len(human_rounds)]
+    model_records = (cached + new_records)[: job.get("n_model_runs", len(human_rounds))]
     if not model_records and not job.get("human_only"):
         return {"tid": tid, "bucket": bucket, "new_records": new_records, "rows": [],
                 "condition_summary_row": None, "skipped": True}
@@ -789,7 +832,8 @@ def _run_condition_job(job):
             h_al.append(al)
             rows.append(_fitts_row("Human", r["completion_time"], r, al))
         interval = 0.05
-        for human_r, model_r in zip(human_rounds, model_records):
+        import itertools
+        for human_r, model_r in zip(itertools.cycle(human_rounds), model_records):
             mtraj = model_r["trajectory"]
             ts = [i * interval for i in range(len(mtraj))]
             al = align_round(mtraj, ts, pointing_target_center(human_r), target_radius)
@@ -825,7 +869,8 @@ def _run_condition_job(job):
 
 
 def process_participant(pid, participant_data, config_path_str, tid_to_condition, tid_to_bucket,
-                         tid_geometry, sim_cache, simulate=True, human_only=False):
+                         tid_geometry, sim_cache, simulate=True, human_only=False,
+                         min_runs=0):
     """
     Dispatches every included tid this participant has data for to a
     ProcessPoolExecutor worker (see _run_condition_job), collects results
@@ -851,7 +896,8 @@ def process_participant(pid, participant_data, config_path_str, tid_to_condition
 
         cache_key = f"{pid}_{tid}"
         cached = sim_cache.get(cache_key, [])
-        n_needed = max(len(human_rounds) - len(cached), 0) if (simulate and not human_only) else 0
+        n_target = max(len(human_rounds), int(min_runs)) if not human_only else len(human_rounds)
+        n_needed = max(n_target - len(cached), 0) if (simulate and not human_only) else 0
         if human_only:
             print(f"    tid={tid} ({bucket}): {len(human_rounds)} human round(s) [--human-only]", flush=True)
         elif n_needed > 0:
@@ -863,7 +909,7 @@ def process_participant(pid, participant_data, config_path_str, tid_to_condition
 
         jobs[tid] = build_condition_job(
             pid, tid, bucket, cond, human_rounds, cached, config_path_str, tid_geometry, simulate,
-            human_only=human_only,
+            human_only=human_only, min_runs=min_runs,
         )
 
     rows_by_bucket = defaultdict(list)
@@ -1330,6 +1376,23 @@ def main():
                              "eval/model_fitting/results/{pid}_gam_config_s{seed}.json "
                              "(participants without a fitted config are skipped)")
     parser.add_argument("--seed", type=int, default=42, help="seed suffix of fitted configs (--per-participant)")
+    parser.add_argument("--config-dir", type=str, default=None,
+                        help="Directory of per-participant simulator configs. Resolution per "
+                             "pid: {pid}_gam_config_s{seed}.json, {pid}.json, default.json "
+                             "(participants without a match are skipped). Overrides --config "
+                             "and --per-participant.")
+    parser.add_argument("--results-dir", type=str, default=None,
+                        help="Write all outputs (and the sim cache) under this directory "
+                             "instead of results/ — relative paths resolve against the "
+                             "script dir, so model variants can be compared side by side. "
+                             "Takes precedence over HCS_EVAL_RESULTS_DIR.")
+    parser.add_argument("--min-runs", type=int, default=0,
+                        help="Simulate at least this many model runs per condition (cycling "
+                             "the human rounds' geometry) so statistics average over more "
+                             "noise realisations — per-condition streams are deterministic "
+                             "under the config's random_seed, so single draws conflate "
+                             "realisation noise with model differences. Default: one run "
+                             "per human round.")
     parser.add_argument("--fresh-sim", action="store_true", default=False,
                         help="Ignore any cached simulator runs and resimulate every condition "
                              "from scratch. The simulator applies stochastic per-step motor/"
@@ -1339,11 +1402,19 @@ def main():
 
     config_path = Path(args.config)
     human_only = args.human_only
+    if args.results_dir:
+        rd = Path(args.results_dir)
+        _set_results_dir(rd if rd.is_absolute() else SCRIPT_DIR / rd)
+    config_dir = Path(args.config_dir) if args.config_dir else None
+    if config_dir is not None and not config_dir.is_dir():
+        print(f"Config dir not found: {config_dir}")
+        return
     data_dir = Path(args.data_dir)
     if not data_dir.is_dir():
         print(f"Data dir not found: {data_dir}")
         return
-    if not human_only and not args.per_participant and not config_path.exists():
+    if (not human_only and config_dir is None and not args.per_participant
+            and not config_path.exists()):
         print(f"Config not found: {config_path}")
         return
 
@@ -1356,6 +1427,9 @@ def main():
     print("Eval Main: ID4SCS / Fitts' Law / Steering Law" + ("  [HUMAN-ONLY]" if human_only else ""))
     print("=" * 70)
     print(f"  Data dir: {data_dir}")
+    print(f"  Results:  {RESULTS_DIR}")
+    if config_dir is not None:
+        print(f"  Configs:  per-participant from {config_dir}")
     if human_only:
         print("  Mode:     --human-only (simulator is never called)")
     else:
@@ -1413,7 +1487,13 @@ def main():
     for pid, participant_data in sorted(all_human_data.items()):
         print(f"\n  Participant: {pid}")
         pid_config_path = config_path
-        if args.per_participant and not human_only:
+        if config_dir is not None and not human_only:
+            pid_config_path = _resolve_pid_config(config_dir, pid, args.seed)
+            if pid_config_path is None:
+                print(f"    no config for {pid} in {config_dir} — skipped", flush=True)
+                continue
+            print(f"    persona: {pid_config_path.name}")
+        elif args.per_participant and not human_only:
             pid_config_path = fitting_dir / f"{pid}_gam_config_s{args.seed}.json"
             if not pid_config_path.exists():
                 print(f"    no fitted config {pid_config_path.name} — skipped", flush=True)
@@ -1427,7 +1507,7 @@ def main():
 
         rows_by_bucket, condition_summaries = process_participant(
             pid, participant_data, str(pid_config_path), tid_to_condition, tid_to_bucket, tid_geometry,
-            sim_cache, simulate=simulate, human_only=human_only,
+            sim_cache, simulate=simulate, human_only=human_only, min_runs=args.min_runs,
         )
         if simulate:
             save_sim_cache(sim_cache, cache_path)

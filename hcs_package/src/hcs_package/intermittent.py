@@ -156,6 +156,16 @@ class ReplanScheduler:
     latency_steps: int = 4          # tau / dt, rounded (median when cv > 0)
     latency_cv: float = 0.0         # lognormal CV of the per-cycle latency
     deviation_frac: float = 0.0     # early-replan threshold; 0 disables
+    # Explicit minimum open-loop interval (steps): after a replan no
+    # feedback-driven trigger (deviation, arrival) may fire until this many
+    # plan steps have executed — the psychological refractory period
+    # (Alvarez Martin et al. 2021 fit 0.03-0.05 s). The exhaustion backstop
+    # is exempt: it is plan availability, not a feedback event.
+    min_open_loop_steps: int = 0
+    # Dedicated RNG for latency draws so scheduler stochasticity is
+    # decoupled from the motor-noise stream (toggling add_noise must not
+    # change the latency sequence). None falls back to the global numpy RNG.
+    rng: Optional[np.random.Generator] = None
     plan_len: int = 0               # steps in the current plan
     anchor: float = np.inf          # arc-length trigger point
     plan_idx: int = 1               # next velocity index to execute (1-based)
@@ -167,7 +177,9 @@ class ReplanScheduler:
         if self.latency_cv <= 0.0 or self.latency_steps <= 0:
             return self.latency_steps
         sigma = float(np.sqrt(np.log1p(self.latency_cv ** 2)))
-        mult = float(np.exp(sigma * np.random.standard_normal()))
+        z = (self.rng.standard_normal() if self.rng is not None
+             else np.random.standard_normal())
+        mult = float(np.exp(sigma * z))
         return max(0, int(round(self.latency_steps * mult)))
 
     def needs_replan(self, theta_now: float,
@@ -182,6 +194,10 @@ class ReplanScheduler:
             return "init"
         if self.plan_idx > self.plan_len:
             return "exhausted"
+        # Refractory gate: latency_left is always None here right after a
+        # replan (on_replan resets it), so this cannot freeze a countdown.
+        if self.plan_idx - 1 < self.min_open_loop_steps:
+            return None
         if self.latency_left is not None:
             if self.latency_left <= 0:
                 return "arrival+latency"
@@ -220,4 +236,5 @@ class ReplanScheduler:
             and bool(self.events)
             and self.latency_left is None
             and self.plan_idx <= self.plan_len
+            and self.plan_idx - 1 >= self.min_open_loop_steps
         )
