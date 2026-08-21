@@ -121,6 +121,7 @@ def model(model_input: SteeringModelInput):
         corridor_bounds=corridor_bounds,
         cartesian_constraints=cartesian_constraints,
         free_space_mask=free_space_mask,
+        warm_shift=int(getattr(model_input, 'warm_shift', 1) or 1),
     )
 
     jx = controls[:, 0]

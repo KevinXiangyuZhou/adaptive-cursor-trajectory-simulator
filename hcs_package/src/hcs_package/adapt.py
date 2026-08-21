@@ -162,12 +162,15 @@ def compute_clearance_profile(
     corridor_bounds=None,
     cartesian_constraints: Optional[List] = None,
 ) -> np.ndarray:
-    """Local clearance — min distance from path to nearest active constraint.
+    """Local usable width — twice the distance from path to the nearest
+    active constraint boundary (for a corridor, w_left + w_right).
 
-    Geometry-agnostic generalisation of tunnel width:
+    Geometry-agnostic generalisation of tunnel width, on a single scale so
+    the difficulty budget's D0 and the speed model transfer between
+    corridor-defined and cartesian-constraint tasks:
     * PathConstraint  (corridor_bounds):    w_left(s) + w_right(s)
-    * PolygonConstraint KEEP_IN:            distance to polygon boundary
-    * RectangleConstraint KEEP_IN:          distance to nearest rect edge
+    * PolygonConstraint KEEP_IN:            2 x distance to polygon boundary
+    * RectangleConstraint KEEP_IN:          2 x distance to nearest rect edge
 
     Unconstrained samples receive the max finite clearance so they don't
     artificially cap speed.
@@ -194,7 +197,7 @@ def compute_clearance_profile(
                         verts = np.array(geom.vertices, dtype=float)
                         if _point_in_polygon(p, verts):
                             d = _distance_to_polygon_boundary(p, verts)
-                            clearance[i] = min(clearance[i], d)
+                            clearance[i] = min(clearance[i], 2.0 * d)
 
                 elif isinstance(geom, RectangleConstraint):
                     if region.constraint_type == ConstraintType.KEEP_IN:
@@ -204,7 +207,7 @@ def compute_clearance_profile(
                         d_top    = geom.y + geom.height - p[1]
                         d = min(d_left, d_right, d_bottom, d_top)
                         if d > 0:
-                            clearance[i] = min(clearance[i], d)
+                            clearance[i] = min(clearance[i], 2.0 * d)
 
     finite_mask = np.isfinite(clearance)
     if finite_mask.any():

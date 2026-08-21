@@ -12,6 +12,7 @@ from .noise import single_step_motor_and_device_noise
 from .constraints import ConstraintConfig, ConstraintRegion, ConstraintType, PathConstraint, RectangleConstraint, PolygonConstraint
 from .constraint_utils import parse_constraints_from_json, convert_constraints_to_corridor_bounds
 from .adapt import compute_clearance_profile, compute_curvature_rate_profile, compute_curvature_spike_profile
+from .intermittent import DifficultyBudgetHorizon, ReplanEvent, ReplanScheduler
 
 #imports for baseline
 from .baseline_model import generate_baseline_mpc
@@ -82,7 +83,41 @@ class CursorSimulator:
             "dwell_s": 0.25,
             "add_noise": True,
             "ddm_enabled": False,
-            "random_seed": 1000
+            "random_seed": 1000,
+            # --- planning-horizon / replanning modules (gaze-cursor fits) ---
+            # horizon_mode "fixed": pred horizon = Th/Interval steps (baseline).
+            # horizon_mode "budget": per-solve horizon from the difficulty
+            # budget  ∫(1/W + lam|kappa|)ds = D0  (eval/eval-gaze-cursor
+            # lookahead_difficulty.py; D0/lam are unit-invariant), floored at
+            # the visuomotor-delay lookahead v * T_min (refit_floor.py) —
+            # which also floors the solve horizon in time so it cannot
+            # collapse near the path end. Defaults are the pooled refit
+            # (cross-validated, magnitude-calibrated) sim_params from
+            # results/lookahead_floor_summary.json.
+            "horizon_mode": "fixed",
+            "budget": {"D0": 1.66, "lam": 0.5, "T_min": 0.1},
+            # replan_mode "every_step": re-solve each step (baseline).
+            # replan_mode "intermittent": execute the plan open-loop and
+            # re-solve on arrival at the planned anchor + a post-arrival
+            # latency (intermittency_analysis.py: median dwell 0.17-0.21 s,
+            # CV ~0.9). replan_latency_cv > 0 draws each cycle's latency
+            # from a lognormal with that median and CV; 0 = deterministic.
+            # replan_deviation_frac > 0 adds an early-replan interrupt when
+            # the realised cursor drifts from the planned position by more
+            # than that fraction of the local usable width. Default 0.15 is
+            # calibrated so ~20% of cycles end before anchor crossing,
+            # matching the human non-crossed fraction (frac_crossed ~0.8);
+            # inert under replan_mode "every_step".
+            "replan_mode": "every_step",
+            "replan_latency_s": 0.19,
+            "replan_latency_cv": 0.89,
+            "replan_deviation_frac": 0.15,
+            # Solve-horizon clamp (steps). The fixed-mode default (Th=0.3 ->
+            # 6 steps) lies inside the clamp, so the baseline is unaffected.
+            # With budget T_min > 0 the binding floor is ceil(T_min/dt), not
+            # horizon_min_steps.
+            "horizon_min_steps": 2,
+            "horizon_max_steps": 40
         }
 
         if user_config is None:
@@ -125,6 +160,26 @@ class CursorSimulator:
         self.carry_acceleration = bool(config.get('carry_acceleration', True))
         self.dwell_s = float(config.get('dwell_s', 0.25))
         self.add_noise = config['add_noise']
+
+        self.horizon_mode = str(config.get('horizon_mode', 'fixed'))
+        if self.horizon_mode not in ('fixed', 'budget'):
+            raise ValueError(f"horizon_mode must be 'fixed' or 'budget', got {self.horizon_mode!r}")
+        budget_cfg = config.get('budget') or {}
+        # Fallbacks match the default config above (single source of truth
+        # for "unset": the pooled cross-validated refit).
+        self.budget_D0 = float(budget_cfg.get('D0', 1.66))
+        self.budget_lam = float(budget_cfg.get('lam', 0.5))
+        self.budget_T_min = float(budget_cfg.get('T_min', 0.1))
+        self.replan_mode = str(config.get('replan_mode', 'every_step'))
+        if self.replan_mode not in ('every_step', 'intermittent'):
+            raise ValueError(f"replan_mode must be 'every_step' or 'intermittent', got {self.replan_mode!r}")
+        self.replan_latency_s = float(config.get('replan_latency_s', 0.19))
+        self.replan_latency_cv = float(config.get('replan_latency_cv', 0.89))
+        self.replan_deviation_frac = float(config.get('replan_deviation_frac', 0.15))
+        self.horizon_min_steps = int(config.get('horizon_min_steps', 2))
+        self.horizon_max_steps = int(config.get('horizon_max_steps', 40))
+        # Diagnostics of the most recent generate_* call (replan events etc.).
+        self.last_diagnostics = None
 
         seed = config['random_seed']
         if seed is not None:
@@ -366,12 +421,40 @@ class CursorSimulator:
         current_time = 0.0
         final_target = np.array(waypoints_norm[-1])
 
-        '''
-        for step in range(max_steps):
-            dist_to_target = np.linalg.norm(cursor_pos - final_target)
-            if dist_to_target < target_radius:
-                break
-        '''
+        # --- planning-horizon / replan-scheduling setup ---
+        desired_speed = float(self.planner_weights.get('desired_speed', 0.12))
+        budget_horizon = None
+        if self.horizon_mode == 'budget':
+            if clearance_profile is None:
+                raise ValueError("horizon_mode='budget' requires a reference path with profiles")
+            s_prof, c_prof = clearance_profile
+            _, k_prof = curvature_profile
+            _, r_prof = curvature_rate_profile
+            # Reference speed along the path — same signals model() feeds the
+            # speed model — used to convert the arc-length lookahead to steps.
+            v_ref_prof = self.speed_model.compute_speed_profile(
+                s_prof, c_prof, k_prof, r_prof)
+            budget_horizon = DifficultyBudgetHorizon(
+                s_prof, c_prof, k_prof, v_ref_prof,
+                D0=self.budget_D0, lam=self.budget_lam,
+                T_min=self.budget_T_min,
+            )
+        tau_steps = max(0, int(round(self.replan_latency_s / self.interval)))
+        # Time-based solve-horizon floor: the plan must always cover at least
+        # one visuomotor delay of movement, so the horizon cannot collapse to
+        # horizon_min_steps when the anchor caps at the path end (the
+        # short-horizon + precision-braking stall behind budget-mode
+        # timeouts).
+        floor_steps = int(np.ceil(self.budget_T_min / self.interval)) \
+            if self.budget_T_min > 0 else 0
+        scheduler = ReplanScheduler(
+            mode=self.replan_mode, latency_steps=tau_steps,
+            latency_cv=self.replan_latency_cv,
+            deviation_frac=self.replan_deviation_frac,
+        )
+        plan = None            # planned velocity/displacement sequences of the current solve
+        theta_track = 0.0      # warm guess for arc-length projection
+
         # Termination: DWELL_S of consecutive samples inside the target
         # (stands in for the human click latency; the pointing data show
         # ~0.3 s median from final target entry to click).
@@ -386,76 +469,171 @@ class CursorSimulator:
             else:
                 dwell_steps = 0
 
-            tunnel_path = waypoints_norm
-            model_input = SteeringModelInput(
-                state_cog=(
-                    float(cursor_pos[0]),
-                    float(cursor_pos[1]),
-                    float(cursor_vel[0]),
-                    float(cursor_vel[1])
-                ),
-                bump=BumpParams(
-                    pred_horizon=self.pred_horizon,
-                    Tp=self.tp,
-                    nc=self.nc
-                ),
-                env=EnvParams(interval=self.interval),
-                tunnel=TunnelInfo(
-                    tunnel_path=tunnel_path,
-                    tunnel_width=tunnel_width or 0.1,
-                    top_wall=None,
-                    bottom_wall=None
-                ),
-                planner_weights=self.planner_weights,
-                planner_margin=self.planner_margin,
-                reference_path=reference_path,
-                current_acc=(0.0, 0.0),
-                corridor_bounds=corridor_bounds,
-                cartesian_constraints=cartesian_regions if cartesian_regions else None,
-                clearance_profile=clearance_profile,
-                curvature_rate_profile=curvature_rate_profile,
-                curvature_profile=curvature_profile,
-                speed_model=self.speed_model,
-                target_radius=target_radius,  # added for pointing model
-            )
-            model_input.current_acc = (float(cursor_acc[0]), float(cursor_acc[1]))
+            theta_now = None
+            if scheduler.wants_theta:
+                theta_now = float(reference_path.find_closest_theta(
+                    cursor_pos, initial_guess=theta_track))
+                theta_track = theta_now
+            # Early-replan interrupt: realised drift from the open-loop plan,
+            # scaled by the usable width at the last solve. Zero until at
+            # least one step of the plan has executed (the plan starts at the
+            # realised cursor state, and noiseless execution tracks exactly).
+            deviation_ratio = None
+            if (scheduler.mode == 'intermittent'
+                    and self.replan_deviation_frac > 0.0
+                    and plan is not None and scheduler.plan_idx >= 2
+                    and plan.get('w_solve')):
+                k_exec = min(scheduler.plan_idx - 2, plan['n_steps'] - 1)
+                dev = float(np.hypot(
+                    cursor_pos[0] - plan['pos_x'][k_exec],
+                    cursor_pos[1] - plan['pos_y'][k_exec]))
+                deviation_ratio = dev / plan['w_solve']
+            trigger = scheduler.needs_replan(
+                theta_now if theta_now is not None else -np.inf,
+                deviation_ratio=deviation_ratio)
 
-            cursor_info, plan_debug = model(model_input)
-            c_pos_dx, c_pos_dy, c_vel_x, c_vel_y = cursor_info
+            if trigger is not None:
+                theta0 = float(reference_path.find_closest_theta(
+                    cursor_pos, initial_guess=theta_track))
+                theta_track = theta0
+                if budget_horizon is not None:
+                    anchor_s = budget_horizon.anchor(
+                        theta0, v_now=float(np.hypot(cursor_vel[0], cursor_vel[1])))
+                    n_base = int(np.ceil(
+                        budget_horizon.traverse_time(theta0, anchor_s) / self.interval))
+                    # Anchor and floor both cap at the path end, so the
+                    # traverse time (and with it n_base) shrinks toward zero
+                    # there; the plan itself must still cover >= T_min.
+                    n_base = max(n_base, floor_steps)
+                else:
+                    n_base = self.pred_horizon
+                    anchor_s = None  # fixed mode: set from the solved plan below
+                if anchor_s is not None:
+                    anchor_s = min(float(anchor_s), float(reference_path.total_length))
+                if self.replan_mode == 'intermittent':
+                    # The plan must survive the post-arrival latency (the old
+                    # plan keeps executing past the anchor), plus the same
+                    # margin again as slack for arrival running later than the
+                    # reference-speed estimate (start-up, corners, noise).
+                    # This is plan availability, not behaviour: the replan time
+                    # is still set by arrival + tau; exhaustion only backstops.
+                    n_solve = n_base + 2 * tau_steps
+                else:
+                    n_solve = n_base
+                if self.horizon_mode == 'budget' or self.replan_mode == 'intermittent':
+                    n_solve = int(np.clip(
+                        n_solve, self.horizon_min_steps, self.horizon_max_steps))
 
-            # c_vel_x has length pred_horizon+1: [v0, v1, ..., vN]; index 1 = first planned step
-            planned_vel_idx = min(1, len(c_vel_x) - 1)
+                tunnel_path = waypoints_norm
+                model_input = SteeringModelInput(
+                    state_cog=(
+                        float(cursor_pos[0]),
+                        float(cursor_pos[1]),
+                        float(cursor_vel[0]),
+                        float(cursor_vel[1])
+                    ),
+                    bump=BumpParams(
+                        pred_horizon=n_solve,
+                        Tp=self.tp,
+                        nc=self.nc
+                    ),
+                    env=EnvParams(interval=self.interval),
+                    tunnel=TunnelInfo(
+                        tunnel_path=tunnel_path,
+                        tunnel_width=tunnel_width or 0.1,
+                        top_wall=None,
+                        bottom_wall=None
+                    ),
+                    planner_weights=self.planner_weights,
+                    planner_margin=self.planner_margin,
+                    reference_path=reference_path,
+                    current_acc=(0.0, 0.0),
+                    corridor_bounds=corridor_bounds,
+                    cartesian_constraints=cartesian_regions if cartesian_regions else None,
+                    clearance_profile=clearance_profile,
+                    curvature_rate_profile=curvature_rate_profile,
+                    curvature_profile=curvature_profile,
+                    speed_model=self.speed_model,
+                    target_radius=target_radius,  # added for pointing model
+                )
+                model_input.current_acc = (float(cursor_acc[0]), float(cursor_acc[1]))
+                # Warm-start shift = steps executed since the previous solve.
+                model_input.warm_shift = max(1, scheduler.plan_idx - 1)
+
+                cursor_info, plan_debug = model(model_input)
+                c_pos_dx, c_pos_dy, c_vel_x, c_vel_y = cursor_info
+                # Absolute planned positions after each step, and the usable
+                # width at the solve position — the deviation trigger's scale.
+                w_solve = None
+                if clearance_profile is not None:
+                    s_cl, c_cl = clearance_profile
+                    w_solve = float(np.interp(theta0, s_cl, c_cl))
+                plan = {
+                    'c_pos_dx': c_pos_dx, 'c_pos_dy': c_pos_dy,
+                    'c_vel_x': c_vel_x, 'c_vel_y': c_vel_y,
+                    'n_steps': len(c_pos_dx),
+                    'pos_x': cursor_pos[0] + np.cumsum(c_pos_dx),
+                    'pos_y': cursor_pos[1] + np.cumsum(c_pos_dy),
+                    'w_solve': w_solve if w_solve and w_solve > 0 else None,
+                }
+                if anchor_s is None:
+                    # Fixed-horizon anchor: the plan's own progress at the
+                    # attentional horizon Th (n_base steps) — where the solved
+                    # plan expects the cursor to be, so arrival is achievable
+                    # by construction and noise supplies the variability.
+                    k_anchor = min(n_base, plan['n_steps'])
+                    planned_end = (
+                        cursor_pos[0] + float(np.sum(c_pos_dx[:k_anchor])),
+                        cursor_pos[1] + float(np.sum(c_pos_dy[:k_anchor])),
+                    )
+                    anchor_s = float(reference_path.find_closest_theta(
+                        np.array(planned_end), initial_guess=theta0))
+                    anchor_s = min(anchor_s, float(reference_path.total_length))
+                scheduler.on_replan(
+                    ReplanEvent(step=step, t=current_time, theta=theta0,
+                                anchor=anchor_s, n_steps=n_solve, trigger=trigger),
+                    anchor=anchor_s, plan_len=plan['n_steps'],
+                )
+
+            # Execute the next step of the current plan. j indexes the planned
+            # velocity at the END of the step (c_vel_* start with the solve-time
+            # velocity at index 0); the matching displacement is c_pos_d*[j-1].
+            j = min(scheduler.plan_idx, plan['n_steps'])
+            c_vel_x = plan['c_vel_x']
+            c_vel_y = plan['c_vel_y']
 
             if self.add_noise:
-                # Pass both the start velocity (c_vel_x[0], the current cursor
-                # velocity) and the planned end velocity (c_vel_x[1]) so the
-                # noisy step integrates trapezoidally over the same interval as
-                # the deterministic path — in the zero-noise limit this advances
-                # by c_pos_dx[0], matching the add_noise=False branch.
+                # The step integrates trapezoidally from the cursor's realised
+                # start velocity to the (noisy) planned end velocity — in the
+                # zero-noise limit this advances by the planner's displacement,
+                # matching the add_noise=False branch. Between replans the plan
+                # keeps executing open-loop: motor noise perturbs each realised
+                # step but is unobservable to the planner until the next solve.
                 c_pos_dx_step, c_pos_dy_step, c_vel_x_step, c_vel_y_step, \
                 hand_pos[0], hand_pos[1], _, _ = single_step_motor_and_device_noise(
-                    c_vel_x[planned_vel_idx], c_vel_y[planned_vel_idx],
+                    c_vel_x[j], c_vel_y[j],
                     hand_pos[0], hand_pos[1],
                     self.nc,
                     self.interval,
                     self.forearm,
-                    c_vel_x_prev=c_vel_x[0], c_vel_y_prev=c_vel_y[0],
+                    c_vel_x_prev=float(cursor_vel[0]), c_vel_y_prev=float(cursor_vel[1]),
                 )
             else:
-                c_pos_dx_step = c_pos_dx[0]
-                c_pos_dy_step = c_pos_dy[0]
-                c_vel_x_step = c_vel_x[planned_vel_idx]
-                c_vel_y_step = c_vel_y[planned_vel_idx]
+                c_pos_dx_step = plan['c_pos_dx'][j - 1]
+                c_pos_dy_step = plan['c_pos_dy'][j - 1]
+                c_vel_x_step = c_vel_x[j]
+                c_vel_y_step = c_vel_y[j]
 
             cursor_pos[0] += c_pos_dx_step
             cursor_pos[1] += c_pos_dy_step
             if self.carry_acceleration:
                 # Planned (pre-noise) acceleration over the executed step —
                 # the motor/device noise is unobservable to the planner.
-                cursor_acc[0] = (c_vel_x[planned_vel_idx] - c_vel_x[0]) / self.interval
-                cursor_acc[1] = (c_vel_y[planned_vel_idx] - c_vel_y[0]) / self.interval
+                cursor_acc[0] = (c_vel_x[j] - c_vel_x[j - 1]) / self.interval
+                cursor_acc[1] = (c_vel_y[j] - c_vel_y[j - 1]) / self.interval
             cursor_vel[0] = c_vel_x_step
             cursor_vel[1] = c_vel_y_step
+            scheduler.on_step_executed()
 
             screen_x = cursor_pos[0] / screen_width_m * screen_width
             screen_y = cursor_pos[1] / screen_height_m * screen_height
@@ -466,6 +644,23 @@ class CursorSimulator:
                 trajectory.append((screen_x, screen_y, self.interval))
 
             current_time += self.interval
+
+        self.last_diagnostics = {
+            'horizon_mode': self.horizon_mode,
+            'replan_mode': self.replan_mode,
+            'budget_T_min': self.budget_T_min,
+            'replan_latency_cv': self.replan_latency_cv,
+            'replan_deviation_frac': self.replan_deviation_frac,
+            'interval': self.interval,
+            'n_steps_executed': len(trajectory),
+            'n_solves': len(scheduler.events),
+            'total_length': float(reference_path.total_length),
+            'replan_events': [
+                {'step': e.step, 't': e.t, 'theta': e.theta, 'anchor': e.anchor,
+                 'n_steps': e.n_steps, 'trigger': e.trigger}
+                for e in scheduler.events
+            ],
+        }
 
         if return_reference_path:
             return trajectory, reference_path

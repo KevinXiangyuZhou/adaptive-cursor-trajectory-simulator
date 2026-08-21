@@ -144,6 +144,7 @@ def generate_mpcc(
     corridor_bounds=None,
     cartesian_constraints=None,
     free_space_mask=None,
+    warm_shift=1,
 ):
     """
     Generate MPCC (Model Predictive Contouring Control) plan.
@@ -423,18 +424,29 @@ def generate_mpcc(
     x0_cold = np.zeros(n_vars)
     x0_cold[idx_vs] = speed_target / SCALE_VS
 
-    # Warm-start: shift previous solution forward by one step
+    # Warm-start: shift the previous solution forward by the number of steps
+    # executed since that solve (1 under per-step replanning; larger under
+    # intermittent replanning). The shifted tail is truncated or padded
+    # (zero jerk, held progress speed) to the new horizon length, so the
+    # warm start survives the per-solve horizon changes of budget mode.
     x0_warm = None
     x_prev = _warm_start_cache.get('x_prev')
     prev_n = _warm_start_cache.get('num_steps')
-    if x_prev is not None and prev_n == num_steps:
+    k_shift = int(warm_shift)
+    if x_prev is not None and prev_n is not None and 1 <= k_shift < prev_n:
+        prev_jx = x_prev[:prev_n]
+        prev_jy = x_prev[prev_n:2*prev_n]
+        prev_vs = x_prev[2*prev_n:3*prev_n]
+
+        def _fit(tail, fill):
+            if len(tail) >= num_steps:
+                return tail[:num_steps]
+            return np.append(tail, np.full(num_steps - len(tail), fill))
+
         x0_warm = np.zeros(n_vars)
-        prev_jx = x_prev[:num_steps]
-        prev_jy = x_prev[num_steps:2*num_steps]
-        prev_vs = x_prev[2*num_steps:3*num_steps]
-        x0_warm[idx_jx] = np.append(prev_jx[1:], 0.0)
-        x0_warm[idx_jy] = np.append(prev_jy[1:], 0.0)
-        x0_warm[idx_vs] = np.append(prev_vs[1:], prev_vs[-1])
+        x0_warm[idx_jx] = _fit(prev_jx[k_shift:], 0.0)
+        x0_warm[idx_jy] = _fit(prev_jy[k_shift:], 0.0)
+        x0_warm[idx_vs] = _fit(prev_vs[k_shift:], prev_vs[-1])
 
     x0_guess = x0_cold
     if x0_warm is not None:

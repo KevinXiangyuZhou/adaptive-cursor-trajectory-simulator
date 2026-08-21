@@ -60,3 +60,6 @@ class SteeringModelInput:
     curvature_profile: Optional[Tuple] = None  # (s_array, kappa_array)
     speed_model: Optional[Any] = None
     target_radius: float = 0.01  # added as dead code for using target_radius in mpcc_model.py
+    # Steps executed since the previous solve — the warm-start shift for the
+    # MPCC. 1 for per-step replanning; >1 under intermittent replanning.
+    warm_shift: int = 1
