@@ -69,15 +69,27 @@ class DifficultyBudgetHorizon:
         D0: float,
         lam: float,
         T_min: float = 0.0,
+        gamma: float = 1.0,
+        W_ref: float = 0.026,
     ):
         self.s = np.asarray(s_profile, dtype=float)
         self.D0 = float(D0)
         self.lam = float(lam)
         self.T_min = float(T_min)
+        self.gamma = float(gamma)
+        self.W_ref = float(W_ref)
 
         width = np.clip(np.asarray(width_profile, dtype=float), _WIDTH_FLOOR, None)
         kappa = np.abs(np.asarray(kappa_profile, dtype=float))
-        density = 1.0 / width + self.lam * kappa
+        # Width density (W_ref/W)^gamma / W_ref: gamma=1 reduces exactly to
+        # 1/W (W_ref cancels; backward compatible). gamma<1 makes the lead
+        # sublinear in width — on a uniform corridor h = D0 * W^gamma *
+        # W_ref^(1-gamma) — matching the human lead ~ w^0.66 scaling that a
+        # linear budget cannot. W_ref (geometric mean of the studied widths)
+        # keeps the density in 1/length so D0 and lam stay dimensionless;
+        # it is not a behavioural knob — rescaling it is absorbed by D0.
+        density = ((self.W_ref / width) ** self.gamma) / self.W_ref \
+            + self.lam * kappa
 
         v_ref = np.clip(np.asarray(v_ref_profile, dtype=float), _SPEED_FLOOR, None)
 

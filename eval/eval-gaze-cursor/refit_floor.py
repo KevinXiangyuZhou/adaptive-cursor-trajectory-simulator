@@ -1,30 +1,41 @@
-"""Refit of the horizon-prediction module with a visuomotor-delay floor.
+"""Refit of the horizon-prediction module: visuomotor floor + width exponent.
 
-Motivation (eval-intermittent horizon_vs_gaze): the bare difficulty budget
-underestimates gaze lead at the narrowest widths (human median lead ~0.015
-at W=0.01 vs ~0.006 predicted) — the 1/W density explodes there and the
-budget lead shrinks proportionally, but human gaze stays at least one
-visuomotor delay ahead of the cursor at its current speed. Floored model:
+Motivation (eval-intermittent horizon_vs_gaze): the bare 1/W difficulty
+budget is linear in width while human leads are sublinear (lead ~ w^0.66):
+it underestimates lead at the narrowest widths (human ~0.015 at W=0.01 vs
+~0.006 predicted) and overestimates at the widest. Two candidate fixes are
+fitted jointly and model-compared under identical CV:
 
-    h_pred = clip( max( v * T_min,  h_budget(lam, D0) ),  0, remaining )
+  * visuomotor-delay floor:  h >= v * T_min
+  * width exponent gamma:    density_W = (W_ref/W)^gamma / W_ref
+    (gamma=1 reduces to 1/W; W_ref = geometric mean of the studied widths
+    keeps the density in 1/length so D0 and lam stay dimensionless —
+    rescaling W_ref is absorbed by D0, it is not a behavioural knob)
 
-with h_budget the smallest h s.t. int_s^{s+h} (1/W + lam|kappa|) ds' = D0
-(capped at the path end), v the cursor speed at fixation onset.
+Full model:
 
-Fitting improvements over lookahead_difficulty.budget_fit:
-  * grouped 5-fold cross-validation (folds split by trial, D0 quantiles and
-    the power-law fit recomputed on each train split) instead of in-sample
-    selection;
+    h_pred = clip( max( v * T_min,  h_budget(gamma, lam, D0) ),  0, remaining )
+
+with h_budget the smallest h s.t.
+int_s^{s+h} [(W_ref/W)^gamma / W_ref + lam|kappa|] ds' = D0 (end-capped),
+v the cursor speed at fixation onset.
+
+Fitting protocol (improvements over lookahead_difficulty.budget_fit):
+  * grouped 5-fold cross-validation (folds split by trial; D0 quantiles and
+    the power-law fit recomputed on each train split);
   * selection by median absolute log error (MALE) of predicted vs observed
-    lead — the simulator consumes lead MAGNITUDES, so the fit should be
-    calibrated, not just rank-correlated. Spearman rho is reported alongside
-    for comparability with lookahead_summary.json.
+    lead — the simulator consumes lead MAGNITUDES; Spearman rho reported
+    alongside for comparability with lookahead_summary.json.
 
-Baselines under the same CV: bare budget (T_min=0), floor-only (h=v*T_min),
-width power law lead=a*w^b.
+Model comparison under the same CV: full (gamma, T_min free), gamma-only
+(T_min=0), floor-only-budget (gamma=1, T_min free), bare budget (gamma=1,
+T_min=0), pure floor (h=v*T_min), width power law lead=a*w^b.
+
+Acceptance extras: per-width median lead calibration and the steering->c2u
+transfer rho (no refit) with the selected pooled parameters.
 
 Outputs results/lookahead_floor_summary.json, including per-participant
-sim_params {T_min, lam, D0} for the simulator/eval configs.
+sim_params {T_min, lam, D0, gamma, W_ref} for the simulator/eval configs.
 Run: python3 refit_floor.py   (from eval/eval-gaze-cursor)
 """
 
@@ -44,8 +55,15 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 T_MIN_GRID = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6]
 LAM_GRID = [0.0, 0.25, 0.5, 1.0, 2.0]
+GAMMA_GRID = [0.5, 0.6, 0.66, 0.7, 0.8, 0.9, 1.0]
 D0_QUANTS = [0.35, 0.5, 0.65, 0.8, 0.9]
 N_FOLDS = 5
+# Geometric mean of the studied width levels {0.01..0.05}; dimensional
+# reference only — any rescaling is absorbed by the fitted D0.
+W_REF = 0.026
+# Dense D0 grid for the h(D0) precompute; candidate D0 values (train-fold
+# quantiles) are then evaluated by interpolation along this axis.
+D0_DENSE = np.geomspace(0.05, 30.0, 120)
 
 
 def _male(h_pred, h_obs):
@@ -56,14 +74,46 @@ def _male(h_pred, h_obs):
     return float(np.median(np.abs(np.log(h_pred[ok] / h_obs[ok]))))
 
 
-def _budget_leads(ev, geoms, lam, D0):
-    """Vector of budget leads h_budget(lam, D0) for every event (end-capped)."""
-    h = np.empty(len(ev))
-    for (p, tid), g in ev.groupby(["participant", "trial_id"]):
-        geom = geoms[(p, tid)]
-        hp, _ = geom.solve_h(g["s_c"].to_numpy(), lam, D0)
-        h[ev.index.get_indexer(g.index)] = hp
-    return h
+def _gamma_cum(geom, gamma, lam):
+    """Cumulative difficulty IC(s) on the geom grid for (gamma, lam)."""
+    invw = ((W_REF / np.clip(geom.W, 1e-6, None)) ** gamma) / W_REF
+    seg = np.diff(geom.s)
+    IW = np.concatenate([[0.0], np.cumsum(0.5 * (invw[1:] + invw[:-1]) * seg)])
+    return IW + lam * geom.PHI
+
+
+class BudgetTable:
+    """Per-(gamma, lam) precompute of h(D0) on the dense D0 grid and the
+    actual-window difficulty D_act for every event. Any candidate D0 value
+    is then an O(events) interpolation — the trial loop runs once per
+    (gamma, lam), not once per (gamma, lam, D0, fold)."""
+
+    def __init__(self, ev, geoms, gamma, lam):
+        n = len(ev)
+        self.h_grid = np.empty((n, len(D0_DENSE)))
+        self.D_act = np.empty(n)
+        for (p, tid), g in ev.groupby(["participant", "trial_id"]):
+            geom = geoms[(p, tid)]
+            IC = _gamma_cum(geom, gamma, lam)
+            loc = ev.index.get_indexer(g.index)
+            s_c = g["s_c"].to_numpy()
+            ic0 = np.interp(s_c, geom.s, IC)
+            # h(D0) for all events x dense-D0 at once (end-capped: interp
+            # saturates at s[-1] because IC targets beyond IC[-1] clip there)
+            targets = ic0[:, None] + D0_DENSE[None, :]
+            s2 = np.interp(targets.ravel(), IC, geom.s).reshape(targets.shape)
+            self.h_grid[loc] = s2 - s_c[:, None]
+            # difficulty inside the observed lookahead window
+            h_obs = np.clip(g["lead_onset"].to_numpy(), 0.0, None)
+            self.D_act[loc] = np.interp(s_c + h_obs, geom.s, IC) - ic0
+
+    def leads(self, D0):
+        """Budget leads for a scalar D0 (interpolated along the dense axis)."""
+        j = np.searchsorted(D0_DENSE, D0)
+        j = int(np.clip(j, 1, len(D0_DENSE) - 1))
+        d0, d1 = D0_DENSE[j - 1], D0_DENSE[j]
+        w = (D0 - d0) / (d1 - d0)
+        return (1 - w) * self.h_grid[:, j - 1] + w * self.h_grid[:, j]
 
 
 def _floored(h_budget, v, T_min, remaining):
@@ -88,32 +138,24 @@ def fit_group(ev, geoms, label=""):
     remaining = (ev["s_end"] - ev["s_c"]).to_numpy(float)
     folds = _fold_assign(ev, N_FOLDS)
 
-    # Cache budget leads per (lam, D0) — D0 values are train-quantiles, so
-    # cache keyed on the rounded value to reuse across folds when equal.
-    cache = {}
+    tables = {(g, l): BudgetTable(ev, geoms, g, l)
+              for g in GAMMA_GRID for l in LAM_GRID}
 
-    def budget_leads(lam, D0):
-        key = (lam, round(D0, 6))
-        if key not in cache:
-            cache[key] = _budget_leads(ev, geoms, lam, D0)
-        return cache[key]
-
-    # ---- CV over the (lam, q, T_min) grid
-    combo_pred = {}   # (lam, q, T_min) -> out-of-fold predictions
+    # ---- CV over the (gamma, lam, q, T_min) grid
+    combo_pred = {}   # (gamma, lam, q, T_min) -> out-of-fold predictions
     pl_pred = np.full(len(ev), np.nan)
     for f in range(N_FOLDS):
         tr = folds != f
         te = folds == f
         if te.sum() == 0 or tr.sum() < 20:
             continue
-        for lam in LAM_GRID:
-            D_act = (ev.loc[tr, "D_W_act"] + lam * ev.loc[tr, "D_K_act"]).to_numpy()
+        for (gam, lam), tab in tables.items():
             for q in D0_QUANTS:
-                D0 = float(np.quantile(D_act, q))
-                hb = budget_leads(lam, D0)
+                D0 = float(np.quantile(tab.D_act[tr], q))
+                hb = tab.leads(D0)
                 for T_min in T_MIN_GRID:
                     hp = _floored(hb[te], v[te], T_min, remaining[te])
-                    combo_pred.setdefault((lam, q, T_min),
+                    combo_pred.setdefault((gam, lam, q, T_min),
                                           np.full(len(ev), np.nan))[te] = hp
         pl_params, _ = ha.fit_horizon_power(ev.loc[tr])
         pl_pred[te] = ha.predict_lead(pl_params, ev.loc[te, "width"])
@@ -124,23 +166,31 @@ def fit_group(ev, geoms, label=""):
                 "rho_cv": float(ha.spearman(pred[ok], h_obs[ok]))}
 
     scores = {c: score(p) for c, p in combo_pred.items()}
-    best_full = min(scores, key=lambda c: scores[c]["male_cv"])
-    best_bare = min((c for c in scores if c[2] == 0.0),
-                    key=lambda c: scores[c]["male_cv"])
+
+    def best(filt):
+        c = min((c for c in scores if filt(c)),
+                key=lambda c: scores[c]["male_cv"])
+        return {"gamma": c[0], "lam": c[1], "D0_quantile": c[2],
+                "T_min": c[3], **scores[c]}, c
+
+    full_s, full_c = best(lambda c: True)
+    gamma_only_s, _ = best(lambda c: c[3] == 0.0)
+    floor_budget_s, _ = best(lambda c: c[0] == 1.0)
+    bare_s, _ = best(lambda c: c[0] == 1.0 and c[3] == 0.0)
     floor_only = {}
     for T_min in T_MIN_GRID:
         if T_min == 0.0:
             continue
-        hp = np.clip(v * T_min, 0.0, remaining)
-        floor_only[T_min] = score(hp)  # no fitted piece -> CV unnecessary
+        floor_only[T_min] = score(np.clip(v * T_min, 0.0, remaining))
     best_floor = min(floor_only, key=lambda t: floor_only[t]["male_cv"])
 
-    # ---- final fit on all events with the selected (lam, q, T_min)
-    lam, q, T_min = best_full
-    D_act = (ev["D_W_act"] + lam * ev["D_K_act"]).to_numpy()
-    D0 = float(np.quantile(D_act, q))
-    h_final = _floored(budget_leads(lam, D0), v, T_min, remaining)
-    frac_floor = float(np.mean((v * T_min > budget_leads(lam, D0)) & (h_final > 0)))
+    # ---- final fit on all events with the selected combo
+    gam, lam, q, T_min = full_c
+    tab = tables[(gam, lam)]
+    D0 = float(np.quantile(tab.D_act, q))
+    hb = tab.leads(D0)
+    h_final = _floored(hb, v, T_min, remaining)
+    frac_floor = float(np.mean((v * T_min > hb) & (h_final > 0)))
 
     by_width = {}
     for w, g in ev.groupby(ev["width"].round(3)):
@@ -154,19 +204,49 @@ def fit_group(ev, geoms, label=""):
     return {
         "n": int(len(ev)),
         "cv": {
-            "floored_budget": {"lam": lam, "D0_quantile": q, "T_min": T_min,
-                               **scores[best_full]},
-            "bare_budget": {"lam": best_bare[0], "D0_quantile": best_bare[1],
-                            **scores[best_bare]},
+            "full": full_s,
+            "gamma_only": gamma_only_s,
+            "floored_budget_gamma1": floor_budget_s,
+            "bare_budget": bare_s,
             "floor_only": {"T_min": best_floor, **floor_only[best_floor]},
             "power_law": score(pl_pred),
         },
-        "sim_params": {"T_min": T_min, "lam": lam, "D0": D0},
+        "sim_params": {"T_min": T_min, "lam": lam, "D0": D0,
+                       "gamma": gam, "W_ref": W_REF},
         "insample_rho": float(ha.spearman(h_final, h_obs)),
         "insample_male": _male(h_final, h_obs),
         "frac_floor_active": frac_floor,
         "lead_by_width": by_width,
     }
+
+
+def c2u_transfer(samples, events, sim_params):
+    """Steering-fitted params applied to constrained-to-unconstrained trials
+    with NO refit — the budget model's transfer test (bare-budget reference:
+    rho 0.53 pooled, lookahead_summary.json unconstrained section)."""
+    ev = events[
+        (events["tunnel_type"] == "constrained_to_unconstrained")
+        & (events["speed_onset"] > ha.MIN_SPEED)
+        & events["lead_onset"].notna()
+    ].copy()
+    ev, geoms = ld.attach_geometry(samples, ev)
+    ev = ev[ev["s_c"].notna() & (ev["lead_onset"] > ha.MIN_LEAD)]
+    ev = ev.reset_index(drop=True)
+    if not len(ev):
+        return {}
+    tab = BudgetTable(ev, geoms, sim_params["gamma"], sim_params["lam"])
+    hb = tab.leads(sim_params["D0"])
+    remaining = (ev["s_end"] - ev["s_c"]).to_numpy(float)
+    hp = _floored(hb, ev["speed_onset"].to_numpy(float),
+                  sim_params["T_min"], remaining)
+    h_obs = ev["lead_onset"].to_numpy(float)
+    out = {"pooled": {"rho": float(ha.spearman(hp, h_obs)),
+                      "male": _male(hp, h_obs), "n": int(len(ev))}}
+    for p, g in ev.groupby("participant"):
+        loc = g.index.to_numpy()
+        out[p] = {"rho": float(ha.spearman(hp[loc], h_obs[loc])),
+                  "male": _male(hp[loc], h_obs[loc]), "n": int(len(g))}
+    return out
 
 
 def main():
@@ -179,13 +259,19 @@ def main():
     print(f"[info] {len(ev_pos)} positive-lead steering events")
 
     out = {"n_events": int(len(ev_pos)),
-           "model": "h = clip(max(v*T_min, budget(lam, D0)), 0, remaining)",
+           "model": ("h = clip(max(v*T_min, budget(gamma, lam, D0)), 0, "
+                     "remaining); density_W = (W_ref/W)^gamma / W_ref"),
+           "W_ref": W_REF,
            "selection": "grouped 5-fold CV, median |log(pred/obs)|"}
     out["pooled"] = fit_group(ev_pos, geoms, "pooled")
     for p, g in ev_pos.groupby("participant"):
         out[p] = fit_group(g, geoms, p)
         print(f"[{p}] {json.dumps(out[p]['cv'], default=float)}")
     print(f"[pooled] {json.dumps(out['pooled']['cv'], default=float)}")
+
+    out["c2u_transfer"] = c2u_transfer(samples, events,
+                                       out["pooled"]["sim_params"])
+    print(f"[c2u] {json.dumps(out['c2u_transfer'], default=float)}")
 
     with open(RESULTS_DIR / "lookahead_floor_summary.json", "w") as f:
         json.dump(out, f, indent=2, default=float)

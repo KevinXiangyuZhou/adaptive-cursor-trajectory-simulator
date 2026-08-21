@@ -94,8 +94,12 @@ class CursorSimulator:
             # collapse near the path end. Defaults are the pooled refit
             # (cross-validated, magnitude-calibrated) sim_params from
             # results/lookahead_floor_summary.json.
+            # gamma < 1 makes the lookahead sublinear in width (human lead ~
+            # w^0.66); W_ref is the dimensional reference (geometric mean of
+            # the studied widths), absorbed by D0 — not a behavior knob.
             "horizon_mode": "fixed",
-            "budget": {"D0": 1.66, "lam": 0.5, "T_min": 0.1},
+            "budget": {"D0": 1.66, "lam": 0.5, "T_min": 0.1,
+                       "gamma": 1.0, "W_ref": 0.026},
             # replan_mode "every_step": re-solve each step (baseline).
             # replan_mode "intermittent": execute the plan open-loop and
             # re-solve on arrival at the planned anchor + a post-arrival
@@ -170,6 +174,8 @@ class CursorSimulator:
         self.budget_D0 = float(budget_cfg.get('D0', 1.66))
         self.budget_lam = float(budget_cfg.get('lam', 0.5))
         self.budget_T_min = float(budget_cfg.get('T_min', 0.1))
+        self.budget_gamma = float(budget_cfg.get('gamma', 1.0))
+        self.budget_W_ref = float(budget_cfg.get('W_ref', 0.026))
         self.replan_mode = str(config.get('replan_mode', 'every_step'))
         if self.replan_mode not in ('every_step', 'intermittent'):
             raise ValueError(f"replan_mode must be 'every_step' or 'intermittent', got {self.replan_mode!r}")
@@ -438,6 +444,7 @@ class CursorSimulator:
                 s_prof, c_prof, k_prof, v_ref_prof,
                 D0=self.budget_D0, lam=self.budget_lam,
                 T_min=self.budget_T_min,
+                gamma=self.budget_gamma, W_ref=self.budget_W_ref,
             )
         tau_steps = max(0, int(round(self.replan_latency_s / self.interval)))
         # Time-based solve-horizon floor: the plan must always cover at least

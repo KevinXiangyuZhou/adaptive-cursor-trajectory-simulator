@@ -102,6 +102,27 @@ def test_budget_floor_caps_at_path_end():
     assert bh.anchor(0.03, v_now=1.0) == pytest.approx(0.04)
 
 
+def test_budget_gamma_sublinear_width_scaling():
+    # closed form on a uniform corridor: h = D0 * W^gamma * W_ref^(1-gamma)
+    s = np.linspace(0.0, 2.0, 2001)
+
+    def make(width, gamma):
+        return DifficultyBudgetHorizon(
+            s_profile=s, width_profile=np.full(2001, width),
+            kappa_profile=np.zeros(2001), v_ref_profile=np.full(2001, 0.2),
+            D0=1.5, lam=0.5, gamma=gamma, W_ref=0.026)
+
+    for w in (0.01, 0.05):
+        h = make(w, 0.66).anchor(0.5) - 0.5
+        assert h == pytest.approx(1.5 * w**0.66 * 0.026**0.34, rel=1e-3)
+    # gamma=1 reduces exactly to the 1/W density (W_ref cancels)
+    h1 = make(0.03, 1.0).anchor(0.5) - 0.5
+    assert h1 == pytest.approx(1.5 * 0.03, rel=1e-3)
+    # sublinear: lead ratio across a 5x width range < 5x
+    r = (make(0.05, 0.66).anchor(0.0)) / (make(0.01, 0.66).anchor(0.0))
+    assert 2.5 < r < 3.5  # 5**0.66 ~ 2.9
+
+
 # --------------------------------------------------------- ReplanScheduler
 
 def _event(step=0, t=0.0, theta=0.0, anchor=1.0, n_steps=10, trigger="init"):
