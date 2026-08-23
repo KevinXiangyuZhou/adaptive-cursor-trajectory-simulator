@@ -17,9 +17,9 @@ the goal-precision well, which is scaled by nc^2, stays active during fitting):
            progress, Th) on the steering training widths {10, 30, 50} mm.
            Loss = human-variability-normalised lateral RMSE + speed-profile
            RMSE + (1 - speed corr) + relative time diff + wall margin.
-  Stage 3  Free-space (pointing) LQ weights via CMA-ES (goal, free_velocity,
-           goal_precision; jerk fixed from Stage 2) on the pointing training
-           radii {5, 15, 25} mm. Loss = normalised |relative MT_kin diff| +
+  Stage 3  Free-space (pointing) LQ weights via CMA-ES (goal, free_velocity;
+           jerk fixed from Stage 2; goal_precision stays at the base config's
+           value, default 0) on the pointing training radii {5, 15, 25} mm. Loss = normalised |relative MT_kin diff| +
            speed-profile RMSE + (1 - corr) + endpoint-depth diff + lateral
            RMSE, with MT_kin = movement onset -> final target entry on both
            sides (human reaction and click latency are NOT fitted; the model
@@ -80,7 +80,9 @@ from utils.stats import (  # noqa: E402
 )
 from extract_speed_data import extract_all_speed_data_v2  # noqa: E402  (same dir)
 
-HUMAN_DATA_DIR = em.HUMAN_DATA_DIR
+# Overridable per cohort: HCS_HUMAN_DATA_DIR env or --data-dir (e.g. the
+# gaze cohort lives in human_data/gaze_cursor_data).
+HUMAN_DATA_DIR = Path(os.environ.get("HCS_HUMAN_DATA_DIR", em.HUMAN_DATA_DIR))
 DEFAULT_BASE_CONFIG = PROJECT_ROOT / "hcs_package" / "src" / "hcs_package" / "user_configurations" / "office_worker.json"
 POPULATION_GAM = DEFAULT_BASE_CONFIG.parent / "population_gam.pkl"
 # Override with HCS_FIT_RESULTS_DIR (Great Lakes: .../projects/chi-27/results/model_fitting)
@@ -120,11 +122,14 @@ TUNNEL_PARAM_SPEC = [
     {"name": "Th",         "log_scale": False, "bounds": (0.2, 0.6), "discrete_step": 0.05,
      "config_key": "top_level"},
 ]
-# Stage 3: free-space LQ weights (jerk fixed from Stage 2 — only ratios matter for the LQR)
+# Stage 3: free-space LQ weights (jerk fixed from Stage 2 — only ratios matter
+# for the LQR). goal_precision is NOT fitted: the well is off by default
+# (2026-08-21 decision; seed-averaged ablation showed ~10% slope effect at
+# 1e-4 and nothing in steering) — re-add here only if the endpoint-depth
+# objective demands it.
 POINTING_PARAM_SPEC = [
     {"name": "goal",           "log_scale": True, "bounds": (-1.0, 1.0)},   # 0.1 - 10
     {"name": "free_velocity",  "log_scale": True, "bounds": (-2.5, 0.0)},   # 0.003 - 1
-    {"name": "goal_precision", "log_scale": True, "bounds": (-7.0, -3.0)},  # 1e-7 (~off) - 1e-3
 ]
 
 TUNNEL_LOSS_WEIGHTS = {"lateral_rmse": 1.0, "speed_rmse": 1.0, "speed_corr": 1.0, "time_diff": 1.0}
@@ -470,7 +475,10 @@ def _eval_tunnel(args):
     """One CMA-ES candidate on the tunnel training set. Top-level for Pool."""
     vec, base_config, gam_path, train_data, tasks, scales = args
     TUNNEL_SCALES.update(scales)
-    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, TUNNEL_PARAM_SPEC)); cfg["add_noise"] = False   # noiseless sim, but keep nc: the precision well is scaled by nc^2
+    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, TUNNEL_PARAM_SPEC))
+    cfg["add_noise"] = False          # noiseless sim (nc kept in the persona)
+    cfg["replan_latency_cv"] = 0.0    # deterministic replan latency during fitting;
+                                      # the SAVED config keeps the base cv for generation
     try:
         sim = _make_sim(cfg, gam_path)
     except Exception:
@@ -555,7 +563,9 @@ def _eval_pointing(args):
     """One CMA-ES candidate on the pointing training set (one noiseless sim per human round)."""
     vec, base_config, gam_path, train_data, scales = args
     POINT_SCALES.update(scales)
-    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, POINTING_PARAM_SPEC)); cfg["add_noise"] = False   # noiseless sim, but keep nc: the precision well is scaled by nc^2
+    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, POINTING_PARAM_SPEC))
+    cfg["add_noise"] = False          # noiseless sim (nc kept in the persona)
+    cfg["replan_latency_cv"] = 0.0    # deterministic replan latency during fitting
     try:
         sim = _make_sim(cfg, gam_path)
     except Exception:
@@ -647,6 +657,10 @@ def run_fitting(pid, base_config_path, time_limit, seed, popsize, n_workers, sta
         print("  reusing tunnel fit from", cfg_path)
     T0 = time.time()
 
+    if base.get("horizon_mode") == "budget":
+        print("  NOTE: horizon_mode=budget — the fitted Th is inert (the difficulty-budget "
+              "lookahead sets the horizon); it is kept in the CMA-ES spec for pipeline "
+              "uniformity but has no effect on the loss.")
     if stages in ("all", "tunnel"):
         # Phase 0
         steer_train_tasks = {t: tunnel_tasks[t][0] for t in tun_train}
@@ -720,7 +734,13 @@ def main():
     ap.add_argument("--popsize", type=int, default=12)
     ap.add_argument("--n-workers", type=int, default=None)
     ap.add_argument("--stages", choices=["all", "tunnel", "pointing"], default="all")
+    ap.add_argument("--data-dir", default=None,
+                    help="Human data directory (default: env HCS_HUMAN_DATA_DIR or the "
+                         "aug-26-prolific dataset). Gaze cohort: human_data/gaze_cursor_data")
     a = ap.parse_args()
+    if a.data_dir:
+        global HUMAN_DATA_DIR
+        HUMAN_DATA_DIR = Path(a.data_dir)
     run_fitting(a.pid, a.config, a.time_limit, a.seed, a.popsize, a.n_workers, a.stages)
 
 

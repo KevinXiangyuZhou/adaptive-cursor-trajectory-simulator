@@ -39,11 +39,16 @@ SEED="${SEED:-42}"
 echo "Evaluating participant: $PID (array task $SLURM_ARRAY_TASK_ID, seed $SEED)"
 echo "Start time: $(date)"
 
+# Cohort selection mirrors fit_all_participants.sh:
+#   PARTICIPANTS_FILE=participants_gaze.txt DATA_DIR=human_data/gaze_cursor_data sbatch --array=1-3 ...
+DATA_ARG=()
+if [ -n "$DATA_DIR" ]; then DATA_ARG=(--data-dir "$PROJECT_DIR/$DATA_DIR"); fi
 python -u eval/eval-main/run_eval.py \
     --pid "$PID" \
     --per-participant \
     --seed "$SEED" \
     --fresh-sim \
+    "${DATA_ARG[@]}" \
     2>&1 | tee "$HCS_EVAL_RESULTS_DIR/eval_${PID}_s${SEED}.log"
 
 echo "End time: $(date)"
