@@ -6,6 +6,15 @@ dataset (steering + ID4SCS + unconstrained pointing) and the current model
 Pipeline (all simulation noiseless — add_noise=False; the persona's nc is kept so
 the goal-precision well, which is scaled by nc^2, stays active during fitting):
 
+  Stage G  (gaze participants only, runs OUTSIDE this script, before it):
+           intermittent-control module parameters fitted from the gaze data —
+           difficulty-budget lookahead (D0, gamma, lam, T_min;
+           eval/eval-gaze-cursor/refit_floor.py) and replan trigger timing
+           (tau, cv; intermittency_analysis.py) — baked into
+           base_configs_gaze/{pid}.json and held FIXED here. Because the
+           budget lookahead determines the prediction horizon, Th is
+           excluded from the Stage 2 search under horizon_mode=budget.
+
   Phase 0  Reference-path params (spatial-only, no simulation).
            Loss: lateral RMSE of human trajectories w.r.t. the generated
            reference path, on the steering training tasks.
@@ -472,10 +481,13 @@ def compute_tunnel_scales(train_data, tasks):
 
 
 def _eval_tunnel(args):
-    """One CMA-ES candidate on the tunnel training set. Top-level for Pool."""
-    vec, base_config, gam_path, train_data, tasks, scales = args
+    """One CMA-ES candidate on the tunnel training set. Top-level for Pool.
+    The parameter spec travels in the args (not via the module global) so the
+    effective spec — e.g. Th excluded under horizon_mode=budget — reaches
+    spawn-based Pool workers unchanged."""
+    vec, spec, base_config, gam_path, train_data, tasks, scales = args
     TUNNEL_SCALES.update(scales)
-    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, TUNNEL_PARAM_SPEC))
+    cfg = copy.deepcopy(base_config); apply_params(cfg, decode(vec, spec))
     cfg["add_noise"] = False          # noiseless sim (nc kept in the persona)
     cfg["replan_latency_cv"] = 0.0    # deterministic replan latency during fitting;
                                       # the SAVED config keeps the base cv for generation
@@ -657,10 +669,15 @@ def run_fitting(pid, base_config_path, time_limit, seed, popsize, n_workers, sta
         print("  reusing tunnel fit from", cfg_path)
     T0 = time.time()
 
+    # Under horizon_mode=budget the prediction horizon is DETERMINED by the
+    # gaze-fitted difficulty-budget lookahead (D0, gamma, lam, T_min in the
+    # base config) — Th is unused by the simulator, so it is excluded from
+    # the Stage 2 search instead of being fitted as an inert dimension.
+    tunnel_spec = TUNNEL_PARAM_SPEC
     if base.get("horizon_mode") == "budget":
-        print("  NOTE: horizon_mode=budget — the fitted Th is inert (the difficulty-budget "
-              "lookahead sets the horizon); it is kept in the CMA-ES spec for pipeline "
-              "uniformity but has no effect on the loss.")
+        tunnel_spec = [sp for sp in TUNNEL_PARAM_SPEC if sp["name"] != "Th"]
+        print("  horizon_mode=budget: Th excluded from Stage 2 — the prediction horizon "
+              "is set by the gaze-fitted budget lookahead (fixed during this fit).")
     if stages in ("all", "tunnel"):
         # Phase 0
         steer_train_tasks = {t: tunnel_tasks[t][0] for t in tun_train}
@@ -675,16 +692,16 @@ def run_fitting(pid, base_config_path, time_limit, seed, popsize, n_workers, sta
         base["speed_model"] = {"type": "gam", "path": gam_path}
         # Stage 2
         compute_tunnel_scales(tun_train, tunnel_tasks)
-        init = {s["name"]: (base["Th"] if s["name"] == "Th" else base["planner_weights"][s["name"]]) for s in TUNNEL_PARAM_SPEC}
+        init = {s["name"]: (base["Th"] if s["name"] == "Th" else base["planner_weights"][s["name"]]) for s in tunnel_spec}
         remaining = time_limit - (time.time() - T0)
         budget = remaining * (0.80 if stages == "all" else 1.0)
-        fitted_t, best_t, hist_t = run_cmaes("Stage 2 (tunnel)", TUNNEL_PARAM_SPEC, init, _eval_tunnel,
-                                              (base, gam_path, tun_train, tunnel_tasks, dict(TUNNEL_SCALES)),
+        fitted_t, best_t, hist_t = run_cmaes("Stage 2 (tunnel)", tunnel_spec, init, _eval_tunnel,
+                                              (tunnel_spec, base, gam_path, tun_train, tunnel_tasks, dict(TUNNEL_SCALES)),
                                               budget, seed, popsize, n_workers)
         apply_params(base, fitted_t)
-        bx = encode(fitted_t, TUNNEL_PARAM_SPEC)
-        train_loss = _eval_tunnel((bx, base, gam_path, tun_train, tunnel_tasks, dict(TUNNEL_SCALES)))
-        test_loss = _eval_tunnel((bx, base, gam_path, tun_test, tunnel_tasks, dict(TUNNEL_SCALES))) if tun_test else None
+        bx = encode(fitted_t, tunnel_spec)
+        train_loss = _eval_tunnel((bx, tunnel_spec, base, gam_path, tun_train, tunnel_tasks, dict(TUNNEL_SCALES)))
+        test_loss = _eval_tunnel((bx, tunnel_spec, base, gam_path, tun_test, tunnel_tasks, dict(TUNNEL_SCALES))) if tun_test else None
         print(f"  tunnel: train loss {train_loss:.4f}  test loss {test_loss}")
         result.update({"fitted_tunnel_params": fitted_t, "tunnel_best_loss": best_t, "tunnel_train_loss": train_loss,
                        "tunnel_test_loss": test_loss, "tunnel_scales": dict(TUNNEL_SCALES), "tunnel_history": hist_t})
