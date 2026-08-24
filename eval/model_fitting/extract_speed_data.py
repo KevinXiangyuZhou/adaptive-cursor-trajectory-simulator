@@ -129,7 +129,9 @@ def extract_all_speed_data_v2(participant_data, task_geometry, ref_path_params,
 
     Returns dict {clearance, kappa, dkappa_ds, speed, trial_id} or None.
     """
-    cols = {"clearance": [], "kappa": [], "dkappa_ds": [], "speed": [], "trial_id": []}
+    cols = {"clearance": [], "kappa": [], "dkappa_ds": [], "speed": [], "trial_id": [],
+            "round_id": []}
+    round_counter = 0
     for tid, rounds in participant_data.items():
         if tid not in task_geometry:
             continue
@@ -153,6 +155,8 @@ def extract_all_speed_data_v2(participant_data, task_geometry, ref_path_params,
             for k in ("clearance", "kappa", "dkappa_ds", "speed"):
                 cols[k].append(f[k][keep])
             cols["trial_id"].append(np.full(int(keep.sum()), tid))
+            cols["round_id"].append(np.full(int(keep.sum()), round_counter))
+            round_counter += 1
     if not cols["speed"]:
         return None
     return {k: np.concatenate(v) for k, v in cols.items()}

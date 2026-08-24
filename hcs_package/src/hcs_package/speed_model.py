@@ -57,7 +57,8 @@ class GAMSpeedModel:
 
     def fit(self, clearance: np.ndarray, kappa: np.ndarray,
             dkappa_ds: np.ndarray, speeds: np.ndarray,
-            lam_grid: Optional[np.ndarray] = None):
+            lam_grid: Optional[np.ndarray] = None,
+            sample_weight: Optional[np.ndarray] = None):
         """Fit GAM from human speed observations.
 
         Args:
@@ -66,6 +67,11 @@ class GAMSpeedModel:
             dkappa_ds: |curvature rate| at each observation.
             speeds:    Human speed at each observation.
             lam_grid:  Smoothing parameter grid for gridsearch.
+            sample_weight: Optional per-observation weights. Use these to
+                de-bias duration sampling: observations arrive per timestep,
+                so a slow round contributes proportionally more samples than
+                a fast round of the same trial and drags the fit toward the
+                slow tail unless rounds are re-weighted to contribute equally.
         """
         try:
             from pygam import LinearGAM, s as spline_term
@@ -94,7 +100,7 @@ class GAMSpeedModel:
 
         if lam_grid is None:
             lam_grid = np.logspace(-1, 4, 11)
-        gam.gridsearch(X, y, lam=lam_grid)
+        gam.gridsearch(X, y, lam=lam_grid, weights=sample_weight)
 
         self.gam = gam
         self._is_fitted = True

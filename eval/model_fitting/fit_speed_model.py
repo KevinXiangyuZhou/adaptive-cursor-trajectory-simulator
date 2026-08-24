@@ -141,9 +141,15 @@ POINTING_PARAM_SPEC = [
     {"name": "free_velocity",  "log_scale": True, "bounds": (-2.5, 0.0)},   # 0.003 - 1
 ]
 
-TUNNEL_LOSS_WEIGHTS = {"lateral_rmse": 1.0, "speed_rmse": 1.0, "speed_corr": 1.0, "time_diff": 1.0}
+# log_time replaces time_diff in the loss (kept in metrics for reporting):
+# |log(model_CT / human_CT)| is symmetric in slow/fast misses, unlike the
+# relative diff, and its weight is doubled — the 8-24 fits showed a 2-3x CT
+# miss on narrow curved tunnels can survive when the equal-weight shape terms
+# are satisfied.
+TUNNEL_LOSS_WEIGHTS = {"lateral_rmse": 1.0, "speed_rmse": 1.0, "speed_corr": 1.0, "log_time": 2.0}
 POINT_LOSS_WEIGHTS = {"mt_rel": 1.0, "speed_rmse": 1.0, "speed_corr": 1.0, "end_depth": 1.0, "lateral_rmse": 1.0}
-DEFAULT_TUNNEL_SCALES = {"lateral_rmse": 0.003, "speed_rmse": 0.05, "speed_corr": 0.3, "time_diff": 0.15}
+DEFAULT_TUNNEL_SCALES = {"lateral_rmse": 0.003, "speed_rmse": 0.05, "speed_corr": 0.3, "time_diff": 0.15,
+                         "log_time": 0.15}
 DEFAULT_POINT_SCALES = {"mt_rel": 0.2, "speed_rmse": 0.1, "speed_corr": 0.2, "end_depth": 0.2, "lateral_rmse": 0.004}
 
 
@@ -415,10 +421,22 @@ def fit_gam_speed_model(tunnel_data, task_configs, ref_params):
         raise ValueError("no speed data extracted")
     valid = data["speed"] > 0.005
     cl, ka, dk, sp = data["clearance"][valid], data["kappa"][valid], data["dkappa_ds"][valid], data["speed"][valid]
-    print(f"  {int(valid.sum())} observations from {len(np.unique(data['trial_id']))} tasks; "
-          f"clearance [{cl.min():.4f}, {cl.max():.4f}] m, kappa [{ka.min():.2f}, {ka.max():.2f}], median speed {np.median(sp):.3f} m/s")
+    rid = data["round_id"][valid]
+    # Equal weight per ROUND, not per sample: observations arrive per
+    # timestep, so a slow round of a trial contributes proportionally more
+    # samples than a fast round of the same trial (a 15 s round has ~6x the
+    # samples of a 2.5 s one) and drags the regression toward the slow tail.
+    # This produced narrow-width speed targets ~2-3x below the participant's
+    # typical rounds in the 8-24 fits.
+    _, inv, counts = np.unique(rid, return_inverse=True, return_counts=True)
+    w = 1.0 / counts[inv]
+    w *= len(w) / w.sum()   # mean weight 1 for conditioning
+    print(f"  {int(valid.sum())} observations from {len(np.unique(data['trial_id']))} tasks "
+          f"({len(counts)} rounds, equal-round weighting); "
+          f"clearance [{cl.min():.4f}, {cl.max():.4f}] m, kappa [{ka.min():.2f}, {ka.max():.2f}], "
+          f"median speed {np.median(sp):.3f} m/s (round-weighted {np.average(sp, weights=w):.3f})")
     gam = GAMSpeedModel(base_speed=float(np.median(sp)), floor=0.01, ceil=0.6)
-    gam.fit(cl, ka, dk, sp)
+    gam.fit(cl, ka, dk, sp, sample_weight=w)
     pred = gam.compute_speed_profile(np.arange(len(sp)), cl, ka, dk)
     print(f"  fitted in {time.time() - t0:.1f}s; train corr {np.corrcoef(sp, pred)[0, 1]:.3f}, RMSE {np.sqrt(np.mean((sp - pred) ** 2)):.4f} m/s")
     return gam
@@ -446,19 +464,21 @@ def tunnel_metrics(model_traj, model_speeds, human, centerline, sim_interval, ha
         wall = float(np.mean(np.maximum(prox - 0.6, 0.0) ** 2))
     return {"lateral_rmse": trajectory_rmse(lat_m, lat_h), "speed_rmse": speed_profile_rmse(sm, sh),
             "speed_corr": speed_profile_correlation(sm, sh),
-            "time_diff": abs(model_time - human_time) / max(human_time, 0.1), "wall_margin": wall}
+            "time_diff": abs(model_time - human_time) / max(human_time, 0.1),
+            "log_time": abs(math.log(max(model_time, 0.05) / max(human_time, 0.05))),
+            "wall_margin": wall}
 
 
 def tunnel_loss(m):
     loss = 0.0
-    for k in ("lateral_rmse", "speed_rmse", "time_diff"):
+    for k in ("lateral_rmse", "speed_rmse", "log_time"):
         loss += TUNNEL_LOSS_WEIGHTS[k] * m[k] / TUNNEL_SCALES[k]
     loss += TUNNEL_LOSS_WEIGHTS["speed_corr"] * (1.0 - m["speed_corr"]) / TUNNEL_SCALES["speed_corr"]
     return loss + WALL_MARGIN_WEIGHT * m.get("wall_margin", 0.0)
 
 
 def compute_tunnel_scales(train_data, tasks):
-    pm = {"lateral_rmse": [], "speed_rmse": [], "speed_corr": [], "time_diff": []}
+    pm = {"lateral_rmse": [], "speed_rmse": [], "speed_corr": [], "time_diff": [], "log_time": []}
     for tid, rounds in train_data.items():
         if len(rounds) < 2 or tid not in tasks:
             continue
@@ -473,6 +493,7 @@ def compute_tunnel_scales(train_data, tasks):
             pm["speed_rmse"].append(speed_profile_rmse(sa, sb)); pm["speed_corr"].append(1.0 - speed_profile_correlation(sa, sb))
             ta = (a["timestamps"][-1] - a["timestamps"][0]) / 1000.0; tb = (b["timestamps"][-1] - b["timestamps"][0]) / 1000.0
             pm["time_diff"].append(abs(ta - tb) / max(tb, 0.1))
+            pm["log_time"].append(abs(math.log(max(ta, 0.05) / max(tb, 0.05))))
     if pm["lateral_rmse"]:
         for k in pm:
             TUNNEL_SCALES[k] = max(float(np.median(pm[k])), 1e-6)
