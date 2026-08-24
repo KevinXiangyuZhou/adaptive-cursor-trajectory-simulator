@@ -2,7 +2,7 @@
 #SBATCH --job-name=hcs_fit
 #SBATCH --account=soney0
 #SBATCH --partition=standard
-#SBATCH --time=13:00:00
+#SBATCH --time=8:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
@@ -49,8 +49,8 @@ STAGES="${STAGES:-all}"
 if [ -n "$DATA_DIR" ]; then export HCS_HUMAN_DATA_DIR="$PROJECT_DIR/$DATA_DIR"; fi
 CONFIG_ARG=()
 if [ -n "$BASE_CONFIG_DIR" ]; then CONFIG_ARG=(--config "$PROJECT_DIR/$BASE_CONFIG_DIR/${PID}.json"); fi
-# leave ~30 min of the 13 h wall time for start-up + final validation
-TIME_LIMIT="${TIME_LIMIT:-43200}"
+# leave ~30 min of the 8 h wall time for start-up + final validation
+TIME_LIMIT="${TIME_LIMIT:-28800}"
 
 echo "Fitting participant: $PID (array task $SLURM_ARRAY_TASK_ID, seed $SEED, stages $STAGES)"
 echo "Start time: $(date)"
