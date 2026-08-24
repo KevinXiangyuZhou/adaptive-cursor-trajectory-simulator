@@ -14,7 +14,8 @@ sawtooth: saccade jump at each replan, roughly linear decay while the cursor
 closes the gap, negative overshoot during the post-arrival latency.
 
 For each participant (A/B/C) this script runs the FITTED persona
-(model_fitting_8-24-26/{pid}_gam_config_s42.json: budget horizon +
+(results_gaze_completed/{pid}_gam_config_s42.json overlaid with the current
+width-only Stage G budget from lookahead_floor_summary.json: budget horizon +
 intermittent replanning, goal_precision 0) once per supported trial (steering,
 ID4SCS, unconstrained pointing; constrained->unconstrained trials have no
 simulator task builder and are skipped), extracts the model lead trace, and
@@ -88,7 +89,11 @@ class ArcProjector:
         return float(self.s_dense[int(np.argmin(d2))])
 
 GAZE_DATA_DIR = PROJECT_ROOT / "human_data" / "gaze_cursor_data"
-FIT_DIR = PROJECT_ROOT / "model_fitting_8-24-26"
+FIT_DIR = PROJECT_ROOT / "eval" / "model_fitting" / "results_gaze_completed"
+# Authoritative Stage G (gaze-module) parameters: the persona configs bake in
+# whatever budget the fit ran with, so the CURRENT width-only sim_params are
+# applied on top (until the next cluster fit regenerates the personas).
+GAZE_FLOOR_SUMMARY = PROJECT_ROOT / "eval" / "eval-gaze-cursor" / "results" / "lookahead_floor_summary.json"
 OUT_DIR = SCRIPT_DIR / "model-gaze-lead"
 PARTICIPANTS = {"A": "P105835", "B": "P170114", "C": "P160254"}
 DT = 0.05
@@ -162,17 +167,19 @@ def model_lead_trace(sim, task_config, centerline):
     return t, lead, ev_rows
 
 
-def human_round1(samples, tid):
-    """(t_rel, lead) of the first recorded round of this trial, or None."""
+def human_rounds(samples, tid):
+    """[(t_rel, lead), ...] — one series per recorded round (block) of this
+    trial, each re-zeroed to its own start."""
     d = samples[(samples["trial_id"] == tid) & samples["lead"].notna()]
-    if d.empty:
-        return None
-    first_block = d["block_id"].iloc[0]
-    d = d[d["block_id"] == first_block]
-    if d.empty:
-        return None
-    t = d["t"].to_numpy()
-    return t - t.min(), d["lead"].to_numpy()
+    out = []
+    for _, g in d.groupby("block_id", sort=True):
+        if len(g):
+            t = g["t"].to_numpy()
+            out.append((t - t.min(), g["lead"].to_numpy()))
+    return out
+
+
+HUMAN_ROUND_COLORS = [HUMAN_COLOR, "#c2a5cf"]   # round 1 dark, round 2 light
 
 
 def trial_label(cond, bucket):
@@ -190,21 +197,33 @@ def steering_width(cond):
     return round(float(w), 3) if w is not None else None
 
 
+def _current_budget(letter):
+    """Width-only Stage G sim_params for this participant, if available."""
+    try:
+        sp = json.load(open(GAZE_FLOOR_SUMMARY))[letter]["sim_params"]
+    except (OSError, KeyError, json.JSONDecodeError):
+        return None
+    return {"D0": round(float(sp["D0"]), 4), "T_min": sp["T_min"],
+            "gamma": sp["gamma"], "W_ref": sp.get("W_ref", 0.026)}
+
+
 def run_participant(letter, noise_on=True):
     pid = PARTICIPANTS[letter]
     cfg_path = FIT_DIR / f"{pid}_gam_config_s42.json"
-    if noise_on:
-        sim = CursorSimulator(str(cfg_path))
-    else:
-        cfg = json.load(open(cfg_path))
+    cfg = json.load(open(cfg_path))
+    budget = _current_budget(letter)
+    if budget is not None:
+        cfg["budget"] = budget
+    if not noise_on:
         cfg["add_noise"] = False
         cfg["replan_latency_cv"] = 0.0
-        sm = cfg.get("speed_model", {})
-        if sm.get("path") and not Path(sm["path"]).is_absolute():
-            sm["path"] = str(FIT_DIR / sm["path"])
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
-            json.dump(cfg, tf)
-            sim = CursorSimulator(tf.name)
+    sm = cfg.get("speed_model", {})
+    if sm.get("path") and not Path(sm["path"]).is_absolute():
+        sm["path"] = str(FIT_DIR / sm["path"])
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
+        json.dump(cfg, tf)
+        cfg_file = tf.name
+    sim = CursorSimulator(cfg_file)
 
     tid_to_condition, tid_to_bucket = em.scan_conditions(GAZE_DATA_DIR)
     tids = sorted(t for t, b in tid_to_bucket.items()
@@ -242,20 +261,17 @@ def run_participant(letter, noise_on=True):
             total_time += t_m[-1] if len(t_m) else 0.0
 
             fig, ax = plt.subplots(figsize=(8.5, 4.2))
-            hr = human_round1(samples, tid)
-            if hr is not None:
-                ax.plot(hr[0], hr[1], ".", ms=3, color=HUMAN_COLOR, alpha=0.7,
-                        label="human (round 1 gaze)")
+            for ri, (ht, hl) in enumerate(human_rounds(samples, tid)):
+                ax.plot(ht, hl, ".", ms=3,
+                        color=HUMAN_ROUND_COLORS[ri % len(HUMAN_ROUND_COLORS)],
+                        alpha=0.7, label=f"human gaze (round {ri + 1})")
             ax.plot(t_m, lead_m, "-", lw=1.4, color=MODEL_COLOR,
                     label="model (anchor - cursor)")
-            for row in ev:
-                if row["trigger"] != "init":
-                    ax.axvline(row["t"], color=MODEL_COLOR, lw=0.4, alpha=0.25)
             ax.axhline(0.0, color="0.4", lw=0.8)
             ax.set_xlabel("time since trial start (s)")
             ax.set_ylabel("signed gaze lead along centerline (task units)\n"
                           "(+ gaze ahead / - cursor ahead)")
-            ax.set_title(f"Trial {k + 1}/{len(tids)}  round 1  —  "
+            ax.set_title(f"Trial {k + 1}/{len(tids)}  —  "
                          f"{trial_label(cond, bucket)}  (id {tid})", fontsize=10)
             ax.legend(fontsize=8, loc="upper right")
             ax.grid(alpha=0.25)
