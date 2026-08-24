@@ -26,16 +26,13 @@ CONFIG_DIR = ROOT / "hcs_package" / "src" / "hcs_package" / "user_configurations
 
 # ---------------------------------------------------- DifficultyBudgetHorizon
 
-def _uniform_horizon(width, v=0.2, length=2.0, n=2001, D0=1.4, lam=1.0,
-                     kappa=0.0):
+def _uniform_horizon(width, v=0.2, length=2.0, n=2001, D0=1.4):
     s = np.linspace(0.0, length, n)
     return DifficultyBudgetHorizon(
         s_profile=s,
         width_profile=np.full(n, width),
-        kappa_profile=np.full(n, kappa),
         v_ref_profile=np.full(n, v),
         D0=D0,
-        lam=lam,
     )
 
 
@@ -53,13 +50,16 @@ def test_budget_anchor_narrower_is_shorter():
     assert h_narrow == pytest.approx(1.4 * 0.01, rel=1e-3)
 
 
-def test_budget_curvature_consumes_budget():
-    # adding curvature raises the density, shortening the lookahead
-    h_straight = _uniform_horizon(width=0.03, kappa=0.0).anchor(0.0)
-    h_curved = _uniform_horizon(width=0.03, kappa=20.0).anchor(0.0)
-    assert h_curved < h_straight
-    # analytic: h = D0 / (1/W + lam*kappa)
-    assert h_curved == pytest.approx(1.4 / (1 / 0.03 + 20.0), rel=1e-3)
+def test_budget_density_is_width_only():
+    # the density has NO curvature term (removed 2026-08-24): the anchor on
+    # a uniform corridor depends only on width, and corner dwell emerges
+    # from the apex slowdown, not from a shorter corner lead
+    n = 2001
+    s = np.linspace(0.0, 2.0, n)
+    kappa_free = DifficultyBudgetHorizon(
+        s_profile=s, width_profile=np.full(n, 0.03),
+        v_ref_profile=np.full(n, 0.2), D0=1.4)
+    assert kappa_free.anchor(0.0) == pytest.approx(1.4 * 0.03, rel=1e-3)
 
 
 def test_budget_anchor_caps_at_path_end():
@@ -73,9 +73,6 @@ def test_budget_traverse_time_constant_speed():
     assert bh.traverse_time(0.2, 0.7) == pytest.approx(0.5 / 0.25, rel=1e-6)
 
 
-def test_budget_lam_zero_is_width_only():
-    bh = _uniform_horizon(width=0.02, kappa=50.0, lam=0.0)
-    assert bh.anchor(0.0) == pytest.approx(1.4 * 0.02, rel=1e-3)
 
 
 def test_budget_floor_binds_at_speed():
@@ -84,15 +81,15 @@ def test_budget_floor_binds_at_speed():
     s = np.linspace(0.0, 2.0, 2001)
     bh = DifficultyBudgetHorizon(
         s_profile=s, width_profile=np.full(2001, 0.01),
-        kappa_profile=np.zeros(2001), v_ref_profile=np.full(2001, 0.2),
-        D0=1.4, lam=1.0, T_min=0.15)
+        v_ref_profile=np.full(2001, 0.2),
+        D0=1.4, T_min=0.15)
     assert bh.anchor(0.5, v_now=0.0) - 0.5 == pytest.approx(0.014, rel=1e-3)
     assert bh.anchor(0.5, v_now=0.2) - 0.5 == pytest.approx(0.03, rel=1e-3)
     # wide corridor: budget lead 0.07 exceeds the floor -> unchanged
     bh_wide = DifficultyBudgetHorizon(
         s_profile=s, width_profile=np.full(2001, 0.05),
-        kappa_profile=np.zeros(2001), v_ref_profile=np.full(2001, 0.2),
-        D0=1.4, lam=1.0, T_min=0.15)
+        v_ref_profile=np.full(2001, 0.2),
+        D0=1.4, T_min=0.15)
     assert bh_wide.anchor(0.5, v_now=0.2) - 0.5 == pytest.approx(0.07, rel=1e-3)
 
 
@@ -109,8 +106,8 @@ def test_budget_gamma_sublinear_width_scaling():
     def make(width, gamma):
         return DifficultyBudgetHorizon(
             s_profile=s, width_profile=np.full(2001, width),
-            kappa_profile=np.zeros(2001), v_ref_profile=np.full(2001, 0.2),
-            D0=1.5, lam=0.5, gamma=gamma, W_ref=0.026)
+            v_ref_profile=np.full(2001, 0.2),
+            D0=1.5, gamma=gamma, W_ref=0.026)
 
     for w in (0.01, 0.05):
         h = make(w, 0.66).anchor(0.5) - 0.5
@@ -344,6 +341,7 @@ def test_sim_budget_every_step_matches_baseline_shape(sinusoidal_task):
 def test_sim_budget_solve_horizon_floored_in_time(sinusoidal_task):
     # With T_min > 0 the solve horizon never collapses below ceil(T_min/dt),
     # even when the anchor caps at the path end (the old stall/timeout mode).
+    # budget dict carries a legacy "lam" key on purpose: it must be ignored
     sim = _make_sim({"horizon_mode": "budget",
                      "budget": {"D0": 1.66, "lam": 0.5, "T_min": 0.2}})
     sim.generate_trajectory_with_waypoints(

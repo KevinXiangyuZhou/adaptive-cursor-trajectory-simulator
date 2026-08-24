@@ -54,7 +54,13 @@ import lookahead_difficulty as ld  # noqa: E402
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 T_MIN_GRID = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6]
-LAM_GRID = [0.0, 0.25, 0.5, 1.0, 2.0]
+# Curvature term REMOVED from the gaze model (2026-08-24): lead shrinks with
+# width only. Corner-dwell analysis showed lam>0 shrinks the corner anchor
+# lead enough to cancel the emergent corner dwell (humans: ~1.4-1.5x longer
+# fixations at corners; model reproduces it iff lam=0) while buying ~1% CV.
+# The lam plumbing below is kept so old summaries stay comparable, but only
+# lam=0 is searched and sim_params no longer emits a lam key.
+LAM_GRID = [0.0]
 GAMMA_GRID = [0.5, 0.6, 0.66, 0.7, 0.8, 0.9, 1.0]
 D0_QUANTS = [0.35, 0.5, 0.65, 0.8, 0.9]
 N_FOLDS = 5
@@ -211,7 +217,7 @@ def fit_group(ev, geoms, label=""):
             "floor_only": {"T_min": best_floor, **floor_only[best_floor]},
             "power_law": score(pl_pred),
         },
-        "sim_params": {"T_min": T_min, "lam": lam, "D0": D0,
+        "sim_params": {"T_min": T_min, "D0": D0,
                        "gamma": gam, "W_ref": W_REF},
         "insample_rho": float(ha.spearman(h_final, h_obs)),
         "insample_male": _male(h_final, h_obs),
@@ -234,7 +240,7 @@ def c2u_transfer(samples, events, sim_params):
     ev = ev.reset_index(drop=True)
     if not len(ev):
         return {}
-    tab = BudgetTable(ev, geoms, sim_params["gamma"], sim_params["lam"])
+    tab = BudgetTable(ev, geoms, sim_params["gamma"], sim_params.get("lam", 0.0))
     hb = tab.leads(sim_params["D0"])
     remaining = (ev["s_end"] - ev["s_c"]).to_numpy(float)
     hp = _floored(hb, ev["speed_onset"].to_numpy(float),

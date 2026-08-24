@@ -1,5 +1,5 @@
 {
- "_description": "Base persona for fitting the gaze cohort: office_worker weights + per-participant gaze-fitted modules (gamma-budget horizon, intermittent replanning), goal_precision=0. Source: goal_precision=0 (== gaze-cursor branch objective: well removed, R enters only via dwell termination); otherwise: office_worker + gamma-budget horizon (refit_floor.py sim_params: gamma=0.5, T_min=0.2, lam=0.0, D0=0.994, W_ref=0.026) + intermittent replanning (tau=0.2052s, cv=0.86, deviation_frac=0.15) for P105835 (A)",
+ "_description": "width-only gaze budget (gamma=0.5, T_min=0.2, D0=0.994) for P105835 (A)",
  "Tp": 0.05,
  "Th": 0.3,
  "nc": [
@@ -25,8 +25,7 @@
  "horizon_mode": "budget",
  "replan_mode": "intermittent",
  "budget": {
-  "D0": 0.994,
-  "lam": 0.0,
+  "D0": 0.9938,
   "T_min": 0.2,
   "gamma": 0.5,
   "W_ref": 0.026

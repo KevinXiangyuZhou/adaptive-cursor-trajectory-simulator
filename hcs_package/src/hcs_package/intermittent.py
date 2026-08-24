@@ -10,12 +10,21 @@ independently switchable so each can be ablated against the baseline
    (lookahead_difficulty.py; pooled fit rho=0.52 vs 0.41 for a width power
    law):
 
-       integral_{s0}^{s0+h} (1/W(s) + lam*|kappa(s)|) ds = D0
+       integral_{s0}^{s0+h} (W_ref/W(s))^gamma / W_ref ds = D0
 
    W is the local usable corridor width (compute_clearance_profile returns
    wl+wr for corridor constraints; in free space it saturates, the density
-   ~ lam*|kappa|, and h runs to the path end — capped). The integral is
-   dimensionless, so D0/lam transfer between task units and meters unchanged.
+   -> 0, and h runs to the path end — capped). The integral is
+   dimensionless, so D0 transfers between task units and meters unchanged.
+
+   The density is WIDTH-ONLY: gaze lead shrinks with narrowing width and
+   with nothing else. An additive curvature term lam*|kappa| was removed
+   2026-08-24 — corner-dwell analysis showed humans dwell ~1.4-1.5x longer
+   when the anchor sits at a corner, and the model reproduces this
+   emergently (constant lead + apex slowdown -> longer catch-up) exactly
+   when lam=0, while a fitted lam>0 (participant B) shrank the corner lead
+   enough to cancel the effect and doubled the anchor overshoot; the CV
+   gain of lam>0 was ~1% (lookahead_floor_summary.json).
 
    The lookahead additionally has a visuomotor-delay floor h >= v * T_min
    (refit_floor.py): human leads at the narrowest widths do NOT shrink
@@ -64,32 +73,28 @@ class DifficultyBudgetHorizon:
         self,
         s_profile: np.ndarray,
         width_profile: np.ndarray,
-        kappa_profile: np.ndarray,
         v_ref_profile: np.ndarray,
         D0: float,
-        lam: float,
         T_min: float = 0.0,
         gamma: float = 1.0,
         W_ref: float = 0.026,
     ):
         self.s = np.asarray(s_profile, dtype=float)
         self.D0 = float(D0)
-        self.lam = float(lam)
         self.T_min = float(T_min)
         self.gamma = float(gamma)
         self.W_ref = float(W_ref)
 
         width = np.clip(np.asarray(width_profile, dtype=float), _WIDTH_FLOOR, None)
-        kappa = np.abs(np.asarray(kappa_profile, dtype=float))
-        # Width density (W_ref/W)^gamma / W_ref: gamma=1 reduces exactly to
-        # 1/W (W_ref cancels; backward compatible). gamma<1 makes the lead
-        # sublinear in width — on a uniform corridor h = D0 * W^gamma *
-        # W_ref^(1-gamma) — matching the human lead ~ w^0.66 scaling that a
-        # linear budget cannot. W_ref (geometric mean of the studied widths)
-        # keeps the density in 1/length so D0 and lam stay dimensionless;
-        # it is not a behavioural knob — rescaling it is absorbed by D0.
-        density = ((self.W_ref / width) ** self.gamma) / self.W_ref \
-            + self.lam * kappa
+        # Width-only density (W_ref/W)^gamma / W_ref: gamma=1 reduces exactly
+        # to 1/W (W_ref cancels). gamma<1 makes the lead sublinear in width —
+        # on a uniform corridor h = D0 * W^gamma * W_ref^(1-gamma) — matching
+        # the human lead ~ w^0.66 scaling that a linear budget cannot. W_ref
+        # (geometric mean of the studied widths) keeps the density in
+        # 1/length so D0 stays dimensionless; it is not a behavioural knob —
+        # rescaling it is absorbed by D0. See the module docstring for why
+        # there is deliberately NO curvature term here.
+        density = ((self.W_ref / width) ** self.gamma) / self.W_ref
 
         v_ref = np.clip(np.asarray(v_ref_profile, dtype=float), _SPEED_FLOOR, None)
 

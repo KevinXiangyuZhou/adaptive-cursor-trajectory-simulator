@@ -72,11 +72,11 @@ def load_gaze_fit():
     (intermittency_analysis.py). Falls back to the pre-floor values if the
     refit output is missing."""
     fit = {
-        "A": {"D0": 1.395, "lam": 1.0, "T_min": 0.0, "gamma": 1.0,
+        "A": {"D0": 1.395, "T_min": 0.0, "gamma": 1.0,
               "W_ref": 0.026, "tau": 0.205, "cv": 0.0},
-        "B": {"D0": 1.549, "lam": 1.0, "T_min": 0.0, "gamma": 1.0,
+        "B": {"D0": 1.549, "T_min": 0.0, "gamma": 1.0,
               "W_ref": 0.026, "tau": 0.190, "cv": 0.0},
-        "C": {"D0": 1.243, "lam": 1.0, "T_min": 0.0, "gamma": 1.0,
+        "C": {"D0": 1.243, "T_min": 0.0, "gamma": 1.0,
               "W_ref": 0.026, "tau": 0.170, "cv": 0.0},
     }
     floor_path = GAZE_RESULTS_DIR / "lookahead_floor_summary.json"
@@ -86,7 +86,7 @@ def load_gaze_fit():
             sp = floor.get(letter, {}).get("sim_params")
             if sp:
                 fit[letter].update(
-                    D0=sp["D0"], lam=sp["lam"], T_min=sp["T_min"],
+                    D0=sp["D0"], T_min=sp["T_min"],
                     gamma=sp.get("gamma", 1.0),
                     W_ref=sp.get("W_ref", 0.026))
     inter_path = GAZE_RESULTS_DIR / "intermittency_summary.json"
@@ -119,7 +119,7 @@ def build_configs(n_seeds, gaze_fit, deviation_frac=DEVIATION_FRAC):
         for letter, fit in gaze_fit.items():
             cfg = json.loads(json.dumps(base))
             cfg.update(overrides)
-            cfg["budget"] = {"D0": fit["D0"], "lam": fit["lam"],
+            cfg["budget"] = {"D0": fit["D0"],
                              "T_min": fit["T_min"], "gamma": fit["gamma"],
                              "W_ref": fit["W_ref"]}
             cfg["replan_latency_s"] = fit["tau"]

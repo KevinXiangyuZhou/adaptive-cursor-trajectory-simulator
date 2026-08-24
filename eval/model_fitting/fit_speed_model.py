@@ -8,7 +8,7 @@ the goal-precision well, which is scaled by nc^2, stays active during fitting):
 
   Stage G  (gaze participants only, runs OUTSIDE this script, before it):
            intermittent-control module parameters fitted from the gaze data —
-           difficulty-budget lookahead (D0, gamma, lam, T_min;
+           difficulty-budget lookahead (D0, gamma, T_min;
            eval/eval-gaze-cursor/refit_floor.py) and replan trigger timing
            (tau, cv; intermittency_analysis.py) — baked into
            base_configs_gaze/{pid}.json and held FIXED here. Because the
@@ -691,7 +691,7 @@ def run_fitting(pid, base_config_path, time_limit, seed, popsize, n_workers, sta
     T0 = time.time()
 
     # Under horizon_mode=budget the prediction horizon is DETERMINED by the
-    # gaze-fitted difficulty-budget lookahead (D0, gamma, lam, T_min in the
+    # gaze-fitted difficulty-budget lookahead (D0, gamma, T_min in the
     # base config) — Th is unused by the simulator, so it is excluded from
     # the Stage 2 search instead of being fitted as an inert dimension.
     tunnel_spec = TUNNEL_PARAM_SPEC

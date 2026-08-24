@@ -90,8 +90,11 @@ class CursorSimulator:
             # --- planning-horizon / replanning modules (gaze-cursor fits) ---
             # horizon_mode "fixed": pred horizon = Th/Interval steps (baseline).
             # horizon_mode "budget": per-solve horizon from the difficulty
-            # budget  ∫(1/W + lam|kappa|)ds = D0  (eval/eval-gaze-cursor
-            # lookahead_difficulty.py; D0/lam are unit-invariant), floored at
+            # width-only budget  ∫(W_ref/W)^gamma/W_ref ds = D0
+            # (eval/eval-gaze-cursor refit_floor.py; unit-invariant; the
+            # lam|kappa| curvature term was removed 2026-08-24 — legacy
+            # configs with a budget.lam key still load, the key is ignored),
+            # floored at
             # the visuomotor-delay lookahead v * T_min (refit_floor.py) —
             # which also floors the solve horizon in time so it cannot
             # collapse near the path end. Defaults are the pooled refit
@@ -101,7 +104,7 @@ class CursorSimulator:
             # w^0.66); W_ref is the dimensional reference (geometric mean of
             # the studied widths), absorbed by D0 — not a behavior knob.
             "horizon_mode": "fixed",
-            "budget": {"D0": 1.66, "lam": 0.5, "T_min": 0.1,
+            "budget": {"D0": 1.66, "T_min": 0.1,
                        "gamma": 1.0, "W_ref": 0.026},
             # replan_mode "every_step": re-solve each step (baseline).
             # replan_mode "intermittent": execute the plan open-loop and
@@ -180,7 +183,6 @@ class CursorSimulator:
         # Fallbacks match the default config above (single source of truth
         # for "unset": the pooled cross-validated refit).
         self.budget_D0 = float(budget_cfg.get('D0', 1.66))
-        self.budget_lam = float(budget_cfg.get('lam', 0.5))
         self.budget_T_min = float(budget_cfg.get('T_min', 0.1))
         self.budget_gamma = float(budget_cfg.get('gamma', 1.0))
         self.budget_W_ref = float(budget_cfg.get('W_ref', 0.026))
@@ -454,9 +456,8 @@ class CursorSimulator:
             v_ref_prof = self.speed_model.compute_speed_profile(
                 s_prof, c_prof, k_prof, r_prof)
             budget_horizon = DifficultyBudgetHorizon(
-                s_prof, c_prof, k_prof, v_ref_prof,
-                D0=self.budget_D0, lam=self.budget_lam,
-                T_min=self.budget_T_min,
+                s_prof, c_prof, v_ref_prof,
+                D0=self.budget_D0, T_min=self.budget_T_min,
                 gamma=self.budget_gamma, W_ref=self.budget_W_ref,
             )
         tau_steps = max(0, int(round(self.replan_latency_s / self.interval)))
