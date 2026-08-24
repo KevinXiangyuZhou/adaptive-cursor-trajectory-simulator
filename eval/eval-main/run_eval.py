@@ -21,7 +21,8 @@ ranges — see bucket_condition()):
                    fit independently per direction.
     - Fitts      : genuine unconstrained pointing tasks (no tunnel).
                    ID = log2(D/(2R)+1), Shannon.
-`constrained_to_unconstrained` trials are excluded entirely, per spec.
+`constrained_to_unconstrained` (c2u) trials are simulated and reported but
+take part in no law regression and no fitting stage (transfer test only).
 
 Uses the shared office_worker.json simulator persona (not a per-participant
 fitted config) and CursorSimulator.generate_trajectory_with_waypoints for
@@ -120,7 +121,7 @@ BUCKET_LAW_DIR = {
     "id4scs_w2n": ID4SCS_W2N_DIR,
     "id4scs_n2w": ID4SCS_N2W_DIR,
     "fitts": FITTS_DIR,
-    "excluded": C2U_DIR,
+    "c2u": C2U_DIR,
 }
 
 
@@ -143,7 +144,7 @@ def _set_results_dir(base):
         "id4scs_w2n": ID4SCS_W2N_DIR,
         "id4scs_n2w": ID4SCS_N2W_DIR,
         "fitts": FITTS_DIR,
-        "excluded": C2U_DIR,
+        "c2u": C2U_DIR,
     }
 
 
@@ -163,14 +164,17 @@ def _resolve_pid_config(config_dir, pid, seed):
 # ---------------------------------------------------------------------------
 
 def bucket_condition(cond):
-    """Returns one of: 'fitts', 'steering', 'id4scs_w2n', 'id4scs_n2w', 'excluded'."""
+    """Returns one of: 'fitts', 'steering', 'id4scs_w2n', 'id4scs_n2w', 'c2u',
+    'excluded'. c2u (constrained_to_unconstrained) is simulated and reported
+    but takes part in NO law regression and NO fitting stage — it is the
+    zero-free-parameter transfer test for the tunnel->free-space transition."""
     ttype = cond.get("tunnelType")
     if ttype == EXCLUDED_TUNNEL_TYPE:
-        return "excluded"
+        return "c2u"
     has_seg = "segment1Width" in cond and "segment2Width" in cond
     has_dist = "distance" in cond
     if has_seg and has_dist:
-        return "excluded"  # belt-and-suspenders: constrained_to_unconstrained also has both
+        return "c2u"  # belt-and-suspenders: constrained_to_unconstrained also has both
     if has_seg:
         return "id4scs_n2w" if cond["segment1Width"] < cond["segment2Width"] else "id4scs_w2n"
     if has_dist:
@@ -473,6 +477,46 @@ def align_round(traj, times, center, radius):
             "end_lat_s": max(total - fe, 0.0), "total_s": total}
 
 
+def build_c2u_task_config(cond, start, max_steps=800):
+    """Constrained->unconstrained hybrid: a straight tunnel of width
+    segment1Width from `start` to the recorded transition x, then
+    unconstrained pointing to the round's nominal target (the same
+    start + (distance, POINTING_Y_OFFSET[targetPosition]) rule as the
+    pointing bucket). The sim constraint gives the free leg the bypass
+    width, so clearance saturates there and the planner's free-space
+    objective takes over node-by-node as its horizon crosses the exit.
+    Returns (task_config, centerline, display_width_profile, trans, target);
+    the display profile draws the free leg as a target-diameter corridor
+    instead of the 10 m bypass so plots stay readable."""
+    W1 = float(cond["segment1Width"])
+    R = float(cond["targetRadius"])
+    tp = cond.get("transition_point", {}) or {}
+    trans = [float(tp.get("taskX", start[0] + float(cond.get("distance", 0.3)) * 0.6)),
+             float(start[1])]
+    off = POINTING_Y_OFFSET.get(cond.get("targetPosition", "middle"), 0.0)
+    target = [float(start[0] + float(cond["distance"])), float(start[1] + off)]
+
+    def _seg(a, b, step=0.004):
+        n = max(2, int(np.ceil(math.hypot(b[0] - a[0], b[1] - a[1]) / step)))
+        return [[a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+                for t in np.linspace(0.0, 1.0, n, endpoint=False)]
+
+    seg1 = _seg(list(start), trans)
+    seg2 = _seg(trans, target)
+    centerline = seg1 + seg2 + [list(target)]
+    width_sim = [W1] * len(seg1) + [BYPASS_TUNNEL_WIDTH_M] * (len(seg2) + 1)
+    width_disp = [W1] * len(seg1) + [max(2.0 * R, 0.01)] * (len(seg2) + 1)
+    environment = {
+        "env_type": "tunnel_steering_smooth",
+        "screen_width": 460, "screen_height": 260,
+        "window_width_m": 0.46, "window_height_m": 0.26,
+        "centerline": centerline, "tunnel_width": W1, "width_profile": width_sim,
+        "target_radius": R, "max_steps": max_steps,
+    }
+    task_config = generate_task_config(environment, include_constraints=True)
+    return task_config, centerline, width_disp, trans, target
+
+
 def build_fitts_bypass_config(human_round, target_radius, max_steps=800):
     """MPCC-based unconstrained-pointing task: a straight, very wide
     ('bypass') tunnel from a human round's recorded start point to the
@@ -693,20 +737,18 @@ def build_condition_job(pid, tid, bucket, cond, human_rounds, cached_records,
             "canonical_path": [start_mean, end_mean],
             "folder_name": f"trial_{tid}",   # targetPosition varies per round/participant
         })
-    elif bucket == "excluded":
-        # constrained_to_unconstrained (human-only visualisation): a straight
-        # tunnel of width segment1Width from the mean start point up to the
-        # transition x, then free pointing to the target. We draw only the
-        # constrained segment as the tunnel; the target is the mean end point.
-        target_position = cond.get("targetPosition", "unknown")
+    elif bucket == "c2u":
+        # Geometry is per participant (targetPosition / transition point vary
+        # by pid for the same tid), so build it from this pid's own rounds.
+        rcond = (human_rounds[0].get("condition") or cond)
         starts = [r["trajectory"][0] for r in human_rounds]
         start_mean = [float(np.mean([s[0] for s in starts])), float(np.mean([s[1] for s in starts]))]
-        tp = cond.get("transition_point", {}) or {}
-        trans_x = tp.get("taskX", start_mean[0] + cond.get("distance", 0.0) * 0.6)
+        task_config, centerline, width_disp, trans, target = build_c2u_task_config(rcond, start_mean)
+        job["cond"] = rcond
         job.update({
-            "canonical_path": [start_mean, [float(trans_x), start_mean[1]]],
-            "tunnel_width": cond.get("segment1Width", 0.02),
-            "folder_name": f"trial_{tid}_{target_position}",
+            "task_config": task_config, "centerline": centerline,
+            "tunnel_width": width_disp, "folder_name": f"trial_{tid}",
+            "trans_x": trans[0], "target": target,
         })
 
     return job
@@ -750,10 +792,15 @@ def _run_condition_job(job):
                 new_records.extend(run_tunnel_simulator(sim, task_config, target_radius, n_runs=1))
         tunnel_path = job["canonical_path"]
         tunnel_width = BYPASS_TUNNEL_WIDTH_M
-    else:  # excluded (constrained_to_unconstrained) — human-only visualisation
-        target_radius = cond.get("targetRadius", 0.0)
-        tunnel_path = job["canonical_path"]
+    elif bucket == "c2u":
+        target_radius = float(cond.get("targetRadius", 0.01))
+        if n_needed > 0:
+            sim = CursorSimulator(job["config_path"])
+            new_records = run_tunnel_simulator(sim, job["task_config"], target_radius, n_needed)
+        tunnel_path = job["centerline"]
         tunnel_width = job["tunnel_width"]
+    else:
+        raise ValueError(f"unknown bucket {bucket!r}")
 
     model_records = (cached + new_records)[: job.get("n_model_runs", len(human_rounds))]
     if not model_records and not job.get("human_only"):
@@ -777,9 +824,9 @@ def _run_condition_job(job):
         L = law_stats.centerline_arc_length(tunnel_path)
         ID = L / width if width > 0 else 0.0
         for r in human_rounds:
-            rows.append({"source": "Human", "tid": tid, "ID": ID, "MT_s": r["completion_time"]})
+            rows.append({"source": "Human", "pid": pid, "tid": tid, "ID": ID, "MT_s": r["completion_time"]})
         for r in model_records:
-            rows.append({"source": "Simulator", "tid": tid, "ID": ID, "MT_s": r["completion_time"],
+            rows.append({"source": "Simulator", "pid": pid, "tid": tid, "ID": ID, "MT_s": r["completion_time"],
                          "timed_out": r.get("timed_out", False)})
         cond_summary_row.update({
             "width_mm": round(width * 1000, 2), "ID_L_over_W": round(ID, 4),
@@ -815,7 +862,7 @@ def _run_condition_job(job):
             D = math.hypot(center[0] - s0[0], center[1] - s0[1])
             ID = law_stats.fitts_id(D, target_radius)
             mtk = al["mt_kin_s"]
-            row = {"source": source, "tid": tid, "ID": ID, "MT_s": mt, "MT_kin_s": mtk,
+            row = {"source": source, "pid": pid, "tid": tid, "ID": ID, "MT_s": mt, "MT_kin_s": mtk,
                    "TP": ID / mt if mt and mt > 0 else None,
                    "TP_kin": ID / mtk if mtk and mtk > 0 else None,
                    "onset_s": al["onset_s"], "final_entry_s": al["final_entry_s"],
@@ -853,13 +900,49 @@ def _run_condition_job(job):
             "model_dwell_mean_s": round(float(np.mean([a["end_lat_s"] for a in m_al])), 3) if m_al else None,
         })
 
-    else:  # excluded (constrained_to_unconstrained): raw completion times only
+    elif bucket == "c2u":
+        target = job["target"]
+        trans_x = job["trans_x"]
+
+        def _c2u_row(source, mt, traj, times, speeds, timed_out=None):
+            al = align_round(traj, times, target, target_radius)
+            k = next((i for i, p in enumerate(traj) if p[0] >= trans_x), None)
+            v_exit = float(speeds[k]) if (speeds and k is not None and k < len(speeds)) else None
+            v_peak_free = float(max(speeds[k:])) if (speeds and k is not None and k < len(speeds)) else None
+            row = {"source": source, "pid": pid, "tid": tid,
+                   "W1_mm": round(float(cond.get("segment1Width", 0)) * 1000, 1),
+                   "R_mm": round(target_radius * 1000, 1),
+                   "target_position": cond.get("targetPosition", ""),
+                   "MT_s": mt, "MT_kin_s": al["mt_kin_s"],
+                   "v_exit": v_exit, "v_peak_free": v_peak_free}
+            if timed_out is not None:
+                row["timed_out"] = timed_out
+            return row
+
+        h_rows, m_rows = [], []
         for r in human_rounds:
-            rows.append({"source": "Human", "tid": tid, "MT_s": r["completion_time"]})
+            ts = [(t - r["timestamps"][0]) / 1000.0 for t in r["timestamps"]]
+            h_rows.append(_c2u_row("Human", r["completion_time"], r["trajectory"], ts, r["speeds"]))
+        interval = 0.05
+        for model_r in model_records:
+            mtraj = model_r["trajectory"]
+            ts = [i * interval for i in range(len(mtraj))]
+            m_rows.append(_c2u_row("Simulator", model_r["completion_time"], mtraj, ts,
+                                    model_r.get("speeds"), model_r.get("timed_out", False)))
+        rows.extend(h_rows); rows.extend(m_rows)
+
+        def _mean(rs, k):
+            v = [r[k] for r in rs if r.get(k) is not None]
+            return float(np.mean(v)) if v else None
         cond_summary_row.update({
             "target_position": cond.get("targetPosition", "unknown"),
-            "segment1Width_mm": round(cond.get("segment1Width", 0) * 1000, 2),
+            "segment1Width_mm": round(float(cond.get("segment1Width", 0)) * 1000, 2),
             "target_radius_mm": round(target_radius * 1000, 2),
+            "human_mt_kin_mean_s": round(_mean(h_rows, "MT_kin_s"), 3) if h_rows else None,
+            "model_mt_kin_mean_s": round(_mean(m_rows, "MT_kin_s"), 3) if m_rows else None,
+            "human_v_exit": _mean(h_rows, "v_exit"), "model_v_exit": _mean(m_rows, "v_exit"),
+            "human_v_peak_free": _mean(h_rows, "v_peak_free"),
+            "model_v_peak_free": _mean(m_rows, "v_peak_free"),
         })
 
     return {
@@ -885,7 +968,7 @@ def process_participant(pid, participant_data, config_path_str, tid_to_condition
     jobs = {}
     for tid in sorted(participant_data.keys()):
         bucket = tid_to_bucket.get(tid)
-        if bucket is None or (bucket == "excluded" and not human_only):
+        if bucket in (None, "excluded"):
             continue
         cond = tid_to_condition[tid]
         human_rounds_dict = participant_data[tid]
@@ -1185,7 +1268,7 @@ def write_fitts_outputs(rows, condition_summaries):
 # ---------------------------------------------------------------------------
 
 _BUCKET_SHORT = {"steering": "steer", "id4scs_w2n": "W2N", "id4scs_n2w": "N2W",
-                 "fitts": "fitts", "excluded": "C2U"}
+                 "fitts": "fitts", "c2u": "C2U", "excluded": "excl"}
 
 
 def _tid_display_geometry(tid, bucket, cond, human_rounds, tid_geometry):
@@ -1247,9 +1330,9 @@ def _round_qc_row(pid, tid, bucket, cond, round_num, r, centerline, width):
         "end_x": round(float(traj[-1, 0]), 4), "end_y": round(float(traj[-1, 1]), 4),
         "outside_tunnel_frac": None,
     }
-    if bucket in ("steering", "id4scs_w2n", "id4scs_n2w", "excluded") and centerline is not None and len(centerline) >= 2:
+    if bucket in ("steering", "id4scs_w2n", "id4scs_n2w", "c2u") and centerline is not None and len(centerline) >= 2:
         pts = traj
-        if bucket == "excluded":  # only the constrained segment (x <= transition) is bounded
+        if bucket == "c2u":  # only the constrained segment (x <= transition) is bounded
             pts = traj[traj[:, 0] <= centerline[-1][0] + 1e-9]
         if len(pts):
             d, seg_idx = _dist_to_polyline(pts, centerline)
@@ -1369,7 +1452,7 @@ def main():
     parser.add_argument("--data-dir", type=str, default=str(HUMAN_DATA_DIR),
                         help="Directory of per-participant human data JSON files")
     parser.add_argument("--buckets", type=str, nargs="+", default=None,
-                        choices=["steering", "id4scs_w2n", "id4scs_n2w", "fitts", "excluded"],
+                        choices=["steering", "id4scs_w2n", "id4scs_n2w", "fitts", "c2u"],
                         help="Restrict processing to these task buckets (default: all)")
     parser.add_argument("--per-participant", action="store_true", default=False,
                         help="Use each participant's fitted persona from "
@@ -1418,8 +1501,8 @@ def main():
         print(f"Config not found: {config_path}")
         return
 
-    dirs = [FITTS_DIR, STEERING_DIR, ID4SCS_W2N_DIR, ID4SCS_N2W_DIR]
-    dirs += [C2U_DIR, OVERVIEW_DIR] if human_only else [SIM_CACHE_DIR]
+    dirs = [FITTS_DIR, STEERING_DIR, ID4SCS_W2N_DIR, ID4SCS_N2W_DIR, C2U_DIR]
+    dirs += [OVERVIEW_DIR] if human_only else [SIM_CACHE_DIR]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
 
@@ -1438,14 +1521,15 @@ def main():
     print("\n[1/4] Scanning trial conditions ...")
     tid_to_condition, tid_to_bucket = scan_conditions(data_dir)
     bucket_counts = Counter(tid_to_bucket.values())
-    for b in ("steering", "id4scs_w2n", "id4scs_n2w", "fitts", "excluded"):
+    for b in ("steering", "id4scs_w2n", "id4scs_n2w", "fitts", "c2u", "excluded"):
         print(f"  {b:12s}: {bucket_counts.get(b, 0):3d} trial_ids")
     n_included = sum(v for k, v in bucket_counts.items() if k != "excluded")
+    # (c2u counts as included: simulated + reported, but outside every law fit)
     print(f"  Total: {n_included} included, {bucket_counts.get('excluded', 0)} excluded, "
           f"{len(tid_to_bucket)} scanned")
 
     included_tids = sorted(t for t, b in tid_to_bucket.items()
-                           if (b != "excluded" or human_only)
+                           if b != "excluded"
                            and (args.buckets is None or b in args.buckets))
 
     print("\n[2/4] Loading human data ...")
@@ -1535,11 +1619,11 @@ def main():
                               "Narrow-to-Wide", ID4SCS_N2W_DIR, "id4scs_narrow_to_wide")
     if all_rows.get("fitts"):
         write_fitts_outputs(all_rows["fitts"], all_condition_summaries["fitts"])
+    if all_rows.get("c2u"):
+        _write_dict_rows_csv(all_rows["c2u"], C2U_DIR / "c2u_results.csv")
+        _write_dict_rows_csv(sorted(all_condition_summaries["c2u"], key=lambda r: r["tid"]),
+                              C2U_DIR / "c2u_condition_summary.csv")
     if human_only:
-        if all_rows.get("excluded"):
-            _write_dict_rows_csv(all_rows["excluded"], C2U_DIR / "c2u_results.csv")
-            _write_dict_rows_csv(sorted(all_condition_summaries["excluded"], key=lambda r: r["tid"]),
-                                  C2U_DIR / "c2u_condition_summary.csv")
         qc_path = OVERVIEW_DIR / "human_rounds_qc.csv"
         _write_dict_rows_csv(sorted(all_qc_rows, key=lambda r: (r["pid"], r["tid"], r["round"])), qc_path)
         print(f"  Saved: {qc_path}")
