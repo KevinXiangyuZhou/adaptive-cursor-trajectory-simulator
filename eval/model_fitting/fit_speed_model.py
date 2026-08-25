@@ -680,14 +680,23 @@ def run_fitting(pid, base_config_path, time_limit, seed, popsize, n_workers, sta
     result = {"participant_id": pid, "seed": seed, "base_config": str(base_config_path),
               "tunnel_train_tids": sorted(tun_train), "tunnel_test_tids": sorted(tun_test),
               "pointing_train_tids": sorted(pt_train), "pointing_test_tids": sorted(pt_test)}
-    if fit_path.exists() and stages == "pointing":
-        with open(fit_path) as f:
-            prev = json.load(f)
-        result.update({k: v for k, v in prev.items() if k not in result})
+    if stages == "pointing" and cfg_path.exists():
+        # Reuse the saved tunnel fit. The config (fitted tunnel weights) and
+        # the GAM pkl are saved as each stage completes; the fit RECORD is
+        # only written at the very end, so it may be missing when a previous
+        # run was killed late (e.g. the 8-25 cluster jobs, whose wall equalled
+        # the CMA budget) — the record is optional here, the config is not.
+        if fit_path.exists():
+            with open(fit_path) as f:
+                prev = json.load(f)
+            result.update({k: v for k, v in prev.items() if k not in result})
         with open(cfg_path) as f:
             base = json.load(f)
         base["speed_model"] = {"type": "gam", "path": gam_path}
         print("  reusing tunnel fit from", cfg_path)
+    elif stages == "pointing":
+        raise FileNotFoundError(
+            f"--stages pointing needs the saved tunnel config {cfg_path}")
     T0 = time.time()
 
     # Under horizon_mode=budget the prediction horizon is DETERMINED by the
