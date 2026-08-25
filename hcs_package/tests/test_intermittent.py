@@ -467,3 +467,19 @@ def test_corridor_bounds_clamp_is_planner_only():
     unclamped = convert_constraints_to_corridor_bounds(cfg, rp, max_bound=None)
     assert clamped[0](0.2) == pytest.approx(0.1)
     assert unclamped[0](0.2) == pytest.approx(5.0)
+
+
+def test_scheduler_latency_draw_is_capped():
+    # heavy-tailed cv: without a cap some draws exceed 30 steps; with the cap
+    # (1.5 s / 0.05 s = 30) none do, and typical draws are unaffected
+    rng = np.random.default_rng(0)
+    free = ReplanScheduler(mode="intermittent", latency_steps=4,
+                           latency_cv=1.0, rng=rng)
+    draws_free = [free._sample_latency_steps() for _ in range(4000)]
+    assert max(draws_free) > 30
+    rng = np.random.default_rng(0)
+    capped = ReplanScheduler(mode="intermittent", latency_steps=4,
+                             latency_cv=1.0, latency_max_steps=30, rng=rng)
+    draws = [capped._sample_latency_steps() for _ in range(4000)]
+    assert max(draws) == 30
+    assert int(np.median(draws)) == int(np.median(draws_free))  # median untouched

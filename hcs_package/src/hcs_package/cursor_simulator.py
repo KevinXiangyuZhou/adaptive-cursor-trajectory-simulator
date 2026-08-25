@@ -127,6 +127,11 @@ class CursorSimulator:
             "replan_mode": "every_step",
             "replan_latency_s": 0.19,
             "replan_latency_cv": 0.89,
+            # Cap on a single latency draw (s). Matches the 1.5 s event-
+            # duration filter under which the human dwell median/CV were
+            # measured — uncapped lognormal tails froze the gaze anchor for
+            # the remainder of a trial (see intermittent.ReplanScheduler).
+            "replan_latency_max_s": 1.5,
             "replan_deviation_frac": 0.15,
             # Explicit minimum open-loop interval (s): after a replan no
             # feedback-driven trigger (deviation, arrival) fires until this
@@ -199,6 +204,7 @@ class CursorSimulator:
         self.replan_latency_cv = float(config.get('replan_latency_cv', 0.89))
         self.replan_deviation_frac = float(config.get('replan_deviation_frac', 0.15))
         self.min_open_loop_s = float(config.get('min_open_loop_s', 0.05))
+        self.replan_latency_max_s = float(config.get('replan_latency_max_s', 1.5))
         self.horizon_min_steps = int(config.get('horizon_min_steps', 2))
         self.horizon_max_steps = int(config.get('horizon_max_steps', 40))
         # Diagnostics of the most recent generate_* call (replan events etc.).
@@ -500,6 +506,7 @@ class CursorSimulator:
         scheduler = ReplanScheduler(
             mode=self.replan_mode, latency_steps=tau_steps,
             latency_cv=self.replan_latency_cv,
+            latency_max_steps=max(0, int(round(self.replan_latency_max_s / self.interval))),
             deviation_frac=self.replan_deviation_frac,
             min_open_loop_steps=max(0, int(round(self.min_open_loop_s / self.interval))),
             rng=self._replan_rng,

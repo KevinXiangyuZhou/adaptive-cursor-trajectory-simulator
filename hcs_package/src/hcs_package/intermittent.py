@@ -160,6 +160,13 @@ class ReplanScheduler:
     mode: str = "every_step"
     latency_steps: int = 4          # tau / dt, rounded (median when cv > 0)
     latency_cv: float = 0.0         # lognormal CV of the per-cycle latency
+    # Upper cap on a single latency draw (steps; 0 = uncapped). The human
+    # post-arrival dwell statistics were measured under the intermittency
+    # analysis's 1.5 s event-duration filter, so the model's lognormal must
+    # not produce pauses that data could never contain: uncapped tail draws
+    # (P(tau > 1 s) ~ 0.7-2.3 %/cycle at the fitted CVs) froze the gaze
+    # anchor for the rest of a trial while the cursor ran on open-loop.
+    latency_max_steps: int = 0
     deviation_frac: float = 0.0     # early-replan threshold; 0 disables
     # Explicit minimum open-loop interval (steps): after a replan no
     # feedback-driven trigger (deviation, arrival) may fire until this many
@@ -185,7 +192,10 @@ class ReplanScheduler:
         z = (self.rng.standard_normal() if self.rng is not None
              else np.random.standard_normal())
         mult = float(np.exp(sigma * z))
-        return max(0, int(round(self.latency_steps * mult)))
+        tau = max(0, int(round(self.latency_steps * mult)))
+        if self.latency_max_steps > 0:
+            tau = min(tau, self.latency_max_steps)
+        return tau
 
     def needs_replan(self, theta_now: float,
                      deviation_ratio: Optional[float] = None) -> Optional[str]:
