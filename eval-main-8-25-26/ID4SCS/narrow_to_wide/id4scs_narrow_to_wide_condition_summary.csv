@@ -1,4 +1,0 @@
-tid,n_human,n_model,n_timed_out,goal_approach_speed_model,lateral_rmse,speed_rmse,speed_corr,goal_approach_speed_human,goal_approach_speed_diff,time_diff,human_time_mean_s,model_time_mean_s,W1_mm,W2_mm,A1_m,A2_m
-39,2,2,0,0.3131,0.00177,0.070243,0.875,0.202,0.5497,0.1641,3.2,3.725,10.0,50.0,0.23,0.228
-40,2,2,0,0.2225,0.000829,0.180525,0.306,0.1998,0.1136,0.3933,1.884,2.625,20.0,50.0,0.23,0.228
-41,2,2,0,0.304,0.002651,0.063142,0.8364,0.2594,0.1718,0.0733,1.4675,1.575,30.0,50.0,0.23,0.228
