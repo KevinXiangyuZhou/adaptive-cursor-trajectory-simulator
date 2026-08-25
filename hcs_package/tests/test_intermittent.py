@@ -483,3 +483,16 @@ def test_scheduler_latency_draw_is_capped():
     draws = [capped._sample_latency_steps() for _ in range(4000)]
     assert max(draws) == 30
     assert int(np.median(draws)) == int(np.median(draws_free))  # median untouched
+
+
+def test_find_closest_theta_ignores_stale_guess():
+    # Regression: a warm-start guess far behind the cursor (post-pause state)
+    # must not trap the projection at the path start. Sinusoid-like path.
+    from hcs_package.reference_path import ReferencePath
+    t = np.linspace(0, 0.46, 200)
+    pts = np.column_stack([t, 0.13 + 0.02 * np.sin(t * 2 * np.pi / 0.115)])
+    rp = ReferencePath(pts, s=0.0, k=3)
+    p_mid = rp(0.55 * rp.total_length)
+    for guess in (0.0, 0.05, 0.15, None):
+        th = rp.find_closest_theta(np.asarray(p_mid), initial_guess=guess)
+        assert abs(th - 0.55 * rp.total_length) < 0.01, (guess, th)

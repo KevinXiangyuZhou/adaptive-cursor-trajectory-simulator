@@ -134,22 +134,29 @@ class ReferencePath:
         pos = np.asarray(pos, dtype=float)
         px, py = float(pos[0]), float(pos[1])
 
-        if initial_guess is not None:
-            theta0 = float(np.clip(initial_guess, 0.0, self.total_length))
-            u0 = float(np.interp(theta0, self.arclengths, self.u_dense))
-        else:
-            xy = np.array(splev(self.u_dense, self.tck))
-            dx = xy[0] - px
-            dy = xy[1] - py
-            dist2 = dx * dx + dy * dy
-            idx = int(np.argmin(dist2))
-            u0 = float(self.u_dense[idx])
-
         min_u = 0.0
         if min_theta is not None:
             min_theta_val = float(min_theta)
             min_u = float(np.interp(min_theta_val, self.arclengths, self.u_dense))
-            u0 = max(u0, min_u)
+
+        # ALWAYS global coarse search, then Newton refinement. A warm-started
+        # local search is an absorbing trap: when the guess lags the cursor
+        # by a fold of the path (e.g. after an intermittent-control pause the
+        # arc estimate is only refreshed at the next replan), Newton's f''
+        # can turn negative there, the step clips to u=0, and every later
+        # call re-enters at 0 — the simulator's theta froze at the path
+        # start while the cursor completed the trial (the "diving" gaze-lead
+        # pages). Task centerlines do not approach themselves, so the global
+        # nearest point is the right projection, and the dense evaluation is
+        # the same cost the guess-free branch always paid. ``initial_guess``
+        # is retained for API compatibility but no longer trusted.
+        xy = np.array(splev(self.u_dense, self.tck))
+        dx = xy[0] - px
+        dy = xy[1] - py
+        dist2 = dx * dx + dy * dy
+        if min_u > 0.0:
+            dist2 = np.where(self.u_dense < min_u, np.inf, dist2)
+        u0 = float(self.u_dense[int(np.argmin(dist2))])
 
         # Newton step needs second derivative — undefined for linear splines
         spline_k = self.tck[2] if hasattr(self.tck, '__len__') else 3
