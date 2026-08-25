@@ -30,6 +30,11 @@ source venv/bin/activate
 export MPLBACKEND=Agg
 SEED="${SEED:-42}"
 echo "Start time: $(date)"
+# Cohort selection mirrors eval_all_participants.sh:
+#   DATA_DIR=human_data/gaze_cursor_data sbatch eval_aggregate.sh
+DATA_ARG=()
+if [ -n "$DATA_DIR" ]; then DATA_ARG=(--data-dir "$PROJECT_DIR/$DATA_DIR"); fi
 python -u eval/eval-main/run_eval.py --per-participant --seed "$SEED" --aggregate-only \
+    "${DATA_ARG[@]}" \
     2>&1 | tee "$HCS_EVAL_RESULTS_DIR/eval_aggregate_s${SEED}.log"
 echo "End time: $(date)"

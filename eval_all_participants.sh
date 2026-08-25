@@ -34,7 +34,8 @@ export MKL_NUM_THREADS=1
 export TMPDIR=/tmp
 export MPLBACKEND=Agg
 
-PID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" participants.txt)
+PARTICIPANTS_FILE="${PARTICIPANTS_FILE:-participants.txt}"
+PID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$PARTICIPANTS_FILE")
 SEED="${SEED:-42}"
 echo "Evaluating participant: $PID (array task $SLURM_ARRAY_TASK_ID, seed $SEED)"
 echo "Start time: $(date)"
