@@ -2,7 +2,7 @@
 #SBATCH --job-name=hcs_fit
 #SBATCH --account=soney0
 #SBATCH --partition=standard
-#SBATCH --time=8:00:00
+#SBATCH --time=9:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
@@ -50,6 +50,10 @@ if [ -n "$DATA_DIR" ]; then export HCS_HUMAN_DATA_DIR="$PROJECT_DIR/$DATA_DIR"; 
 CONFIG_ARG=()
 if [ -n "$BASE_CONFIG_DIR" ]; then CONFIG_ARG=(--config "$PROJECT_DIR/$BASE_CONFIG_DIR/${PID}.json"); fi
 # leave ~30 min of the 8 h wall time for start-up + final validation
+# CMA budget (s). Must stay BELOW the #SBATCH wall with margin: startup,
+# the generation in flight when the budget expires, held-out validation and
+# the final save all run after it — the 8-25 cluster fits were killed at a
+# wall equal to the budget, losing every Stage 3 result.
 TIME_LIMIT="${TIME_LIMIT:-28800}"
 
 echo "Fitting participant: $PID (array task $SLURM_ARRAY_TASK_ID, seed $SEED, stages $STAGES)"
