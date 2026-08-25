@@ -1,0 +1,46 @@
+{
+  "trial_id": 82,
+  "condition": {
+    "tunnelType": "constrained_to_unconstrained",
+    "segment1Width": 0.05,
+    "distance": 0.46,
+    "targetRadius": 0.015,
+    "repetitions": 2,
+    "description": "constrained-to-unconstrained, width 0.05, distance D, radius 15mm",
+    "targetPosition": "middle",
+    "has_constraint": true,
+    "transition_point": {
+      "taskX": 0.23000000000000018,
+      "screenX": -1005
+    }
+  },
+  "human": {
+    "n_rounds": 2,
+    "completion_times": [
+      1.146,
+      0.756
+    ]
+  },
+  "model": {
+    "n_valid_runs": 2,
+    "completion_times": [
+      1.4500000000000002,
+      1.4000000000000001
+    ],
+    "path_lengths": [
+      0.4520357474679704,
+      0.4522036346105158
+    ]
+  },
+  "metrics": {
+    "goal_approach_speed_model": 0.0807,
+    "lateral_rmse": 0.000957,
+    "speed_rmse": 0.939222,
+    "speed_corr": 0.8519,
+    "goal_approach_speed_human": 0.6043,
+    "goal_approach_speed_diff": 0.8664,
+    "time_diff": 0.4984,
+    "human_time_mean_s": 0.951,
+    "model_time_mean_s": 1.425
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "notes": {
+    "ID_formula": "log2(D/(2R) + 1)  [Shannon; 2R = target width]",
+    "D_formula": "Euclidean distance from each round's recorded start point to the round's nominal target centre (start + (distance, y-offset[targetPosition]))",
+    "MT_model": "MT = a + b * ID",
+    "aligned": "MT_kin = final target entry - movement onset (>2 mm displacement), both sides; strips human reaction latency and click latency, and the model's dwell. 'raw' uses human click time vs model time incl. dwell.",
+    "aggregation": "Regression/plot fit on one point per trial_id, averaged across all participants (flat pooled mean, not a per-participant-first hierarchical mean) \u2014 matches the Steering Law plot's methodology and the original paper's Fig. 3 ('each point represents one task condition averaged across participants'). fitts_results.csv retains every raw per-round row.",
+    "timed_out_runs_excluded": 0
+  },
+  "aligned": {
+    "model": {
+      "a_intercept": 0.15098,
+      "b_slope_s_per_bit": 0.244141,
+      "r_squared": 0.8112,
+      "throughput_mean_bps": 3.5578,
+      "throughput_std_bps": 0.4968,
+      "n_runs": 15
+    },
+    "human": {
+      "a_intercept": 0.147385,
+      "b_slope_s_per_bit": 0.137701,
+      "r_squared": 0.5802,
+      "throughput_mean_bps": 5.7574,
+      "throughput_std_bps": 0.8437,
+      "n_runs": 15
+    }
+  },
+  "raw": {
+    "model": {
+      "a_intercept": 0.41658,
+      "b_slope_s_per_bit": 0.236166,
+      "r_squared": 0.8249,
+      "throughput_mean_bps": 2.8521,
+      "throughput_std_bps": 0.4059,
+      "n_runs": 15
+    },
+    "human": {
+      "a_intercept": 0.430959,
+      "b_slope_s_per_bit": 0.146254,
+      "r_squared": 0.5294,
+      "throughput_mean_bps": 3.7996,
+      "throughput_std_bps": 0.5686,
+      "n_runs": 15
+    }
+  },
+  "latencies": {
+    "human_onset_s": {
+      "mean": 0.014,
+      "median": 0.0,
+      "sd": 0.033
+    },
+    "human_click_lat_s": {
+      "mean": 0.277,
+      "median": 0.25,
+      "sd": 0.082
+    },
+    "model_dwell_s": {
+      "mean": 0.187
+    }
+  },
+  "model": {
+    "a_intercept": 0.41658,
+    "b_slope_s_per_bit": 0.236166,
+    "r_squared": 0.8249,
+    "throughput_mean_bps": 2.8521,
+    "throughput_std_bps": 0.4059,
+    "n_runs": 15
+  },
+  "human": {
+    "a_intercept": 0.430959,
+    "b_slope_s_per_bit": 0.146254,
+    "r_squared": 0.5294,
+    "throughput_mean_bps": 3.7996,
+    "throughput_std_bps": 0.5686,
+    "n_runs": 15
+  }
+}

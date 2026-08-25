@@ -33,6 +33,7 @@ Usage:  python model_gaze_lead.py [--letters A B C] [--noise {on,off}]
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 import warnings
@@ -89,7 +90,9 @@ class ArcProjector:
         return float(self.s_dense[int(np.argmin(d2))])
 
 GAZE_DATA_DIR = PROJECT_ROOT / "human_data" / "gaze_cursor_data"
-FIT_DIR = PROJECT_ROOT / "eval" / "model_fitting" / "results_gaze_completed"
+# Overridable so fit generations can be compared: HCS_GAZE_LEAD_FIT_DIR
+FIT_DIR = Path(os.environ.get("HCS_GAZE_LEAD_FIT_DIR",
+                              PROJECT_ROOT / "model_fitting_8-25-26"))
 # Authoritative Stage G (gaze-module) parameters: the persona configs bake in
 # whatever budget the fit ran with, so the CURRENT width-only sim_params are
 # applied on top (until the next cluster fit regenerates the personas).

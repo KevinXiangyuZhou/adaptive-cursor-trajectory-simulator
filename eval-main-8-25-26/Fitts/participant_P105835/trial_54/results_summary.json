@@ -1,0 +1,41 @@
+{
+  "trial_id": 54,
+  "condition": {
+    "tunnelType": "unconstrained_pointing",
+    "distance": 0.46,
+    "targetRadius": 0.015,
+    "repetitions": 2,
+    "description": "unconstrained pointing, distance D, radius 15mm",
+    "targetPosition": "top",
+    "has_constraint": false
+  },
+  "human": {
+    "n_rounds": 2,
+    "completion_times": [
+      1.095,
+      1.049
+    ]
+  },
+  "model": {
+    "n_valid_runs": 2,
+    "completion_times": [
+      1.4000000000000001,
+      1.4500000000000002
+    ],
+    "path_lengths": [
+      0.4547356315544144,
+      0.45990270554900975
+    ]
+  },
+  "metrics": {
+    "goal_approach_speed_model": 0.0766,
+    "lateral_rmse": 0.012271,
+    "speed_rmse": 0.587751,
+    "speed_corr": 0.9465,
+    "goal_approach_speed_human": 0.487,
+    "goal_approach_speed_diff": 0.8427,
+    "time_diff": 0.3293,
+    "human_time_mean_s": 1.072,
+    "model_time_mean_s": 1.425
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "trial_id": 40,
+  "condition": {
+    "tunnelType": "narrow_to_wide",
+    "segment1Width": 0.02,
+    "segment2Width": 0.05,
+    "repetitions": 2,
+    "description": "narrow-to-wide, narrow=0.02",
+    "has_constraint": true,
+    "transition_point": {
+      "taskX": 0.23000000000000018,
+      "screenX": -1005
+    }
+  },
+  "human": {
+    "n_rounds": 2,
+    "completion_times": [
+      1.87,
+      1.273
+    ]
+  },
+  "model": {
+    "n_valid_runs": 2,
+    "completion_times": [
+      1.8,
+      1.9000000000000001
+    ],
+    "path_lengths": [
+      0.46596713570151643,
+      0.47538810506380025
+    ]
+  },
+  "metrics": {
+    "goal_approach_speed_model": 0.2782,
+    "lateral_rmse": 0.002859,
+    "speed_rmse": 0.122176,
+    "speed_corr": 0.3688,
+    "goal_approach_speed_human": 0.1037,
+    "goal_approach_speed_diff": 1.6821,
+    "time_diff": 0.1772,
+    "human_time_mean_s": 1.5715,
+    "model_time_mean_s": 1.85
+  }
+}

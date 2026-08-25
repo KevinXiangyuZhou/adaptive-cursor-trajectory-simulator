@@ -1,0 +1,39 @@
+{
+  "trial_id": 5,
+  "condition": {
+    "tunnelWidth": 0.05,
+    "curvature": 0.025,
+    "repetitions": 2,
+    "description": "sinusoidal, width 0.05",
+    "has_constraint": true
+  },
+  "human": {
+    "n_rounds": 2,
+    "completion_times": [
+      1.92,
+      2.096
+    ]
+  },
+  "model": {
+    "n_valid_runs": 2,
+    "completion_times": [
+      2.15,
+      2.25
+    ],
+    "path_lengths": [
+      0.4752476704547816,
+      0.470911295853058
+    ]
+  },
+  "metrics": {
+    "goal_approach_speed_model": 0.168,
+    "lateral_rmse": 0.005495,
+    "speed_rmse": 0.056926,
+    "speed_corr": 0.6032,
+    "goal_approach_speed_human": 0.1311,
+    "goal_approach_speed_diff": 0.2813,
+    "time_diff": 0.0956,
+    "human_time_mean_s": 2.008,
+    "model_time_mean_s": 2.2
+  }
+}
