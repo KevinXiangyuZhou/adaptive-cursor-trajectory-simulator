@@ -5,6 +5,12 @@ import numpy as np
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any, Union
 from .model import model, FREE_SPACE_CLEARANCE_M
+
+# Finite stand-in for "no constraint" when a consumer needs a finite number
+# (the GAM's log-clearance feature; interpolation). Purely numerical: both
+# the GAM (saturated at its ceiling) and the free-space mask (threshold
+# FREE_SPACE_CLEARANCE_M) are insensitive to anything this large.
+W_TASK_FINITE_CAP = 1.0
 from .mpcc_model import reset_warm_start
 from .params import SteeringModelInput, BumpParams, EnvParams, TunnelInfo
 from .reference_path import ReferencePath, generate_optimal_reference_path
@@ -404,16 +410,33 @@ class CursorSimulator:
             )
 
         clearance_profile = None
+        task_width_profile = None
         curvature_rate_profile = None
         curvature_profile = None
         if reference_path.total_length > 0:
             n_profile = 500
             s_profile = np.linspace(0, reference_path.total_length, n_profile)
-            c_profile = compute_clearance_profile(
+            # TRUE task width W_task(s): unclamped distance between active
+            # constraint bounds, np.inf where no constraint covers s. This is
+            # the perceptual difficulty signal (gaze budget, free-space mask,
+            # speed model, deviation scale). The planner's corridor_bounds
+            # above stay clamped (max_bound) purely for QP conditioning and
+            # must not leak into behaviour — a 10 m corridor is free space,
+            # not a 0.2 m tunnel.
+            task_bounds = None
+            if constraint_config is not None:
+                task_bounds = convert_constraints_to_corridor_bounds(
+                    constraint_config, reference_path,
+                    default_margin=self.planner_margin, max_bound=None)
+            w_task_profile = compute_clearance_profile(
                 reference_path, s_profile,
-                corridor_bounds=corridor_bounds,
+                corridor_bounds=task_bounds,
                 cartesian_constraints=cartesian_regions if cartesian_regions else None,
+                unconstrained="inf",
             )
+            task_width_profile = (s_profile, w_task_profile)
+            # Finite copy for log-feature / interpolation consumers.
+            c_profile = np.minimum(w_task_profile, W_TASK_FINITE_CAP)
             clearance_profile = (s_profile, c_profile)
 
             # Curvature-rate signal computed on the CENTERLINE (not optimized
@@ -449,14 +472,20 @@ class CursorSimulator:
             if clearance_profile is None:
                 raise ValueError("horizon_mode='budget' requires a reference path with profiles")
             s_prof, c_prof = clearance_profile
+            _, w_task_prof = task_width_profile
             _, k_prof = curvature_profile
             _, r_prof = curvature_rate_profile
-            # Reference speed along the path — same signals model() feeds the
-            # speed model — used to convert the arc-length lookahead to steps.
+            # Reference speed along the path — same (finite) signals model()
+            # feeds the speed model — used to convert the arc-length
+            # lookahead to steps.
             v_ref_prof = self.speed_model.compute_speed_profile(
                 s_prof, c_prof, k_prof, r_prof)
+            # The budget consumes the TRUE width: density is exactly zero
+            # where W_task is inf, so in free space the anchor runs to the
+            # goal (path end) — gaze goes straight to the target, no fitted
+            # or hidden constant involved.
             budget_horizon = DifficultyBudgetHorizon(
-                s_prof, c_prof, v_ref_prof,
+                s_prof, w_task_prof, v_ref_prof,
                 D0=self.budget_D0, T_min=self.budget_T_min,
                 gamma=self.budget_gamma, W_ref=self.budget_W_ref,
             )
@@ -593,10 +622,15 @@ class CursorSimulator:
                 # that has drifted by deviation_frac of the distance it set
                 # out to cover is invalid), floored at the target diameter so
                 # terminal micro-plans keep a sane threshold.
+                # Deviation-trigger scale: the local usable width where the
+                # task is constrained; in free space (no walls) the task's
+                # own accuracy scale, the target diameter.
                 w_solve = None
                 if clearance_profile is not None:
                     s_cl, c_cl = clearance_profile
-                    w_solve = float(np.interp(theta0, s_cl, c_cl))
+                    w_here = float(np.interp(theta0, s_cl, c_cl))
+                    w_solve = (w_here if w_here < FREE_SPACE_CLEARANCE_M
+                               else 2.0 * target_radius)
                 dev_scale = w_solve if (w_solve and w_solve > 0) else None
                 if dev_scale is not None and dev_scale >= FREE_SPACE_CLEARANCE_M:
                     span = float(np.hypot(np.sum(c_pos_dx), np.sum(c_pos_dy)))

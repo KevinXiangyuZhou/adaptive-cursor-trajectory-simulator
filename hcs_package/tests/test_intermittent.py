@@ -420,3 +420,50 @@ def test_scheduler_dedicated_rng_reproducible_and_decoupled():
     np.random.seed(123); draws(np.random.default_rng(7))
     after = np.random.standard_normal()
     assert before == after
+
+
+def test_budget_free_space_anchor_is_goal():
+    # No constraint => W_task = inf => density 0 => the anchor runs to the
+    # path end (the target). Parameter-free pointing gaze.
+    n = 2001
+    s = np.linspace(0.0, 0.46, n)
+    bh = DifficultyBudgetHorizon(
+        s_profile=s, width_profile=np.full(n, np.inf),
+        v_ref_profile=np.full(n, 0.4), D0=1.4)
+    assert bh.anchor(0.0) == pytest.approx(0.46)
+    assert bh.anchor(0.3) == pytest.approx(0.46)
+
+
+def test_budget_c2u_handoff_at_remaining_difficulty():
+    # Tunnel (W=0.02) for s<1.0, then free space: from far inside the tunnel
+    # the anchor is budget-limited (h = D0*W); once the remaining in-tunnel
+    # difficulty drops below D0 the anchor leaps to the path end.
+    n = 4001
+    s = np.linspace(0.0, 2.0, n)
+    width = np.where(s < 1.0, 0.02, np.inf)
+    bh = DifficultyBudgetHorizon(
+        s_profile=s, width_profile=width,
+        v_ref_profile=np.full(n, 0.2), D0=1.4)
+    h_inside = bh.anchor(0.2) - 0.2
+    assert h_inside == pytest.approx(1.4 * 0.02, rel=1e-2)
+    # 2 cm before the exit: remaining difficulty 0.02/0.02 = 1.0 < D0
+    assert bh.anchor(0.98) == pytest.approx(2.0)
+
+
+def test_corridor_bounds_clamp_is_planner_only():
+    # max_bound clamps (planner QP conditioning); max_bound=None gives the
+    # true constraint distance — the task-width signal must use the latter.
+    from hcs_package.constraint_utils import (
+        parse_constraints_from_json, convert_constraints_to_corridor_bounds)
+    from hcs_package.reference_path import ReferencePath
+    cfg = parse_constraints_from_json({
+        "coordinate_system": "normalized", "default_margin": 0.0,
+        "regions": [{"constraint_type": "keep_in", "enabled": True,
+                     "geometry": {"type": "path",
+                                  "path": [[0.0, 0.13], [0.46, 0.13]],
+                                  "width": 10.0}}]})
+    rp = ReferencePath([(0.0, 0.13), (0.46, 0.13)], k=1)
+    clamped = convert_constraints_to_corridor_bounds(cfg, rp)
+    unclamped = convert_constraints_to_corridor_bounds(cfg, rp, max_bound=None)
+    assert clamped[0](0.2) == pytest.approx(0.1)
+    assert unclamped[0](0.2) == pytest.approx(5.0)

@@ -161,6 +161,7 @@ def compute_clearance_profile(
     s_samples: np.ndarray,
     corridor_bounds=None,
     cartesian_constraints: Optional[List] = None,
+    unconstrained: str = "max",
 ) -> np.ndarray:
     """Local usable width — twice the distance from path to the nearest
     active constraint boundary (for a corridor, w_left + w_right).
@@ -173,7 +174,10 @@ def compute_clearance_profile(
     * RectangleConstraint KEEP_IN:          2 x distance to nearest rect edge
 
     Unconstrained samples receive the max finite clearance so they don't
-    artificially cap speed.
+    artificially cap speed (``unconstrained="max"``, legacy default), or
+    stay at ``np.inf`` with ``unconstrained="inf"`` — the honest task-width
+    semantics: where no constraint is active there is no width, and
+    consumers that need a finite number must cap it themselves.
     """
     s_samples = np.asarray(s_samples, dtype=float)
     n = len(s_samples)
@@ -208,6 +212,9 @@ def compute_clearance_profile(
                         d = min(d_left, d_right, d_bottom, d_top)
                         if d > 0:
                             clearance[i] = min(clearance[i], 2.0 * d)
+
+    if unconstrained == "inf":
+        return clearance
 
     finite_mask = np.isfinite(clearance)
     if finite_mask.any():

@@ -243,7 +243,8 @@ def convert_constraints_to_corridor_bounds(
     reference_path,
     default_margin: float = 0.0,
     screen_width: Optional[float] = None,
-    screen_height: Optional[float] = None
+    screen_height: Optional[float] = None,
+    max_bound: Optional[float] = 0.1,
 ) -> Optional[Tuple[Callable, Callable]]:
     """Convert PathConstraint regions to path-relative corridor bounds.
 
@@ -252,6 +253,15 @@ def convert_constraints_to_corridor_bounds(
     *s*.  Only :class:`PathConstraint` regions with a ``width`` attribute are
     considered; Rectangle / Polygon regions are ignored (they are enforced
     separately as Cartesian constraints).
+
+    Args (in addition to the constraint config):
+        max_bound: Per-side clamp on the returned bounds (m). This exists
+            ONLY to condition the planner's lateral-corridor QP/penalty — a
+            +-5 m corridor is numerically useless to the MPCC. Pass None for
+            the TRUE unclamped constraint distance (the task-width signal
+            consumed by the gaze budget / speed model), which must never be
+            clamped: a 10 m corridor is perceptually free space, not a 0.2 m
+            tunnel.
 
     Returns:
         ``(left_bound_func, right_bound_func)`` or *None* when no
@@ -297,7 +307,6 @@ def convert_constraints_to_corridor_bounds(
 
     bound_array = np.min(np.stack(hw_arrays, axis=0), axis=0)
 
-    max_bound = 0.1
     left_bounds = np.clip(bound_array, 0.0, max_bound)
     right_bounds = np.clip(bound_array, 0.0, max_bound)
 

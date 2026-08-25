@@ -536,7 +536,13 @@ def build_fitts_bypass_config(human_round, target_radius, max_steps=800):
         "tunnel_width": BYPASS_TUNNEL_WIDTH_M,
     }
     environment = create_environment(env_dict)
-    task_config = generate_task_config(environment, include_constraints=True)
+    # Pointing is UNCONSTRAINED: no PathConstraint in the task. The wide
+    # "bypass" corridor is kept only as drawing geometry — as a constraint it
+    # used to leak the planner's per-side clamp (constraint_utils max_bound)
+    # into the clearance profile, making the gaze budget see a fictitious
+    # 0.2 m tunnel. With no constraints the task width is infinite, the
+    # budget density is zero, and the gaze anchor is the target itself.
+    task_config = generate_task_config(environment, include_constraints=False)
     return task_config, environment["centerline"], environment["tunnel_width"]
 
 
