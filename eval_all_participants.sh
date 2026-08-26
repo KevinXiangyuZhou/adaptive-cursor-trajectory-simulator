@@ -22,8 +22,12 @@ cd "$PROJECT_DIR"
 
 # All outputs go to the chi-27 project folder (override with RESULTS_ROOT)
 RESULTS_ROOT="${RESULTS_ROOT:-/home/xiangyz/ondemand/data/sys/myjobs/projects/chi-27/results}"
-export HCS_FIT_RESULTS_DIR="$RESULTS_ROOT/model_fitting"
-export HCS_EVAL_RESULTS_DIR="$RESULTS_ROOT/eval-main"
+# RUN_TAG isolates concurrent/successive fitting generations: outputs go to
+# model_fitting-<tag> / eval-main-<tag> instead of overwriting the untagged
+# dirs. Use the SAME tag for the fit, the eval and the aggregate of one
+# generation. Empty tag = legacy untagged dirs.
+export HCS_FIT_RESULTS_DIR="$RESULTS_ROOT/model_fitting${RUN_TAG:+-$RUN_TAG}"
+export HCS_EVAL_RESULTS_DIR="$RESULTS_ROOT/eval-main${RUN_TAG:+-$RUN_TAG}"
 mkdir -p "$HCS_FIT_RESULTS_DIR" "$HCS_EVAL_RESULTS_DIR"
 
 module load python3.11-anaconda/2024.02
