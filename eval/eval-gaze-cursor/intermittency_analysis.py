@@ -66,7 +66,7 @@ def robust_cv(x):
 
 
 def steering_events(events: pd.DataFrame) -> pd.DataFrame:
-    ev = events[
+    mask = (
         events["tunnel_type"].isin(STEER_TYPES)
         & (events["speed_onset"] > MIN_SPEED)
         & (events["lead_onset"] > MIN_LEAD)
@@ -74,7 +74,13 @@ def steering_events(events: pd.DataFrame) -> pd.DataFrame:
         & (events["duration_s"] <= MAX_DURATION)
         & (events["n_samples"] >= MIN_SAMPLES)
         & events["lead_end"].notna()
-    ].copy()
+    )
+    # Blink filter (re-exported CSVs only): blinks during the fixation or its
+    # incoming saccade fabricate long dwells / bad onset leads, inflating the
+    # post-arrival latency median and CV.
+    if "blink_corrupted" in events.columns:
+        mask &= ~events["blink_corrupted"].fillna(False)
+    ev = events[mask].copy()
     ev["frac_remaining"] = ev["lead_end"] / ev["lead_onset"]
     return ev
 
@@ -331,14 +337,26 @@ def main():
     plot_profiles(profiles, RESULTS_DIR)
     plot_trigger(ev, stats, RESULTS_DIR)
 
+    # Robustness split: cycles whose fixation is followed by a detected
+    # saccade within 0.10 s (a verified re-target). ~30% of transitions lack
+    # a labelled saccade, so this is a check that the headline latency stats
+    # are not carried by tracker-segmentation artifacts — not a filter.
+    stats_sacc = None
+    if "saccade_followed" in ev.columns and ev["saccade_followed"].any():
+        stats_sacc = trigger_stats(ev[ev["saccade_followed"]])
+
     summary = {
         "n_events_analyzed": int(len(ev)),
         "filters": {
             "steer_types": STEER_TYPES, "min_speed": MIN_SPEED,
             "min_lead": MIN_LEAD, "max_duration_s": MAX_DURATION,
             "min_samples": MIN_SAMPLES,
+            "blink_filter": bool("blink_corrupted" in events.columns),
         },
+        "frac_saccade_followed": (float(ev["saccade_followed"].mean())
+                                  if "saccade_followed" in ev.columns else None),
         "trigger": stats,
+        "trigger_saccade_validated": stats_sacc,
         "sawtooth_profile_pooled": {
             "grid": profiles["pooled"]["grid"].tolist(),
             "median": profiles["pooled"]["median"].tolist(),

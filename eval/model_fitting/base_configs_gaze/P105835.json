@@ -1,36 +1,36 @@
 {
- "_description": "width-only gaze budget (gamma=0.5, T_min=0.2, D0=0.994) for P105835 (A)",
- "Tp": 0.05,
- "Th": 0.3,
- "nc": [
-  0.2,
-  0.02
- ],
- "forearm": 0.35,
- "planner_weights": {
-  "jerk": 2e-06,
-  "progress": 3e-07,
-  "constraint": 50,
-  "contour": 10,
-  "lag": 1.0,
-  "desired_speed": 0.2,
-  "goal": 1.0,
-  "free_velocity": 0.08,
-  "goal_precision": 0.0
- },
- "speed_model": {
-  "type": "gam",
-  "path": "../../../hcs_package/src/hcs_package/user_configurations/population_gam.pkl"
- },
- "horizon_mode": "budget",
- "replan_mode": "intermittent",
- "budget": {
-  "D0": 0.9938,
-  "T_min": 0.2,
-  "gamma": 0.5,
-  "W_ref": 0.026
- },
- "replan_latency_s": 0.2052,
- "replan_latency_cv": 0.86,
- "replan_deviation_frac": 0.15
+  "_description": "width-only gaze budget (gamma=0.5, T_min=0.2, D0=0.994) for P105835 (A)",
+  "Tp": 0.05,
+  "Th": 0.3,
+  "nc": [
+    0.2,
+    0.02
+  ],
+  "forearm": 0.35,
+  "planner_weights": {
+    "jerk": 2e-06,
+    "progress": 3e-07,
+    "constraint": 50,
+    "contour": 10,
+    "lag": 1.0,
+    "desired_speed": 0.2,
+    "goal": 1.0,
+    "free_velocity": 0.08,
+    "goal_precision": 0.0
+  },
+  "speed_model": {
+    "type": "gam",
+    "path": "../../../hcs_package/src/hcs_package/user_configurations/population_gam.pkl"
+  },
+  "horizon_mode": "budget",
+  "replan_mode": "intermittent",
+  "budget": {
+    "D0": 1.2871,
+    "T_min": 0.0,
+    "gamma": 0.5,
+    "W_ref": 0.026
+  },
+  "replan_latency_s": 0.2051,
+  "replan_latency_cv": 0.8415,
+  "replan_deviation_frac": 0.15
 }

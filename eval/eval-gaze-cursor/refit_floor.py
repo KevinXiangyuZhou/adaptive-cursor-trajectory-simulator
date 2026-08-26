@@ -44,6 +44,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -255,6 +256,34 @@ def c2u_transfer(samples, events, sim_params):
     return out
 
 
+def ttc_validation(ev_pos: pd.DataFrame, fitted: dict) -> dict:
+    """Fit-free check of T_min against time_to_catch = lead/v at fixation
+    onset (re-exported CSVs). The floor h >= v*T_min is exactly
+    ttc_onset >= T_min at the planning event, so the fitted T_min should sit
+    near the lower quantiles of the onset distribution (instantaneous-speed
+    noise blurs the hard edge; use quantiles, not the minimum)."""
+    if "ttc_onset" not in ev_pos.columns:
+        return {}
+    out = {}
+    groups = [("pooled", ev_pos)] + list(ev_pos.groupby("participant"))
+    for name, g in groups:
+        ttc = pd.to_numeric(g["ttc_onset"], errors="coerce").dropna()
+        ttc = ttc[(ttc > 0) & (ttc < 3.0)]
+        if len(ttc) < 10:
+            continue
+        t_min = fitted.get(name, {}).get("sim_params", {}).get("T_min")
+        out[name] = {
+            "n": int(len(ttc)),
+            "q10": float(np.percentile(ttc, 10)),
+            "q25": float(np.percentile(ttc, 25)),
+            "q50": float(np.percentile(ttc, 50)),
+            "fitted_T_min": t_min,
+            "frac_above_T_min": (float((ttc >= t_min).mean())
+                                 if t_min is not None else None),
+        }
+    return out
+
+
 def main():
     RESULTS_DIR.mkdir(exist_ok=True)
     samples, events = gd.load_all()
@@ -278,6 +307,9 @@ def main():
     out["c2u_transfer"] = c2u_transfer(samples, events,
                                        out["pooled"]["sim_params"])
     print(f"[c2u] {json.dumps(out['c2u_transfer'], default=float)}")
+
+    out["ttc_validation"] = ttc_validation(ev_pos, out)
+    print(f"[ttc] {json.dumps(out['ttc_validation'], default=float)}")
 
     with open(RESULTS_DIR / "lookahead_floor_summary.json", "w") as f:
         json.dump(out, f, indent=2, default=float)

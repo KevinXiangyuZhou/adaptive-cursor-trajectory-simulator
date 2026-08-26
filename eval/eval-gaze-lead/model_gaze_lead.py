@@ -210,7 +210,9 @@ def _current_budget(letter):
             "gamma": sp["gamma"], "W_ref": sp.get("W_ref", 0.026)}
 
 
-def run_participant(letter, noise_on=True):
+def make_sim(letter, noise_on=True):
+    """Fitted persona simulator for one participant: the Stage A-F GAM config
+    overlaid with the current width-only Stage G budget."""
     pid = PARTICIPANTS[letter]
     cfg_path = FIT_DIR / f"{pid}_gam_config_s42.json"
     cfg = json.load(open(cfg_path))
@@ -226,7 +228,12 @@ def run_participant(letter, noise_on=True):
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
         json.dump(cfg, tf)
         cfg_file = tf.name
-    sim = CursorSimulator(cfg_file)
+    return CursorSimulator(cfg_file)
+
+
+def run_participant(letter, noise_on=True):
+    pid = PARTICIPANTS[letter]
+    sim = make_sim(letter, noise_on=noise_on)
 
     tid_to_condition, tid_to_bucket = em.scan_conditions(GAZE_DATA_DIR)
     tids = sorted(t for t, b in tid_to_bucket.items()

@@ -53,11 +53,16 @@ def spearman(x, y):
 
 
 def steering_events(events: pd.DataFrame) -> pd.DataFrame:
-    ev = events[
+    mask = (
         events["tunnel_type"].isin(STEER_TYPES)
         & (events["speed_onset"] > MIN_SPEED)
         & events["lead_onset"].notna()
-    ].copy()
+    )
+    # Blink filter (re-exported CSVs only): a blink over the fixation or its
+    # incoming saccade corrupts both the onset lead and the dwell duration.
+    if "blink_corrupted" in events.columns:
+        mask &= ~events["blink_corrupted"].fillna(False)
+    ev = events[mask].copy()
     ev["abs_curv"] = ev["curvature"].abs().fillna(0.0)
     ev["width"] = ev["width"].fillna(ev["width"].median())
     return ev
