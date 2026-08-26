@@ -1,0 +1,43 @@
+{
+  "Tp": 0.05,
+  "Th": 0.3,
+  "nc": [
+    0.2,
+    0.02
+  ],
+  "forearm": 0.35,
+  "planner_weights": {
+    "jerk": 3.149413839921767e-05,
+    "progress": 9.43418318682607e-07,
+    "constraint": 14.428446276996418,
+    "contour": 21.757472893192052,
+    "lag": 5.836113128611945,
+    "desired_speed": 0.2,
+    "goal": 5.5764275064842055,
+    "free_velocity": 0.1774741475745511,
+    "goal_precision": 0.0
+  },
+  "speed_model": {
+    "type": "gam",
+    "path": "P105835_gam_s42.pkl"
+  },
+  "horizon_mode": "budget",
+  "replan_mode": "intermittent",
+  "budget": {
+    "D0": 1.2871,
+    "T_min": 0.0,
+    "gamma": 0.5,
+    "W_ref": 0.026
+  },
+  "replan_latency_s": 0.2051,
+  "replan_latency_cv": 0.8415,
+  "replan_deviation_frac": 0.15,
+  "reference_path": {
+    "w_cut": 0.30427745790822647,
+    "w_suppress": 0.6164695213640161,
+    "w_width_exp": 0.06178114528736979,
+    "cut_window_frac": 0.021816459452699954,
+    "global_clearance_ref": 0.021506923617259206
+  },
+  "_description": "Fitted persona for P105835 (seed 42); see P105835_gam_fit_s42.json"
+}
