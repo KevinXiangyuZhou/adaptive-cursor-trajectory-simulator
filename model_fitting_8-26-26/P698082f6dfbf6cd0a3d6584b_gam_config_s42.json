@@ -1,0 +1,32 @@
+{
+  "Tp": 0.05,
+  "Th": 0.25,
+  "nc": [
+    0.2,
+    0.02
+  ],
+  "forearm": 0.35,
+  "planner_weights": {
+    "jerk": 1.0671396571152792e-06,
+    "progress": 1.0110325881846122e-08,
+    "constraint": 34.453183489595695,
+    "contour": 68.07488384884388,
+    "lag": 9.2614503413127,
+    "desired_speed": 0.2,
+    "goal": 0.5987045951853374,
+    "free_velocity": 0.057517430521269654,
+    "goal_precision": 9.196559026285458e-05
+  },
+  "speed_model": {
+    "type": "gam",
+    "path": "P698082f6dfbf6cd0a3d6584b_gam_s42.pkl"
+  },
+  "reference_path": {
+    "w_cut": 0.3709405354960984,
+    "w_suppress": 0.07723087866121724,
+    "w_width_exp": 0.6784773241117351,
+    "cut_window_frac": 0.059288107107780444,
+    "global_clearance_ref": 0.025060522298443872
+  },
+  "_description": "Fitted persona for P698082f6dfbf6cd0a3d6584b (seed 42); see P698082f6dfbf6cd0a3d6584b_gam_fit_s42.json"
+}

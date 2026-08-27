@@ -1,0 +1,43 @@
+{
+  "Tp": 0.05,
+  "Th": 0.3,
+  "nc": [
+    0.2,
+    0.02
+  ],
+  "forearm": 0.35,
+  "planner_weights": {
+    "jerk": 4.053578915708651e-06,
+    "progress": 3.930821660454106e-07,
+    "constraint": 13.517878966123344,
+    "contour": 61.965642319077865,
+    "lag": 9.341493024913634,
+    "desired_speed": 0.2,
+    "goal": 0.15822145130220608,
+    "free_velocity": 0.007743744295310023,
+    "goal_precision": 0.0
+  },
+  "speed_model": {
+    "type": "gam",
+    "path": "P170114_gam_s42.pkl"
+  },
+  "horizon_mode": "budget",
+  "replan_mode": "intermittent",
+  "budget": {
+    "D0": 1.6369,
+    "T_min": 0.1,
+    "gamma": 0.6,
+    "W_ref": 0.026
+  },
+  "replan_latency_s": 0.1902,
+  "replan_latency_cv": 0.7629,
+  "replan_deviation_frac": 0.15,
+  "reference_path": {
+    "w_cut": 0.30427745790822647,
+    "w_suppress": 0.6164695213640161,
+    "w_width_exp": 0.06178114528736979,
+    "cut_window_frac": 0.021816459452699954,
+    "global_clearance_ref": 0.021506923617259206
+  },
+  "_description": "Fitted persona for P170114 (seed 42); see P170114_gam_fit_s42.json"
+}
