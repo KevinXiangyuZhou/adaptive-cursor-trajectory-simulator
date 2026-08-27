@@ -147,6 +147,83 @@ def plot_fitts_regression(model_rows, human_rows, model_reg, human_reg, output_p
     print(f"  Saved: {output_path}")
 
 
+def plot_id4scs_combined(side_rows, side_fits, output_path):
+    """
+    Aggregate ID4SCS plot across BOTH directions on a SHARED difficulty axis:
+    composite ID = b*S1 + c*C + d*S2 computed with the HUMAN coefficients for
+    both sides, so each condition has one x and the simulator's deviation
+    from the human appears purely as vertical displacement. The human line is
+    its own-law y = x + a; the simulator line is a least-squares fit of its
+    MT against the human composite. Direction is encoded in the marker:
+    o = wide-to-narrow, ^ = narrow-to-wide.
+
+    Args:
+        side_rows: {"human"/"model": [{"S1","C","S2","MT","direction"}, ...]}
+                   with direction in {"wide_to_narrow", "narrow_to_wide"}.
+        side_fits: {"human"/"model": dict from stats.fit_id4scs (a..d, r_squared)}.
+        output_path: path to save the figure to.
+    """
+    colors = {"human": "tab:blue", "model": "tab:orange"}
+    names = {"human": "Human", "model": "Simulator"}
+    markers = {"wide_to_narrow": "o", "narrow_to_wide": "^"}
+
+    ref = side_fits.get("human") or side_fits.get("model")
+    if not ref:
+        print(f"  Skipping {output_path}: no ID4SCS fit to define the composite axis")
+        return
+
+    def comp(r):
+        return ref["b"] * r["S1"] + ref["c"] * r["C"] + ref["d"] * r["S2"]
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ann = [f"axis: human fit  MT = {ref['a']:.2f} + {ref['b']:.3f}·S1 "
+           f"{ref['c']:+.3f}·C {ref['d']:+.3f}·S2   (R²={ref['r_squared']:.2f})"]
+    for side in ("human", "model"):
+        rows = side_rows.get(side) or []
+        if not rows:
+            continue
+        for direction, mk in markers.items():
+            pts = [(comp(r), r["MT"]) for r in rows if r["direction"] == direction]
+            if not pts:
+                continue
+            xs, ys = zip(*pts)
+            ax.scatter(xs, ys, s=55, marker=mk, color=colors[side], alpha=0.85,
+                       edgecolors="none", zorder=3,
+                       label=f"{names[side]} — {direction.replace('_to_', ' → ')}")
+        cs = np.array([comp(r) for r in rows])
+        x = np.linspace(cs.min(), cs.max(), 100)
+        if side == "human":
+            ax.plot(x, x + ref["a"], color=colors[side], linewidth=2, alpha=0.8,
+                    zorder=2)
+        else:
+            mts = np.array([r["MT"] for r in rows])
+            if len(rows) >= 3 and np.ptp(cs) > 1e-9:
+                slope, icpt = np.polyfit(cs, mts, 1)
+                pred = icpt + slope * cs
+                ss_tot = float(np.sum((mts - mts.mean()) ** 2))
+                r_sq = 1.0 - float(np.sum((mts - pred) ** 2)) / ss_tot if ss_tot else 0.0
+                ax.plot(x, icpt + slope * x, color=colors[side], linewidth=2,
+                        alpha=0.8, zorder=2)
+                ann.append(f"{names[side]} vs human composite: "
+                           f"MT = {icpt:.2f} + {slope:.2f}·ID   (R²={r_sq:.2f})")
+
+    ax.set_xlabel("Composite ID (b·S1 + c·C + d·S2, human coefficients)", fontsize=11)
+    ax.set_ylabel("Observed MT (s)", fontsize=11)
+    ax.set_title("ID4SCS: both directions, pooled per-condition means", fontsize=12,
+                 fontweight="bold")
+    if ann:
+        ax.text(0.02, 0.98, "\n".join(ann), transform=ax.transAxes, fontsize=8.5,
+                verticalalignment="top",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+    ax.legend(fontsize=9, loc="lower right")
+    ax.grid(alpha=0.3)
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {output_path}")
+
+
 def plot_id4scs_regression(rows, reg, output_path, direction_label):
     """
     Composite-ID diagnostic plot for the ID4SCS model:
