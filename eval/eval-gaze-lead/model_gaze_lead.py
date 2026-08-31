@@ -210,21 +210,25 @@ def _current_budget(letter):
             "gamma": sp["gamma"], "W_ref": sp.get("W_ref", 0.026)}
 
 
+CONFIG_OVERRIDE = None   # --config: explicit persona JSON (e.g. an anchor-drive persona)
+
+
 def make_sim(letter, noise_on=True):
     """Fitted persona simulator for one participant: the Stage A-F GAM config
-    overlaid with the current width-only Stage G budget."""
+    (or the --config persona) overlaid with the current width-only Stage G budget."""
     pid = PARTICIPANTS[letter]
-    cfg_path = FIT_DIR / f"{pid}_gam_config_s42.json"
+    cfg_path = Path(CONFIG_OVERRIDE) if CONFIG_OVERRIDE else FIT_DIR / f"{pid}_gam_config_s42.json"
     cfg = json.load(open(cfg_path))
+    cfg.pop("_description", None)
     budget = _current_budget(letter)
-    if budget is not None:
+    if budget is not None and not CONFIG_OVERRIDE:   # an explicit persona keeps its own budget
         cfg["budget"] = budget
     if not noise_on:
         cfg["add_noise"] = False
         cfg["replan_latency_cv"] = 0.0
     sm = cfg.get("speed_model", {})
     if sm.get("path") and not Path(sm["path"]).is_absolute():
-        sm["path"] = str(FIT_DIR / sm["path"])
+        sm["path"] = str((cfg_path.parent if CONFIG_OVERRIDE else FIT_DIR) / sm["path"])
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
         json.dump(cfg, tf)
         cfg_file = tf.name
@@ -335,7 +339,13 @@ def main():
     ap.add_argument("--noise", choices=["on", "off"], default="on",
                     help="motor noise + stochastic replan latency (default on: "
                          "matches how humans generated their traces)")
+    ap.add_argument("--config", default=None, help="explicit persona JSON (overrides FIT_DIR lookup; use with one --letters)")
+    ap.add_argument("--out-dir", default=None, help="output folder (default: model-gaze-lead/)")
     a = ap.parse_args()
+    global CONFIG_OVERRIDE, OUT_DIR
+    CONFIG_OVERRIDE = a.config
+    if a.out_dir:
+        OUT_DIR = Path(a.out_dir) if Path(a.out_dir).is_absolute() else SCRIPT_DIR / a.out_dir
 
     all_rows = []
     for letter in a.letters:
