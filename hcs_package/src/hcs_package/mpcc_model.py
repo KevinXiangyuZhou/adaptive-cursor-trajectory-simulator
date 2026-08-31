@@ -256,6 +256,7 @@ def generate_mpcc(
     if anchor_mode:
         anchor_s_target = float(np.clip(float(anchor[0]), 0.0, ref_path.total_length))
         k_deadline = int(np.clip(int(anchor[1]), 0, num_steps - 1))
+        anchor_lead_norm = max(anchor_s_target - float(state_0[6]), 0.005)
         free_space_mask = None
         s_sched = np.clip(np.asarray(anchor[2], dtype=float), 0.0, ref_path.total_length)
         # Coast-safety: number of latency steps over which the deadline
@@ -451,7 +452,10 @@ def generate_mpcc(
                     tracking_cost += w_contour * e_contour**2 + float(w_lag_anchor) * e_lag**2
                 if k == k_deadline:
                     # Progress via-point: be at the anchor at the deadline.
-                    tracking_cost += w_goal * (anchor_s_target - float(s_traj[k]))**2
+                    # Lateness is normalised by the planned lead (dimensionless)
+                    # so the drive's stiffness does not scale with lead^2 — a
+                    # 60 mm and a 300 mm plan are held to the same fraction.
+                    tracking_cost += w_goal * ((anchor_s_target - float(s_traj[k])) / anchor_lead_norm)**2
             elif any_free and free_mask[k]:
                 # Goal-directed pointing: lateral error stays w.r.t. the path
                 # (keeps the movement on the straight line); the drive is the
@@ -606,6 +610,11 @@ def generate_mpcc(
         # Fixed-point iteration on the progress linearisation: re-take the
         # tangents on the solved plan's own progress and re-solve
         # (warm-started) until the schedule is self-consistent.
+        # Monotone safeguard: the fixed-point iteration is not a descent
+        # method (each pass changes the objective's linearisation), so keep the
+        # best (cost, plan, schedule) seen and return that if a later pass
+        # diverges — a numerical guard against runaway plans, no behaviour.
+        best = (float(result.fun), result.x.copy(), s_sched.copy(), tan_sched_box[0].copy())
         for _ in range(ANCHOR_RELIN_PASSES - 1):
             jx_p, jy_p, _ = unpack_x(result.x)
             s_new = kinematic_progress(vx_free + A_vel_mat @ jx_p, vy_free + A_vel_mat @ jy_p)
@@ -616,6 +625,11 @@ def generate_mpcc(
             result = minimize(
                 objective, result.x, method='L-BFGS-B', bounds=bounds,
                 options={'maxiter': 500, 'ftol': 1e-6, 'gtol': 1e-5, 'maxfun': 5000})
+            if np.isfinite(result.fun) and float(result.fun) < best[0]:
+                best = (float(result.fun), result.x.copy(), s_sched.copy(), tan_sched_box[0].copy())
+        if not (np.isfinite(result.fun) and float(result.fun) <= best[0]):
+            s_sched = best[2]; tan_sched_box[0] = best[3]
+            result.x = best[1]; result.fun = best[0]
 
     _warm_start_cache['x_prev'] = result.x.copy()
     _warm_start_cache['num_steps'] = num_steps

@@ -1,6 +1,7 @@
 """Playwright-compatible cursor simulator for generating human-like trajectories."""
 
 import json
+import os
 import numpy as np
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any, Union
@@ -227,6 +228,12 @@ class CursorSimulator:
         # in pointing it stretches the deadline for far targets so the drive
         # asks for a physiological peak speed instead of an absurd one.
         self.plan_vmax = float(config.get('plan_vmax', 0.8))
+        # Turning-time deadline (s per radian of turning inside the lead); 0 = off.
+        self.plan_turn_time_s = float(config.get('plan_turn_time_s', 0.0))
+        self.plan_turn_width_exp = float(config.get('plan_turn_width_exp', 0.0))
+        # Trial abort on leaving the tunnel by more than this margin (m); the
+        # steering experiment restarts such trials. None = never abort.
+        self.abort_on_breach_m = config.get('abort_on_breach_m', None)
         # Arrival rule for the replan trigger: "progress" = cursor's arc-length
         # projection reaches the anchor (stalls in the wedge of a sharp corner,
         # where every inside point projects to the apex); "distance" = cursor
@@ -584,6 +591,7 @@ class CursorSimulator:
         # ~0.3 s median from final target entry to click).
         dwell_required = int(round(self.dwell_s / self.interval))
         dwell_steps = 0
+        aborted_breach = False
         for step in range(max_steps):
             dist_to_target = np.linalg.norm(cursor_pos - final_target)
             if dist_to_target < target_radius:
@@ -636,10 +644,17 @@ class CursorSimulator:
                 theta0 = float(reference_path.find_closest_theta(
                     cursor_pos, initial_guess=theta_track))
                 theta_track = theta0
+                anchor_solve_s = None
                 if motor_replan:
                     # Slide the anchor along the fixation's schedule: demand the
                     # schedule position one deadline ahead of NOW (no new fixation).
                     t_ahead = (current_time - fix['t0']) + self.plan_deadline_s
+                    anchor_solve_s = None
+                    if self.plan_turn_time_s > 0.0:
+                        # Turning-time mode: the motor plan spans the numerical
+                        # horizon floor; demand the schedule at its end.
+                        n_base_m = max(3, motor_steps + 2)
+                        t_ahead = (current_time - fix['t0']) + n_base_m * self.interval
                     # Slid anchor keeps the same lead floor as fixations: at
                     # least one local room ahead of the cursor — otherwise a
                     # cursor that overtakes the schedule loses all drive and
@@ -652,6 +667,8 @@ class CursorSimulator:
                     anchor_s = min(max(fix['s0'] + fix['pace'] * t_ahead, theta0 + room_m),
                                    float(reference_path.total_length))
                     n_base = max(1, int(np.floor(self.plan_deadline_s / self.interval + 0.5 + 1e-9)))
+                    if self.plan_turn_time_s > 0.0:
+                        n_base = max(3, motor_steps + 2)
                 if motor_replan:
                     pass
                 elif budget_horizon is not None:
@@ -683,6 +700,32 @@ class CursorSimulator:
                         # Round half-up with a float guard (0.175/0.05 = 3.4999.. -> 4).
                         lead_now = max(0.0, float(anchor_s) - theta0)
                         t_plan = max(self.plan_deadline_s, lead_now / max(self.plan_vmax, 1e-6))
+                        # Turning-time mode: t_plan = max(T0, lead/v_max) + tau*theta*(W_ref/W)^beta,
+                        # T0 = plan_deadline_s (gaze: straight-segment time-to-anchor, ~0.1-0.2 s).
+                        # The numerical horizon floor (3 nodes) is separate, see below.
+                        if self.plan_turn_time_s > 0.0 and curvature_profile is not None:
+                            # Turning-time deadline (config-gated): the planned
+                            # time-to-anchor grows with the turning angle inside
+                            # the lead, tau_turn seconds per radian. Gaze data:
+                            # the lead is width-only and crosses corners, while
+                            # the time to reach the anchor lengthens in bends —
+                            # one slower movement, not a shorter look-ahead.
+                            s_kp, k_kp = curvature_profile
+                            s_lo, s_hi = theta0, float(anchor_s)
+                            if s_hi > s_lo + 1e-9:
+                                s_grid = np.linspace(s_lo, s_hi, max(4, int((s_hi - s_lo) / 0.001) + 2))
+                                theta_lead = float(np.trapz(np.interp(s_grid, s_kp, k_kp), s_grid))
+                                w_fac = 1.0
+                                if self.plan_turn_width_exp > 0.0 and clearance_profile is not None:
+                                    # Tolerance-scaled turning time: seconds per
+                                    # radian grow as the room shrinks, (W_ref/W)^beta
+                                    # (gaze data: B's corner crossing 0.46 s at 20 mm
+                                    # vs 0.26 s at 40-50 mm; beta = 1 fits best).
+                                    s_cw, c_cw = clearance_profile
+                                    w_loc = float(np.interp(theta0, s_cw, c_cw))
+                                    if 0.0 < w_loc < FREE_SPACE_CLEARANCE_M:
+                                        w_fac = (self.budget_W_ref / w_loc) ** self.plan_turn_width_exp
+                                t_plan += self.plan_turn_time_s * theta_lead * w_fac
                         a_max = float(self.planner_weights.get('acc_max', 0.0) or 0.0)
                         if a_max > 0.0:
                             # ... nor faster than the bounded hand can cover the
@@ -691,9 +734,26 @@ class CursorSimulator:
                             t_acc = (-v_now + np.sqrt(v_now * v_now + 2.0 * a_max * lead_now)) / a_max
                             t_plan = max(t_plan, float(t_acc))
                         n_base = max(1, int(np.floor(t_plan / self.interval + 0.5 + 1e-9)))
+                        anchor_solve_s = None
+                        if self.plan_turn_time_s > 0.0:
+                            # Numerical floor: >= 3 nodes (shorter horizons destabilise
+                            # the solve) and > the motor period, else the scheduler's
+                            # plan exhaustion fires at the next motor tick before arrival.
+                            n_min = max(3, motor_steps + 2)
+                            if n_base < n_min:
+                                # Horizon floor: demand the schedule position at the
+                                # horizon end (pace unchanged), not the fixation
+                                # point itself — same rule as the motor replans.
+                                n_base = n_min
+                                pace0 = lead_now / max(t_plan, 1e-6)
+                                anchor_solve_s = min(theta0 + pace0 * n_base * self.interval,
+                                                     float(reference_path.total_length))
                         fix = {'t0': current_time, 's0': theta0,
                                'pace': lead_now / max(t_plan, 1e-6),
                                'steps': 0, 'max_steps': None}
+                        if os.environ.get('HCS_DEBUG_PLAN'):
+                            print(f"[plan] t={current_time:.2f} s0={theta0*1000:.0f}mm lead={lead_now*1000:.1f}mm "
+                                  f"t_plan={t_plan:.3f}s pace={fix['pace']:.3f} n_base={n_base} solve_anchor={'%.0f' % (anchor_solve_s*1000) if anchor_solve_s is not None else '-'}", flush=True)
                     else:
                         n_base = int(np.ceil(
                             budget_horizon.traverse_time(theta0, anchor_s) / self.interval))
@@ -760,7 +820,8 @@ class CursorSimulator:
                 model_input.warm_shift = max(1, scheduler.plan_idx - 1)
                 # Anchor-drive: the gaze anchor is the plan's via point at
                 # the deadline node (n_base steps); the padded tail coasts.
-                model_input.anchor_s = anchor_s if self.anchor_drive else None
+                model_input.anchor_s = (anchor_solve_s if (self.anchor_drive and anchor_solve_s is not None)
+                                        else (anchor_s if self.anchor_drive else None))
                 model_input.deadline_steps = n_base
                 model_input.safety_steps = tau_steps if (self.anchor_drive and self.coast_safety) else 0
 
@@ -893,13 +954,26 @@ class CursorSimulator:
 
             current_time += self.interval
 
+            if self.abort_on_breach_m is not None and clearance_profile is not None:
+                # Trial failure: the cursor left the tunnel by more than the
+                # margin (the experiment restarts such trials). Stops the
+                # runaway sims that otherwise burn the 30 s cap.
+                th_b = float(reference_path.find_closest_theta(cursor_pos, initial_guess=theta_track))
+                s_cb, c_cb = clearance_profile
+                w_b = float(np.interp(th_b, s_cb, c_cb))
+                if 0.0 < w_b < FREE_SPACE_CLEARANCE_M:
+                    off_b = float(np.linalg.norm(cursor_pos - np.asarray(reference_path(th_b), dtype=float).reshape(-1)[:2]))
+                    if off_b > 0.5 * w_b + float(self.abort_on_breach_m):
+                        aborted_breach = True
+                        break
+
         self.last_diagnostics = {
             'horizon_mode': self.horizon_mode,
             'replan_mode': self.replan_mode,
             'anchor_drive': self.anchor_drive,
             'plan_deadline_s': self.plan_deadline_s,
             'coast_safety': self.coast_safety,
-            'plan_vmax': self.plan_vmax, 'arrival_mode': self.arrival_mode, 'anchor_lead_floor': self.anchor_lead_floor,
+            'plan_vmax': self.plan_vmax, 'plan_turn_time_s': self.plan_turn_time_s, 'plan_turn_width_exp': self.plan_turn_width_exp, 'arrival_mode': self.arrival_mode, 'anchor_lead_floor': self.anchor_lead_floor,
             'anchor_memory': self.anchor_memory, 'corner_consume': self.corner_consume,
             'budget_T_min': self.budget_T_min,
             'replan_latency_cv': self.replan_latency_cv,
@@ -907,6 +981,7 @@ class CursorSimulator:
             'min_open_loop_s': self.min_open_loop_s,
             'interval': self.interval,
             'n_steps_executed': len(trajectory),
+            'aborted_breach': aborted_breach,
             'n_solves': len(scheduler.events),
             'total_length': float(reference_path.total_length),
             'replan_events': [
