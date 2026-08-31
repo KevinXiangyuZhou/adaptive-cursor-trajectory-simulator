@@ -66,8 +66,10 @@ def model(model_input: SteeringModelInput):
         desired_speed = float(model_input.planner_weights['desired_speed'])
 
     speed_model = getattr(model_input, 'speed_model', None)
-    if speed_model is None:
-        raise ValueError("speed_model is required in SteeringModelInput")
+    anchor_s = getattr(model_input, 'anchor_s', None)
+    if speed_model is None and anchor_s is None:
+        raise ValueError("speed_model is required in SteeringModelInput "
+                         "(or anchor_s for anchor-drive planning)")
 
     s0_init = theta_0
     # Project the look-ahead at the cursor's actual speed (not a fixed nominal)
@@ -95,14 +97,32 @@ def model(model_input: SteeringModelInput):
         s_prof, r_prof = curvature_rate_profile
         dkappa_at_s = np.interp(s_estimated, s_prof, r_prof)
 
-    speed_profile = speed_model.compute_speed_profile(
-        s_estimated, clearance_at_s, kappa_at_s, dkappa_at_s,
-    )
+    anchor = None
+    if anchor_s is not None:
+        # Anchor-drive planning: no prescribed speed and no free-space
+        # gate. ONE drive term everywhere — a via-point cost at the deadline
+        # node aimed at the gaze anchor. In a tunnel the anchor recedes at
+        # every replan (cruise emerges as lookahead / deadline); where the
+        # environment stops constraining, the budget density vanishes, the
+        # anchor rests on the goal and the same pursuit becomes pointing.
+        speed_profile = None
+        free_space_mask = None
+        deadline_steps = int(getattr(model_input, 'deadline_steps', pred_horizon) or pred_horizon)
+        k_deadline = int(np.clip(deadline_steps, 1, pred_horizon)) - 1
+        # Initial progress schedule for the linearisation: the current
+        # speed (gentle floor; re-linearised to self-consistency inside).
+        s_sched0 = s0_init + max(speed_now, 0.05) * interval * np.arange(1, pred_horizon + 1)
+        anchor = (float(np.clip(anchor_s, 0.0, ref_path.total_length)), k_deadline, s_sched0,
+                  int(getattr(model_input, 'safety_steps', 0) or 0))
+    else:
+        speed_profile = speed_model.compute_speed_profile(
+            s_estimated, clearance_at_s, kappa_at_s, dkappa_at_s,
+        )
 
-    # Horizon nodes in unconstrained space (clearance far beyond any tunnel
-    # half-width; the tunnel-adaptive speed model is saturated there) switch
-    # the MPCC from corridor-following to goal-directed pointing.
-    free_space_mask = clearance_at_s > FREE_SPACE_CLEARANCE_M
+        # Horizon nodes in unconstrained space (clearance far beyond any tunnel
+        # half-width; the tunnel-adaptive speed model is saturated there) switch
+        # the MPCC from corridor-following to goal-directed pointing.
+        free_space_mask = clearance_at_s > FREE_SPACE_CLEARANCE_M
 
     weights_with_nc = dict(model_input.planner_weights) if model_input.planner_weights else {}
     weights_with_nc['nc0'] = model_input.bump.nc[0]
@@ -121,6 +141,8 @@ def model(model_input: SteeringModelInput):
         corridor_bounds=corridor_bounds,
         cartesian_constraints=cartesian_constraints,
         free_space_mask=free_space_mask,
+        anchor=anchor,
+        curvature_profile=curvature_profile,
         warm_shift=int(getattr(model_input, 'warm_shift', 1) or 1),
     )
 
@@ -155,6 +177,7 @@ def model(model_input: SteeringModelInput):
     ref_target = ref_path(theta_0)
     plan_debug = {
         "ideal_segment": (pos_x.tolist(), pos_y.tolist()),
+        "anchor": None if anchor is None else (float(anchor[0]), int(anchor[1])),
         "target_waypoint": (float(ref_target[0]), float(ref_target[1])),
         "theta": float(theta_0),
         "opt_info": opt_info,

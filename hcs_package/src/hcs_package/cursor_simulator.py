@@ -197,6 +197,7 @@ class CursorSimulator:
         self.budget_T_min = float(budget_cfg.get('T_min', 0.1))
         self.budget_gamma = float(budget_cfg.get('gamma', 1.0))
         self.budget_W_ref = float(budget_cfg.get('W_ref', 0.026))
+        self.budget_curvature_weighted = bool(budget_cfg.get('curvature_weighted', False))
         self.replan_mode = str(config.get('replan_mode', 'every_step'))
         if self.replan_mode not in ('every_step', 'intermittent'):
             raise ValueError(f"replan_mode must be 'every_step' or 'intermittent', got {self.replan_mode!r}")
@@ -207,6 +208,52 @@ class CursorSimulator:
         self.replan_latency_max_s = float(config.get('replan_latency_max_s', 1.5))
         self.horizon_min_steps = int(config.get('horizon_min_steps', 2))
         self.horizon_max_steps = int(config.get('horizon_max_steps', 40))
+        # Anchor-drive planning (speed_model type "none"): the plan's
+        # intended time-to-anchor. Every solve covers plan_deadline_s of
+        # movement and asks the cursor to be AT the gaze anchor at that
+        # deadline (a via point, not a rest point), so cruise speed is the
+        # budget lookahead divided by this deadline — v = h(W)/T_plan —
+        # and no speed is prescribed anywhere. Gaze data: the time from
+        # fixation onset to the cursor crossing the anchor is ~0.19 s and
+        # width-invariant (lead and speed both scale with width, their
+        # ratio does not); it lengthens in curved tunnels, which the
+        # planner reproduces by trading punctuality against effort.
+        self.plan_deadline_s = float(config.get('plan_deadline_s', 0.19))
+        # Coast-safety (anchor-drive): the deadline state's ballistic
+        # continuation over the replan latency must stay inside the walls.
+        self.coast_safety = bool(config.get('coast_safety', True))
+        # Maximum hand speed (m/s): the plan deadline cannot demand arrival
+        # sooner than lookahead / v_max. Inert in tunnels (lookahead <= 5 cm);
+        # in pointing it stretches the deadline for far targets so the drive
+        # asks for a physiological peak speed instead of an absurd one.
+        self.plan_vmax = float(config.get('plan_vmax', 0.8))
+        # Arrival rule for the replan trigger: "progress" = cursor's arc-length
+        # projection reaches the anchor (stalls in the wedge of a sharp corner,
+        # where every inside point projects to the apex); "distance" = cursor
+        # within the local room (half-width; target radius in free space) of
+        # the anchor point.
+        self.arrival_mode = str(config.get('arrival_mode', 'progress'))
+        # Anchor lead floor: the anchor must be at least one arrival tolerance
+        # (the local room) ahead of the cursor at planning time — one cannot
+        # plan toward a point one has already arrived at. Without it the
+        # budget parks the anchor on a corner apex, the cursor reaches it and
+        # the via-point drive vanishes (stalls of ~1 s per corner).
+        self.anchor_lead_floor = bool(config.get('anchor_lead_floor', False))
+        # BUMP-style motor period (s): between fixation events, re-solve the
+        # MPCC every motor_period_s toward the CURRENT fixation's progress
+        # schedule (anchor slid along it); a plan's tail is never executed
+        # (Bye & Neilson BUMP; Do et al. CHI'21). 0 = off.
+        self.motor_period_s = float(config.get('motor_period_s', 0.0))
+        # Gaze memory (anchor-drive): the difficulty budget is charged from the
+        # last fixated point rather than from the cursor (the eyes do not look
+        # back), and a fixated corner is consumed — the next budget starts
+        # where the corner's curvature ends. Humans fixate each corner once,
+        # for longer; without memory a lumpy budget re-fixates the same apex.
+        self.anchor_memory = bool(config.get('anchor_memory', False))
+        self.corner_consume = bool(config.get('corner_consume', False))
+        self.corner_kappa = float(config.get('corner_kappa', 60.0))
+        if self.arrival_mode not in ('progress', 'distance'):
+            raise ValueError("arrival_mode must be 'progress' or 'distance'")
         # Diagnostics of the most recent generate_* call (replan events etc.).
         self.last_diagnostics = None
 
@@ -229,6 +276,11 @@ class CursorSimulator:
         }
 
         self.speed_model = self._load_speed_model(config, config_path)
+        # speed_model "none" -> anchor-drive planning (see plan_deadline_s).
+        self.anchor_drive = self.speed_model is None
+        if self.anchor_drive and self.horizon_mode != 'budget':
+            raise ValueError("speed_model type 'none' (anchor-drive planning) requires "
+                             "horizon_mode='budget': the gaze anchor is the drive")
 
     @staticmethod
     def _load_speed_model(config: dict, config_path: Path):
@@ -244,6 +296,9 @@ class CursorSimulator:
 
         model_type = sm_cfg.get('type', 'gam')
 
+        if model_type == 'none':
+            # No prescribed speed: anchor-drive planning.
+            return None
         if model_type == 'gam':
             from .speed_model import GAMSpeedModel
             model_path = sm_cfg.get('path')
@@ -484,8 +539,14 @@ class CursorSimulator:
             # Reference speed along the path — same (finite) signals model()
             # feeds the speed model — used to convert the arc-length
             # lookahead to steps.
-            v_ref_prof = self.speed_model.compute_speed_profile(
-                s_prof, c_prof, k_prof, r_prof)
+            if self.speed_model is not None:
+                v_ref_prof = self.speed_model.compute_speed_profile(
+                    s_prof, c_prof, k_prof, r_prof)
+            else:
+                # Anchor-drive: the horizon is a fixed DURATION (the plan
+                # deadline), so no reference speed is needed to convert the
+                # lookahead to steps. Placeholder keeps the budget class API.
+                v_ref_prof = np.full_like(s_prof, desired_speed)
             # The budget consumes the TRUE width: density is exactly zero
             # where W_task is inf, so in free space the anchor runs to the
             # goal (path end) — gaze goes straight to the target, no fitted
@@ -494,6 +555,7 @@ class CursorSimulator:
                 s_prof, w_task_prof, v_ref_prof,
                 D0=self.budget_D0, T_min=self.budget_T_min,
                 gamma=self.budget_gamma, W_ref=self.budget_W_ref,
+                kappa_profile=k_prof, curvature_weighted=self.budget_curvature_weighted,
             )
         tau_steps = max(0, int(round(self.replan_latency_s / self.interval)))
         # Time-based solve-horizon floor: the plan must always cover at least
@@ -512,7 +574,10 @@ class CursorSimulator:
             rng=self._replan_rng,
         )
         plan = None            # planned velocity/displacement sequences of the current solve
+        last_anchor_s = None   # gaze memory: the previous plan's anchor (arc length)
         theta_track = 0.0      # warm guess for arc-length projection
+        motor_steps = max(1, int(round(self.motor_period_s / self.interval))) if self.motor_period_s > 0 else 0
+        fix = None             # current fixation: dict(t0, s0, pace)
 
         # Termination: DWELL_S of consecutive samples inside the target
         # (stands in for the human click latency; the pointing data show
@@ -547,27 +612,99 @@ class CursorSimulator:
                     cursor_pos[0] - plan['pos_x'][k_exec],
                     cursor_pos[1] - plan['pos_y'][k_exec]))
                 deviation_ratio = dev / plan['dev_scale']
-            trigger = scheduler.needs_replan(
-                theta_now if theta_now is not None else -np.inf,
-                deviation_ratio=deviation_ratio)
+            theta_for_trigger = theta_now if theta_now is not None else -np.inf
+            if (self.arrival_mode == 'distance' and plan is not None
+                    and plan.get('anchor_xy') is not None and scheduler.wants_theta):
+                d_anchor = float(np.hypot(cursor_pos[0] - plan['anchor_xy'][0],
+                                          cursor_pos[1] - plan['anchor_xy'][1]))
+                # Arrival = reached OR passed the fixation point: within the local
+                # room of the anchor point, or progress beyond its arc position.
+                # (Distance alone is missed at speed — 13 mm/step at 0.26 m/s skips
+                # a 5 mm window — leaving the fixation alive and the schedule
+                # sliding ahead; progress alone stalls in a corner's wedge.)
+                passed = (theta_now is not None and plan.get('anchor_s') is not None
+                          and theta_now >= plan['anchor_s'] - 1e-9)
+                theta_for_trigger = np.inf if (d_anchor <= plan['arrival_tol'] or passed) else -np.inf
+            trigger = scheduler.needs_replan(theta_for_trigger, deviation_ratio=deviation_ratio)
+            if (trigger is None and motor_steps > 0 and fix is not None
+                    and fix.get('steps', 0) >= fix.get('max_steps') if fix and fix.get('max_steps') else False):
+                trigger = 'exhausted'      # fixation-level backstop (motor replans reset plan_idx)
+            motor_replan = (trigger is None and motor_steps > 0 and self.anchor_drive
+                            and fix is not None and scheduler.plan_idx > motor_steps)
 
-            if trigger is not None:
+            if trigger is not None or motor_replan:
                 theta0 = float(reference_path.find_closest_theta(
                     cursor_pos, initial_guess=theta_track))
                 theta_track = theta0
-                if budget_horizon is not None:
+                if motor_replan:
+                    # Slide the anchor along the fixation's schedule: demand the
+                    # schedule position one deadline ahead of NOW (no new fixation).
+                    t_ahead = (current_time - fix['t0']) + self.plan_deadline_s
+                    # Slid anchor keeps the same lead floor as fixations: at
+                    # least one local room ahead of the cursor — otherwise a
+                    # cursor that overtakes the schedule loses all drive and
+                    # waits for the schedule to catch up (mid-trial stall).
+                    room_m = 0.0
+                    if clearance_profile is not None:
+                        s_cl_m, c_cl_m = clearance_profile
+                        w_here_m = float(np.interp(theta0, s_cl_m, c_cl_m))
+                        room_m = 0.5 * w_here_m if w_here_m < FREE_SPACE_CLEARANCE_M else float(target_radius)
+                    anchor_s = min(max(fix['s0'] + fix['pace'] * t_ahead, theta0 + room_m),
+                                   float(reference_path.total_length))
+                    n_base = max(1, int(np.floor(self.plan_deadline_s / self.interval + 0.5 + 1e-9)))
+                if motor_replan:
+                    pass
+                elif budget_horizon is not None:
+                    s_from = theta0
+                    if self.anchor_drive and self.anchor_memory and last_anchor_s is not None:
+                        s_from = max(s_from, last_anchor_s)
+                        if self.corner_consume and curvature_profile is not None:
+                            s_k, k_k = curvature_profile
+                            if float(np.interp(last_anchor_s, s_k, k_k)) > self.corner_kappa:
+                                beyond = s_k[(s_k > last_anchor_s) & (k_k < self.corner_kappa)]
+                                if len(beyond):
+                                    s_from = max(s_from, float(beyond[0]))
+                    s_from = min(s_from, float(reference_path.total_length))
                     anchor_s = budget_horizon.anchor(
-                        theta0, v_now=float(np.hypot(cursor_vel[0], cursor_vel[1])))
-                    n_base = int(np.ceil(
-                        budget_horizon.traverse_time(theta0, anchor_s) / self.interval))
-                    # Anchor and floor both cap at the path end, so the
-                    # traverse time (and with it n_base) shrinks toward zero
-                    # there; the plan itself must still cover >= T_min.
-                    n_base = max(n_base, floor_steps)
+                        s_from, v_now=float(np.hypot(cursor_vel[0], cursor_vel[1])))
+                    if self.anchor_drive and self.anchor_memory:
+                        anchor_s = max(float(anchor_s), s_from)
+                    if self.anchor_drive and self.anchor_lead_floor and clearance_profile is not None:
+                        # Lead floor BEFORE the deadline: if the floor extends
+                        # the anchor, the deadline must stretch with it
+                        # (review finding: floor applied after n_base made the
+                        # via-point demand the extended lead in the old time).
+                        s_cl0, c_cl0 = clearance_profile
+                        w_here0 = float(np.interp(theta0, s_cl0, c_cl0))
+                        room0 = 0.5 * w_here0 if w_here0 < FREE_SPACE_CLEARANCE_M else float(target_radius)
+                        anchor_s = min(max(float(anchor_s), theta0 + room0), float(reference_path.total_length))
+                    if self.anchor_drive:
+                        # Fixed plan duration: speed = lookahead / deadline.
+                        # Round half-up with a float guard (0.175/0.05 = 3.4999.. -> 4).
+                        lead_now = max(0.0, float(anchor_s) - theta0)
+                        t_plan = max(self.plan_deadline_s, lead_now / max(self.plan_vmax, 1e-6))
+                        a_max = float(self.planner_weights.get('acc_max', 0.0) or 0.0)
+                        if a_max > 0.0:
+                            # ... nor faster than the bounded hand can cover the
+                            # lead from its current speed: 1/2 a t^2 + v t = h.
+                            v_now = float(np.hypot(cursor_vel[0], cursor_vel[1]))
+                            t_acc = (-v_now + np.sqrt(v_now * v_now + 2.0 * a_max * lead_now)) / a_max
+                            t_plan = max(t_plan, float(t_acc))
+                        n_base = max(1, int(np.floor(t_plan / self.interval + 0.5 + 1e-9)))
+                        fix = {'t0': current_time, 's0': theta0,
+                               'pace': lead_now / max(t_plan, 1e-6),
+                               'steps': 0, 'max_steps': None}
+                    else:
+                        n_base = int(np.ceil(
+                            budget_horizon.traverse_time(theta0, anchor_s) / self.interval))
+                        # Anchor and floor both cap at the path end, so the
+                        # traverse time (and with it n_base) shrinks toward zero
+                        # there; the plan itself must still cover >= T_min.
+                        n_base = max(n_base, floor_steps)
                 else:
                     n_base = self.pred_horizon
                     anchor_s = None  # fixed mode: set from the solved plan below
-                if anchor_s is not None:
+                if anchor_s is not None and not motor_replan:
                     anchor_s = min(float(anchor_s), float(reference_path.total_length))
                 if self.replan_mode == 'intermittent':
                     # The plan must survive the post-arrival latency (the old
@@ -576,7 +713,10 @@ class CursorSimulator:
                     # reference-speed estimate (start-up, corners, noise).
                     # This is plan availability, not behaviour: the replan time
                     # is still set by arrival + tau; exhaustion only backstops.
-                    n_solve = n_base + 2 * tau_steps
+                    # BUMP mode: plans refresh every motor period and are never
+                    # executed past it — padding beyond the deadline is dead
+                    # weight (3x solve cost for nodes that never run).
+                    n_solve = n_base if motor_steps > 0 else n_base + 2 * tau_steps
                 else:
                     n_solve = n_base
                 if self.horizon_mode == 'budget' or self.replan_mode == 'intermittent':
@@ -618,6 +758,11 @@ class CursorSimulator:
                 model_input.current_acc = (float(cursor_acc[0]), float(cursor_acc[1]))
                 # Warm-start shift = steps executed since the previous solve.
                 model_input.warm_shift = max(1, scheduler.plan_idx - 1)
+                # Anchor-drive: the gaze anchor is the plan's via point at
+                # the deadline node (n_base steps); the padded tail coasts.
+                model_input.anchor_s = anchor_s if self.anchor_drive else None
+                model_input.deadline_steps = n_base
+                model_input.safety_steps = tau_steps if (self.anchor_drive and self.coast_safety) else 0
 
                 cursor_info, plan_debug = model(model_input)
                 c_pos_dx, c_pos_dy, c_vel_x, c_vel_y = cursor_info
@@ -642,7 +787,10 @@ class CursorSimulator:
                 if dev_scale is not None and dev_scale >= FREE_SPACE_CLEARANCE_M:
                     span = float(np.hypot(np.sum(c_pos_dx), np.sum(c_pos_dy)))
                     dev_scale = max(span, 2.0 * target_radius)
+                _carry_axy = plan.get('anchor_xy') if (motor_replan and plan) else None
+                _carry_tol = plan.get('arrival_tol', 0.0) if (motor_replan and plan) else 0.0
                 plan = {
+                    'anchor_xy': _carry_axy, 'arrival_tol': _carry_tol,
                     'c_pos_dx': c_pos_dx, 'c_pos_dy': c_pos_dy,
                     'c_vel_x': c_vel_x, 'c_vel_y': c_vel_y,
                     'n_steps': len(c_pos_dx),
@@ -663,11 +811,35 @@ class CursorSimulator:
                     anchor_s = float(reference_path.find_closest_theta(
                         np.array(planned_end), initial_guess=theta0))
                     anchor_s = min(anchor_s, float(reference_path.total_length))
-                scheduler.on_replan(
-                    ReplanEvent(step=step, t=current_time, theta=theta0,
-                                anchor=anchor_s, n_steps=n_solve, trigger=trigger),
-                    anchor=anchor_s, plan_len=plan['n_steps'],
-                )
+                if motor_replan and fix is not None and fix.get('anchor_xy') is not None:
+                    # Motor replans slide the PLANNING anchor, but arrival is
+                    # judged against the FIXATION point the eyes rest on —
+                    # keep the fixation's arrival geometry (else the slid
+                    # anchor is always ahead and arrival can never fire).
+                    plan['anchor_xy'] = fix['anchor_xy']
+                    plan['anchor_s'] = fix['anchor_s']
+                    plan['arrival_tol'] = fix['arrival_tol']
+                elif anchor_s is not None:
+                    a_xy = reference_path(float(anchor_s))
+                    plan['anchor_xy'] = (float(a_xy[0]), float(a_xy[1]))
+                    plan['anchor_s'] = float(anchor_s)
+                    # room at the anchor: half the local usable width, or the target radius in free space
+                    tol = 0.5 * dev_scale if (dev_scale and dev_scale < FREE_SPACE_CLEARANCE_M) else float(target_radius)
+                    plan['arrival_tol'] = max(float(tol), 1e-3)
+                    if fix is not None:
+                        fix['anchor_xy'] = plan['anchor_xy']; fix['anchor_s'] = plan['anchor_s']; fix['arrival_tol'] = plan['arrival_tol']
+                _ev = ReplanEvent(step=step, t=current_time, theta=theta0,
+                                  anchor=anchor_s, n_steps=n_solve, trigger=trigger)
+                _ev.arrival_tol = plan.get('arrival_tol')
+                last_anchor_s = float(anchor_s) if anchor_s is not None else None
+                if motor_replan:
+                    scheduler.plan_len = plan['n_steps']; scheduler.plan_idx = 1
+                else:
+                    scheduler.on_replan(_ev, anchor=anchor_s, plan_len=plan['n_steps'])
+                    if fix is not None:
+                        # Fixation lifetime backstop: deadline + 2*latency,
+                        # independent of the (unpadded) motor-solve length.
+                        fix['max_steps'] = n_base + 2 * tau_steps
 
             # Execute the next step of the current plan. j indexes the planned
             # velocity at the END of the step (c_vel_* start with the solve-time
@@ -708,6 +880,8 @@ class CursorSimulator:
             cursor_vel[0] = c_vel_x_step
             cursor_vel[1] = c_vel_y_step
             scheduler.on_step_executed()
+            if fix is not None:
+                fix['steps'] = fix.get('steps', 0) + 1
 
             screen_x = cursor_pos[0] / screen_width_m * screen_width
             screen_y = cursor_pos[1] / screen_height_m * screen_height
@@ -722,6 +896,11 @@ class CursorSimulator:
         self.last_diagnostics = {
             'horizon_mode': self.horizon_mode,
             'replan_mode': self.replan_mode,
+            'anchor_drive': self.anchor_drive,
+            'plan_deadline_s': self.plan_deadline_s,
+            'coast_safety': self.coast_safety,
+            'plan_vmax': self.plan_vmax, 'arrival_mode': self.arrival_mode, 'anchor_lead_floor': self.anchor_lead_floor,
+            'anchor_memory': self.anchor_memory, 'corner_consume': self.corner_consume,
             'budget_T_min': self.budget_T_min,
             'replan_latency_cv': self.replan_latency_cv,
             'replan_deviation_frac': self.replan_deviation_frac,
@@ -732,7 +911,8 @@ class CursorSimulator:
             'total_length': float(reference_path.total_length),
             'replan_events': [
                 {'step': e.step, 't': e.t, 'theta': e.theta, 'anchor': e.anchor,
-                 'n_steps': e.n_steps, 'trigger': e.trigger}
+                 'n_steps': e.n_steps, 'trigger': e.trigger,
+                 'arrival_tol': getattr(e, 'arrival_tol', None)}
                 for e in scheduler.events
             ],
         }

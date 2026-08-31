@@ -78,6 +78,8 @@ class DifficultyBudgetHorizon:
         T_min: float = 0.0,
         gamma: float = 1.0,
         W_ref: float = 0.026,
+        kappa_profile=None,
+        curvature_weighted: bool = False,
     ):
         self.s = np.asarray(s_profile, dtype=float)
         self.D0 = float(D0)
@@ -95,6 +97,14 @@ class DifficultyBudgetHorizon:
         # rescaling it is absorbed by D0. See the module docstring for why
         # there is deliberately NO curvature term here.
         density = ((self.W_ref / width) ** self.gamma) / self.W_ref
+        if curvature_weighted:
+            # Curvature-weighted difficulty: density = |kappa| (W_ref/W)^gamma
+            # (1/length; W_ref cancels in the toll's scale). A straight costs no
+            # budget -> the anchor runs to the end of the straight (ballistic);
+            # a bend costs in proportion to how tight AND how narrow; a corner
+            # is a lump of difficulty the anchor stops at (fixate the apex).
+            kap = np.abs(np.asarray(kappa_profile, dtype=float)) if kappa_profile is not None else np.zeros_like(width)
+            density = kap * ((self.W_ref / width) ** self.gamma)
 
         v_ref = np.clip(np.asarray(v_ref_profile, dtype=float), _SPEED_FLOOR, None)
 

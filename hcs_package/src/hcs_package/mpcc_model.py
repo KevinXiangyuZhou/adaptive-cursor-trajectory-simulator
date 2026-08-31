@@ -12,6 +12,11 @@ from .constraints import ConstraintType, RectangleConstraint, PolygonConstraint
 from .constraint_utils import _point_in_polygon, _distance_to_polygon_boundary
 
 
+# Anchor-drive progress linearisation: max fixed-point passes and the
+# schedule change (m) below which the linearisation is accepted.
+ANCHOR_RELIN_PASSES = 8
+ANCHOR_RELIN_TOL = 1e-3
+
 _warm_start_cache = {
     'x_prev': None,
     'num_steps': None,
@@ -144,6 +149,8 @@ def generate_mpcc(
     corridor_bounds=None,
     cartesian_constraints=None,
     free_space_mask=None,
+    anchor=None,
+    curvature_profile=None,
     warm_shift=1,
 ):
     """
@@ -162,6 +169,34 @@ def generate_mpcc(
         corridor_bounds: Tuple (bound_left, bound_right) for path-relative
             corridor constraints.
         cartesian_constraints: List[ConstraintRegion] for world-space constraints.
+        anchor: Optional (anchor_s, k_deadline, s_schedule) for anchor-drive planning
+            (speed_profile None, free_space_mask ignored). The objective is
+            then the SAME everywhere: jerk effort, contour tracking,
+            boundary penalties, velocity damping free_velocity*|v|^2 at
+            every node, and one drive — a progress via-point
+                goal * (anchor_s - s_{k_deadline})^2
+            at the deadline node only, in the path's own arc-length
+            coordinate (the drive acts along the path, never across a
+            corner). Progress is KINEMATIC — the plan's along-tangent
+            velocity integrated along the path, with the tangents taken on
+            a fixed per-solve progress schedule (s_schedule, the lookahead
+            at the current speed) so progress is LINEAR in the plan's
+            velocities: a recursion through tangent(s_k) is chaotic on
+            wiggly paths (amplification ~ v*dt*kappa per node) and wrecks
+            finite-difference gradients. No virtual progress variables, no
+            lag term; the drive acts on the jerk decision variables
+            directly (a via-point routed through a stiff lag coupling
+            stalls a first-order solver; a Cartesian via-point pulls across
+            corners). The anchor is passed through,
+            not settled at: nodes after the deadline carry no attractor
+            and coast (the old plan keeps executing through the anchor
+            during the post-arrival latency, as the gaze data show). The
+            reference path is a curve WITH ENDS: where progress saturates
+            at the path end the tracking error is the full distance to the
+            end point, so overshooting the goal costs contour error and
+            braking into the target emerges. Speed is never prescribed:
+            cruise emerges as lookahead / deadline, and pointing is the
+            same pursuit with the anchor resting on the path end.
         free_space_mask: Optional bool array (N,). True at horizon nodes that
             lie in unconstrained space (clearance far larger than any tunnel).
             At those nodes the corridor-following machinery is replaced by
@@ -191,6 +226,17 @@ def generate_mpcc(
     w_progress = weights.get('progress', 1.0e-5)
     w_constraint = weights.get('constraint', 1e3)
     w_corridor = w_constraint  # one fitted weight for all boundary penalties
+    # Coast-safety hinge weight (anchor-drive terminal safety); a constraint
+    # must be enforced as one, so this defaults to the boundary weight but
+    # is expected to sit far above it.
+    w_safety = weights.get('safety', w_constraint)
+    # Peak-acceleration bound (anchor-drive): the hand cannot produce
+    # arbitrary acceleration; a stiff hinge on |a_k| above acc_max (m/s^2).
+    # One physiological constant, universal (pointing, corners, bends):
+    # cornering speed is capped at sqrt(acc_max * cut radius), so the
+    # corner phenotype's width dependence comes from the corner-cut radius.
+    acc_max_w = float(weights.get('acc_max', 0.0) or 0.0)
+    w_acc = float(weights.get('acc_weight', 1e4))
     w_contour = weights.get('contour', 1.0)
     w_lag = weights.get('lag', 0.1)
     # Free-space (pointing) LQ weights: q on |p-goal|^2, r on |v|^2, rho on
@@ -199,6 +245,29 @@ def generate_mpcc(
     w_goal = weights.get('goal', 1.0)
     w_free_velocity = weights.get('free_velocity', 0.08)
     w_free_accel = weights.get('free_accel', 0.0)
+    anchor_mode = anchor is not None
+    if anchor_mode:
+        anchor_s_target = float(np.clip(float(anchor[0]), 0.0, ref_path.total_length))
+        k_deadline = int(np.clip(int(anchor[1]), 0, num_steps - 1))
+        free_space_mask = None
+        s_sched = np.clip(np.asarray(anchor[2], dtype=float), 0.0, ref_path.total_length)
+        # Coast-safety: number of latency steps over which the deadline
+        # state's ballistic continuation must stay inside the corridor.
+        n_safety = int(anchor[3]) if len(anchor) > 3 and anchor[3] else 0
+        t_safety = dt * np.arange(1, n_safety + 1)
+        if s_sched.shape[0] != num_steps:
+            # Pad with the last value (np.resize tiles cyclically — review-flagged latent trap).
+            if s_sched.shape[0] < num_steps:
+                s_sched = np.concatenate([s_sched, np.full(num_steps - s_sched.shape[0], s_sched[-1] if len(s_sched) else 0.0)])
+            else:
+                s_sched = s_sched[:num_steps]
+
+        def _tangents_on(sched):
+            # Tangent at the previous node of the schedule (node 0: at s0).
+            return ref_path.tangents(np.concatenate([[state_0[6]], sched[:-1]]))
+        # Mutable holder so the objective closure sees re-linearised tangents
+        # (fixed-point iteration below).
+        tan_sched_box = [_tangents_on(s_sched)]
     if free_space_mask is None:
         free_mask = np.zeros(num_steps, dtype=bool)
     else:
@@ -214,14 +283,16 @@ def generate_mpcc(
         P_lqr = _free_space_lqr_value(dt, w_goal, w_free_velocity, w_free_accel, w_jerk)
 
     # Light Gaussian smoothing prevents chasing step-like changes over the short horizon
-    speed_target = np.asarray(speed_profile, dtype=float).copy()
-    if len(speed_target) > 3:
-        speed_target = gaussian_filter1d(speed_target, sigma=1.5)
+    if speed_profile is None:
+        speed_target = None
+    else:
+        speed_target = np.asarray(speed_profile, dtype=float).copy()
+        if len(speed_target) > 3:
+            speed_target = gaussian_filter1d(speed_target, sigma=1.5)
 
     SCALE_JERK = 1000.0
     SCALE_VS = max(0.1, desired_speed)
 
-    acc_max = limits.get('acc_max', 100.0)
 
     px0, py0, vx0, vy0, ax0, ay0, s0 = state_0
 
@@ -240,11 +311,14 @@ def generate_mpcc(
     ax_free = np.full(num_steps, ax0)
     ay_free = np.full(num_steps, ay0)
 
-    # x = [jx_0..N-1, jy_0..N-1, vs_0..N-1]
-    n_vars = 3 * num_steps
+    # x = [jx_0..N-1, jy_0..N-1, vs_0..N-1]; anchor mode has no virtual
+    # progress variables (progress is kinematic), so x = [jx, jy] only.
+    n_blocks = 2 if anchor_mode else 3
+    n_vars = n_blocks * num_steps
     idx_jx = slice(0, num_steps)
     idx_jy = slice(num_steps, 2 * num_steps)
     idx_vs = slice(2 * num_steps, 3 * num_steps)
+    s_end_total = float(ref_path.total_length)
 
     S_mat = np.tril(np.ones((num_steps, num_steps))) * dt
 
@@ -257,8 +331,22 @@ def generate_mpcc(
     def unpack_x(x):
         jx = x[idx_jx] * SCALE_JERK
         jy = x[idx_jy] * SCALE_JERK
-        vs = x[idx_vs] * SCALE_VS
+        vs = None if anchor_mode else x[idx_vs] * SCALE_VS
         return jx, jy, vs
+
+    def kinematic_progress(vx, vy):
+        """Arc-length progress from the plan's along-tangent velocity
+        (trapezoid over each step) with tangents on the fixed schedule —
+        linear in the velocities, hence smooth in the jerk variables."""
+        tan_sched = tan_sched_box[0]
+        vpx = np.concatenate([[vx0], vx[:-1]])
+        vpy = np.concatenate([[vy0], vy[:-1]])
+        v_t = 0.5 * ((vpx + vx) * tan_sched[:, 0] + (vpy + vy) * tan_sched[:, 1])
+        # Unclipped: progress may run past the path end, so overshooting the
+        # goal anchor is lateness in reverse and the via-point drive brakes
+        # into the target (path lookups clip internally; a clipped progress
+        # left overshoot to the weak tracking term -> hunting at the goal).
+        return s0 + np.cumsum(v_t) * dt
 
     def objective(x):
         jx, jy, vs = unpack_x(x)
@@ -272,18 +360,25 @@ def generate_mpcc(
                 j_cost += w_free_accel * float(np.sum(np.where(free_mask, ax_h**2 + ay_h**2, 0.0)))
 
         # 2. Progress / speed tracking
-        s_traj = s0 + S_mat @ vs
         vx = vx_free + A_vel_mat @ jx
         vy = vy_free + A_vel_mat @ jy
+        s_traj = kinematic_progress(vx, vy) if anchor_mode else s0 + S_mat @ vs
         physical_speed = np.sqrt(vx**2 + vy**2)
 
-        speed_error = physical_speed - speed_target
-        if any_free:
-            v_sq = vx**2 + vy**2
-            prog_cost = float(np.sum(np.where(
-                free_mask, w_free_velocity * v_sq, w_progress * speed_error**2)))
+        if anchor_mode:
+            # Velocity damping everywhere; no speed target.
+            prog_cost = w_free_velocity * float(np.sum(vx**2 + vy**2))
+            if acc_max_w > 0.0:
+                a_mag = np.hypot(ax_free + A_acc_mat @ jx, ay_free + A_acc_mat @ jy)
+                prog_cost += w_acc * float(np.sum(np.maximum(a_mag - acc_max_w, 0.0) ** 2))
         else:
-            prog_cost = np.sum(speed_error**2) * w_progress
+            speed_error = physical_speed - speed_target
+            if any_free:
+                v_sq = vx**2 + vy**2
+                prog_cost = float(np.sum(np.where(
+                    free_mask, w_free_velocity * v_sq, w_progress * speed_error**2)))
+            else:
+                prog_cost = np.sum(speed_error**2) * w_progress
 
         # 3. Contour + lag tracking error
         px = px_free + A_pos_mat @ jx
@@ -296,6 +391,7 @@ def generate_mpcc(
                 ref_pts[k] = ref_path(float(s_traj[k]))
 
         rx, ry = ref_pts[:, 0], ref_pts[:, 1]
+        tangents_all = ref_path.tangents(s_traj)
         tracking_cost = 0.0
 
         for k in range(num_steps):
@@ -303,9 +399,8 @@ def generate_mpcc(
             ref_k = np.array([rx[k], ry[k]], dtype=float)
             pos_error = pos_k - ref_k
 
-            tangent = ref_path.tangent(s_traj[k])
-            cos_phi = tangent[0]
-            sin_phi = tangent[1]
+            cos_phi = tangents_all[k, 0]
+            sin_phi = tangents_all[k, 1]
 
             R = np.array([
                 [sin_phi, -cos_phi],
@@ -316,7 +411,38 @@ def generate_mpcc(
             e_contour = e_k[0]
             e_lag = e_k[1]
 
-            if any_free and free_mask[k]:
+            if anchor_mode and n_safety > 0 and k == k_deadline and corridor_bounds is not None:
+                # Terminal safety across the intermittency: the plan hands
+                # over at the deadline and no new plan can arrive for the
+                # latency tau. The handover state must be one whose
+                # ballistic continuation p + v t (t <= tau) stays inside the
+                # walls — a recursive-feasibility hedge. Zero on straights
+                # and in free space; on a bend it caps speed at
+                # sqrt(2 m / (kappa tau^2)) with no new constant.
+                vt_k = vx[k] * cos_phi + vy[k] * sin_phi
+                s_e = np.clip(float(s_traj[k]) + vt_k * t_safety, 0.0, s_end_total)
+                ref_e = ref_path(s_e)
+                ref_e = np.asarray(ref_e, dtype=float).reshape(2, -1).T if np.ndim(ref_e) > 1 else np.atleast_2d(ref_e)
+                tan_e = ref_path.tangents(s_e)
+                b_l, b_r = corridor_bounds
+                for i in range(n_safety):
+                    ex = px[k] + vx[k] * t_safety[i] - ref_e[i, 0]
+                    ey = py[k] + vy[k] * t_safety[i] - ref_e[i, 1]
+                    e_c = tan_e[i, 1] * ex - tan_e[i, 0] * ey
+                    wl = b_l(s_e[i]) if callable(b_l) else float(b_l)
+                    wr = b_r(s_e[i]) if callable(b_r) else float(b_r)
+                    tracking_cost += w_safety * (max(0.0, e_c - wl) ** 2 + max(0.0, -e_c - wr) ** 2)
+            if anchor_mode:
+                # Tracking error = full distance to the progress point (one
+                # term, one weight). Along-path mismatch is what appears when
+                # the plan coasts past a corner (progress freezes while the
+                # cursor runs on) or past the path end; lateral mismatch is
+                # the contour error. No special cases.
+                tracking_cost += w_contour * float(pos_error @ pos_error)
+                if k == k_deadline:
+                    # Progress via-point: be at the anchor at the deadline.
+                    tracking_cost += w_goal * (anchor_s_target - float(s_traj[k]))**2
+            elif any_free and free_mask[k]:
                 # Goal-directed pointing: lateral error stays w.r.t. the path
                 # (keeps the movement on the straight line); the drive is the
                 # squared distance to the goal.
@@ -328,8 +454,9 @@ def generate_mpcc(
             # 4a. Path-relative corridor penalty
             if corridor_bounds is not None:
                 b_left_in, b_right_in = corridor_bounds
-                w_left = b_left_in(s_traj[k]) if callable(b_left_in) else float(b_left_in)
-                w_right = b_right_in(s_traj[k]) if callable(b_right_in) else float(b_right_in)
+                s_b = float(min(max(s_traj[k], 0.0), s_end_total))
+                w_left = b_left_in(s_b) if callable(b_left_in) else float(b_left_in)
+                w_right = b_right_in(s_b) if callable(b_right_in) else float(b_right_in)
                 violation_left = max(0.0, e_k[0] - w_left)
                 violation_right = max(0.0, -e_k[0] - w_right)
                 tracking_cost += w_corridor * (violation_left**2 + violation_right**2)
@@ -419,10 +546,11 @@ def generate_mpcc(
         return j_cost + prog_cost + tracking_cost + goal_cost + term_cost
 
     bounds = []
-    bounds.extend([(None, None)] * 3 * num_steps)
+    bounds.extend([(None, None)] * n_vars)
 
     x0_cold = np.zeros(n_vars)
-    x0_cold[idx_vs] = speed_target / SCALE_VS
+    if not anchor_mode:
+        x0_cold[idx_vs] = speed_target / SCALE_VS
 
     # Warm-start: shift the previous solution forward by the number of steps
     # executed since that solve (1 under per-step replanning; larger under
@@ -433,10 +561,11 @@ def generate_mpcc(
     x_prev = _warm_start_cache.get('x_prev')
     prev_n = _warm_start_cache.get('num_steps')
     k_shift = int(warm_shift)
-    if x_prev is not None and prev_n is not None and 1 <= k_shift < prev_n:
+    if (x_prev is not None and prev_n is not None and 1 <= k_shift < prev_n
+            and len(x_prev) == n_blocks * prev_n):
         prev_jx = x_prev[:prev_n]
         prev_jy = x_prev[prev_n:2*prev_n]
-        prev_vs = x_prev[2*prev_n:3*prev_n]
+        prev_vs = None if anchor_mode else x_prev[2*prev_n:3*prev_n]
 
         def _fit(tail, fill):
             if len(tail) >= num_steps:
@@ -446,7 +575,8 @@ def generate_mpcc(
         x0_warm = np.zeros(n_vars)
         x0_warm[idx_jx] = _fit(prev_jx[k_shift:], 0.0)
         x0_warm[idx_jy] = _fit(prev_jy[k_shift:], 0.0)
-        x0_warm[idx_vs] = _fit(prev_vs[k_shift:], prev_vs[-1])
+        if not anchor_mode:
+            x0_warm[idx_vs] = _fit(prev_vs[k_shift:], prev_vs[-1])
 
     x0_guess = x0_cold
     if x0_warm is not None:
@@ -462,11 +592,30 @@ def generate_mpcc(
         bounds=bounds,
         options={'maxiter': 500, 'ftol': 1e-6, 'gtol': 1e-5, 'maxfun': 5000}
     )
+    if anchor_mode:
+        # Fixed-point iteration on the progress linearisation: re-take the
+        # tangents on the solved plan's own progress and re-solve
+        # (warm-started) until the schedule is self-consistent.
+        for _ in range(ANCHOR_RELIN_PASSES - 1):
+            jx_p, jy_p, _ = unpack_x(result.x)
+            s_new = kinematic_progress(vx_free + A_vel_mat @ jx_p, vy_free + A_vel_mat @ jy_p)
+            if float(np.max(np.abs(s_new - s_sched))) < ANCHOR_RELIN_TOL:
+                break
+            s_sched = s_new
+            tan_sched_box[0] = _tangents_on(s_sched)
+            result = minimize(
+                objective, result.x, method='L-BFGS-B', bounds=bounds,
+                options={'maxiter': 500, 'ftol': 1e-6, 'gtol': 1e-5, 'maxfun': 5000})
 
     _warm_start_cache['x_prev'] = result.x.copy()
     _warm_start_cache['num_steps'] = num_steps
 
     jx_opt, jy_opt, vs_opt = unpack_x(result.x)
+    if vs_opt is None:
+        # Report the kinematic progress rate in the vs column for callers.
+        vx_o = vx_free + A_vel_mat @ jx_opt
+        vy_o = vy_free + A_vel_mat @ jy_opt
+        vs_opt = np.diff(np.concatenate([[s0], kinematic_progress(vx_o, vy_o)])) / dt
     controls = np.column_stack((jx_opt, jy_opt, vs_opt))
 
     opt_info = {
