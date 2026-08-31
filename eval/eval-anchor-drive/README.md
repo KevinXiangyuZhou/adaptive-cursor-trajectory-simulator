@@ -693,3 +693,15 @@ REDUCES B's executed corner cut (progress-lag skips the apex window) — contour
 Figure-3-style overlays (A=S9e, B=S9f, 5 noise-on runs vs human rounds): results/fig3_overlays_S9.png
 (fig3_overlays.py). Remaining gaps vs the paper figure: corner20 absolute cut (1.1 vs 2.8), gentle50
 depth (8.7 vs 12.3), and A's apex dip (0.43 vs 0.13, stop-and-turn).
+
+**Tolerance-normalised contouring (S9g, B).** The lateral tracking cost is scaled by
+(W_ref/W_local)^contour_width_exp (config-gated in mpcc_model; W_ref 26 mm): one fitted weight now
+means tight tracking in narrow corridors and casual tracking in wide ones. On B (S9f route, exp 3 —
+effective contour 1190 at 10 mm → 48 at 50 mm): corner40 executed cut 3.6/5.7 mm (human 4.3/6.3; fixed
+weight gave 3.1/4.7) with human-like spread, corner20 unchanged (1.3), sinusoids stable; joint losses
+HOLD (tunnel 6.50/5.12 — best held-out yet; pointing unchanged). Softening the along-path coupling
+(lag 800/400) does not deepen the cut (3.1–3.4) — lag stays 2000 (though lag 400 gives apex dip 0.61 ≈
+human 0.65, worth revisiting). A keeps exp 0 (uniformly tight) — the exponent is the per-participant
+"casualness" phenotype. Figure: results/fig3_overlays_S9g.png (A=S9e, B=S9g) — B cuts visibly at
+Cor W=40, not at W=20; A sharp and wall-following at both. contour_width_exp should join the fit spec
+in the next full refit.

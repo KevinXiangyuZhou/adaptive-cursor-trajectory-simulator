@@ -246,6 +246,12 @@ def generate_mpcc(
     # stiff. A single full-distance weight forces both stiff and removes
     # corner-cutting. None = legacy full-distance tracking with 'contour'.
     w_lag_anchor = weights.get('lag_anchor', None)
+    # Tolerance-normalised contouring (config-gated): scale the lateral tracking
+    # cost by (W_ref / W_local)^exp so a fixed weight means tight tracking in a
+    # narrow tunnel and casual tracking in a wide one — the same room scaling
+    # the steering law and the turning-time deadline use. exp = 0 disables.
+    contour_width_exp = float(weights.get('contour_width_exp', 0.0))
+    contour_width_ref = float(weights.get('contour_width_ref', 0.026))
     # Free-space (pointing) LQ weights: q on |p-goal|^2, r on |v|^2, rho on
     # |a|^2 (jerk weight shared with the tunnel objective). Provisional
     # defaults; to be replaced by formal fitting to the pointing data.
@@ -446,10 +452,19 @@ def generate_mpcc(
                 # the plan coasts past a corner (progress freezes while the
                 # cursor runs on) or past the path end; lateral mismatch is
                 # the contour error. No special cases.
+                cw_k = 1.0
+                if contour_width_exp > 0.0 and corridor_bounds is not None:
+                    b_l0, b_r0 = corridor_bounds
+                    s_w = float(min(max(s_traj[k], 0.0), s_end_total))
+                    wl0 = b_l0(s_w) if callable(b_l0) else float(b_l0)
+                    wr0 = b_r0(s_w) if callable(b_r0) else float(b_r0)
+                    w_loc = wl0 + wr0
+                    if 0.0 < w_loc < 0.2:
+                        cw_k = (contour_width_ref / w_loc) ** contour_width_exp
                 if w_lag_anchor is None:
-                    tracking_cost += w_contour * float(pos_error @ pos_error)
+                    tracking_cost += w_contour * cw_k * float(pos_error @ pos_error)
                 else:
-                    tracking_cost += w_contour * e_contour**2 + float(w_lag_anchor) * e_lag**2
+                    tracking_cost += w_contour * cw_k * e_contour**2 + float(w_lag_anchor) * e_lag**2
                 if k == k_deadline:
                     # Progress via-point: be at the anchor at the deadline.
                     # Lateness is normalised by the planned lead (dimensionless)
