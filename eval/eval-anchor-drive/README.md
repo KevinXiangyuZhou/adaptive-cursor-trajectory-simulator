@@ -558,3 +558,12 @@ Human B 0.17 / 0.65, A 0.15 / 0.13, C 0.16 / 0.50. One lateral weight moves the 
 stop-and-go phenotype (A) to the flowing/cutting phenotype (B) and reproduces B's width-dependent
 transition; the reference-path (Phase 0) parameters set sinusoid cut depth (A 6.4 / B 8.1 /
 C 13.2 mm). `lag_anchor` is config-gated (None = legacy full-distance tracking).
+
+## S8 round (2026-08-31): strategy weights
+
+Phase-0 reference-path refit on corrected geometry (B, spatial-only, 4 generations): held-out
+lateral RMSE 3.51 mm (old params) vs 3.56 mm (new) — the aug-26 Phase-0 parameters are
+already adequate on the corrected centerlines; kept. S8 = S7 with `lag_anchor` = 2000 fixed
+(along-path coupling) and `contour` free (lateral adherence = steering-strategy parameter);
+same 7-parameter joint fit, deadline 0.2 / budget fixed. Evaluation of the paper's claims via
+`strategy_stats.py` (cut depth + apex dip per condition, human vs personas).
