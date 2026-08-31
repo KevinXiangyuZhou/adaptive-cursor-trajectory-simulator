@@ -186,8 +186,10 @@ def decode(vec, spec):
 def apply_params(cfg, params):
     """Apply fitted params to a persona config (in place)."""
     for k, v in params.items():
-        if k == "Th":
-            cfg["Th"] = v
+        if k in ("Th", "plan_deadline_s", "plan_vmax"):
+            cfg[k] = v          # top-level simulator keys, not planner weights
+        elif k in ("D0", "gamma", "T_min"):
+            cfg.setdefault("budget", {})[k] = v   # gaze-budget constants
         elif k in REF_PATH_KEYS:
             cfg.setdefault("reference_path", {})[k] = v
         else:
@@ -625,7 +627,7 @@ def _eval_pointing(args):
 # CMA-ES driver (shared by Stages 2 and 3)
 # ---------------------------------------------------------------------------
 
-def run_cmaes(label, spec, initial_params, eval_fn, shared_args, time_limit, seed, popsize, n_workers, sigma0=0.15):
+def run_cmaes(label, spec, initial_params, eval_fn, shared_args, time_limit, seed, popsize, n_workers, sigma0=0.15, patience=None, min_rel_improve=0.01):
     import cma
     print(f"\n--- {label}: CMA-ES over {[s['name'] for s in spec]} ---", flush=True)
     x0 = encode(initial_params, spec)
@@ -637,14 +639,19 @@ def run_cmaes(label, spec, initial_params, eval_fn, shared_args, time_limit, see
     best_x, best_loss = x0.copy(), initial_loss
     hist = [{"generation": 0, "best_loss": float(best_loss), "elapsed_sec": 0.0}]
     t0 = time.time(); gen = 0
+    last_improve_gen, ref_best = 0, best_loss
     with multiprocessing.Pool(processes=n_workers) as pool:
         while not es.stop() and time.time() - t0 < time_limit:
+            if patience and gen - last_improve_gen >= patience:
+                print(f"  early stop: no >{min_rel_improve*100:.0f}% improvement in {patience} generations", flush=True); break
             sols = es.ask()
             fit = pool.map(eval_fn, [(x, *shared_args) for x in sols])
             es.tell(sols, fit); gen += 1
             i = int(np.argmin(fit))
             if fit[i] < best_loss:
                 best_loss, best_x = fit[i], np.array(sols[i]).copy()
+            if best_loss < ref_best * (1.0 - min_rel_improve):
+                ref_best, last_improve_gen = best_loss, gen
             hist.append({"generation": gen, "best_loss": float(best_loss), "mean_loss": float(np.mean(fit)), "elapsed_sec": round(time.time() - t0, 1)})
             print(f"  gen {gen:3d} best {best_loss:.4f} mean {np.mean(fit):.4f} ({time.time() - t0:.0f}s)", flush=True)
     fitted = decode(best_x, spec)
