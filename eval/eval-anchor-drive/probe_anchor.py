@@ -92,7 +92,7 @@ def _tunnel_job(args):
     except Exception as ex:
         return {"tid": tid, "error": repr(ex)}
     comp = fsm._completion(traj, cl)
-    timed_out = len(traj) >= fsm.MAX_SIM_STEPS and comp < 0.95
+    timed_out = comp < 0.95   # timed out or aborted (wall breach)
     mets = [fsm.tunnel_metrics(traj, spd, h, cl, dt, hw) for h in rounds]
     loss = fsm.INCOMPLETE_PENALTY * (1 - comp) if timed_out else float(np.mean([fsm.tunnel_loss(m) for m in mets]))
     ht = float(np.mean([(h["timestamps"][-1] - h["timestamps"][0]) / 1000.0 for h in rounds]))

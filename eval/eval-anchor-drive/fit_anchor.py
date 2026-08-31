@@ -23,19 +23,19 @@ import run_eval as em
 ANCHOR_SPEC = [
     {"name": "jerk", "bounds": (-7.0, -2.0), "log_scale": True},
     {"name": "contour", "bounds": (0.0, 3.5), "log_scale": True},
-    {"name": "constraint", "bounds": (1.0, 3.0), "log_scale": True},
+    {"name": "constraint", "bounds": (1.0, 4.0), "log_scale": True},
     {"name": "goal", "bounds": (0.0, 4.0), "log_scale": True},
     {"name": "free_velocity", "bounds": (-4.0, -0.5), "log_scale": True},
     # coast-safety hinge weight (review: was hand-set)
-    {"name": "safety", "bounds": (2.0, 6.0), "log_scale": True},
+    {"name": "safety", "bounds": (2.0, 4.0), "log_scale": True},
     # curvature-weighted gaze budget constants (re-estimated on cursor data)
     {"name": "D0", "bounds": (0.2, 1.5)},
     {"name": "gamma", "bounds": (0.3, 1.5)},
     # intended time-to-anchor (s), quantised to the 50 ms step; a 3-node
     # horizon (<0.15 s) destabilises solves, so the floor is 0.15
-    {"name": "plan_deadline_s", "bounds": (0.15, 0.40), "discrete_step": 0.05},
+    {"name": "plan_deadline_s", "bounds": (0.08, 0.25), "discrete_step": 0.01},
     # max hand speed (m/s): deadline >= lookahead / v_max (pointing only in practice)
-    {"name": "plan_vmax", "bounds": (0.2, 1.0)},
+    {"name": "plan_vmax", "bounds": (0.25, 1.0)},
 ]
 RESULTS = HERE / "results"
 
@@ -45,14 +45,19 @@ def _tunnel_part(cfg, train_data, tasks):
     total, n = 0.0, 0
     for tid in sorted(train_data):
         rounds = train_data[tid]; tc, cl, hw = tasks[tid]; n += 1
+        # Per-trial step cap: 3x the human completion time (floor 3 s). A
+        # candidate that crawls is a failure either way; this stops it from
+        # burning the 30 s cap on every trial (fit gen 1 took 25 min).
+        ct_h = float(np.mean([(h["timestamps"][-1] - h["timestamps"][0]) / 1000.0 for h in rounds]))
+        tc = dict(tc); tc["max_steps"] = int(min(fsm.MAX_SIM_STEPS, max(60, 3.0 * ct_h / 0.05)))
         try:
             traj, spd, dt = fsm.run_single_sim(sim, tc)
         except Exception:
             total += 1e6; continue
-        if len(traj) < 5:
-            total += 1e6; continue
+        if len(traj) < 5:   # aborted within 5 steps (breach at start-up): a failed trial, not a crash
+            total += fsm.INCOMPLETE_PENALTY; continue
         comp = fsm._completion(traj, cl)
-        if len(traj) >= fsm.MAX_SIM_STEPS and comp < 0.95:
+        if comp < 0.95:   # timed out or aborted (wall breach): trial failure
             total += fsm.INCOMPLETE_PENALTY * (1.0 - comp); continue
         total += float(np.mean([fsm.tunnel_loss(fsm.tunnel_metrics(traj, spd, h, cl, dt, hw)) for h in rounds]))
     return total / max(n, 1)
@@ -65,13 +70,16 @@ def _pointing_part(cfg, train_data):
         for hp in fsm._human_pointing_profiles(train_data[tid]):
             n += 1
             try:
-                tc, _, _ = em.build_fitts_bypass_config(hp["round"], hp["R"], max_steps=fsm.MAX_SIM_STEPS)
+                # Per-trial cap: 3 s (human pointing MT <= ~1 s); a timed-out
+                # trial is a failure either way.
+                pt_cap = min(fsm.MAX_SIM_STEPS, 60)
+                tc, _, _ = em.build_fitts_bypass_config(hp["round"], hp["R"], max_steps=pt_cap)
                 traj, spd, dt = fsm.run_single_sim(sim, tc, target_radius=hp["R"])
             except Exception:
                 total += 1e6; continue
             if len(traj) < 5:
-                total += 1e6; continue
-            if len(traj) >= fsm.MAX_SIM_STEPS:
+                total += fsm.INCOMPLETE_PENALTY; continue
+            if len(traj) >= pt_cap:
                 total += fsm.INCOMPLETE_PENALTY; continue
             mp = fsm._pointing_profile(traj, spd, [i * dt for i in range(len(traj))], hp["center"], hp["R"])
             total += fsm.pointing_loss(fsm.pointing_metrics(mp, hp, hp["canonical"]))
@@ -83,8 +91,12 @@ def _eval_joint(args):
     fsm.TUNNEL_SCALES.update(scales); fsm.POINT_SCALES.update(pscales)
     cfg = copy.deepcopy(base); fsm.apply_params(cfg, fsm.decode(vec, spec))
     cfg["add_noise"] = False; cfg["replan_latency_cv"] = 0.0
+    t0 = time.time()
     lt = _tunnel_part(cfg, tun_train, tasks)
     lp = _pointing_part(cfg, pt_train) if pt_train else 0.0
+    el = time.time() - t0
+    if el > 240:
+        print(f"    [slow candidate {el:.0f}s] tunnel {lt:.2f} pointing {lp:.2f} params {json.dumps({k: round(float(v), 4) for k, v in fsm.decode(vec, spec).items()})}", file=sys.stderr, flush=True)
     return lt + w_pt * lp
 
 
