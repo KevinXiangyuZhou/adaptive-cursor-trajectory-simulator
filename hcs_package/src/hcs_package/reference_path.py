@@ -104,6 +104,17 @@ class ReferencePath:
             return np.array([1.0, 0.0])
         return t / norm
     
+    def tangents(self, thetas):
+        """Unit tangents at an array of arclengths — (N, 2), vectorised
+        counterpart of ``tangent`` (one splev call)."""
+        u = self._theta_to_u(np.asarray(thetas, dtype=float))
+        dx, dy = splev(u, self.tck, der=1)
+        t = np.column_stack([np.asarray(dx, dtype=float), np.asarray(dy, dtype=float)])
+        n = np.linalg.norm(t, axis=1)
+        bad = n < 1e-9
+        t[bad] = (1.0, 0.0); n[bad] = 1.0
+        return t / n[:, None]
+
     def normal(self, theta):
         """Return right-pointing unit normal vector at arclength theta."""
         t = self.tangent(theta)
@@ -166,7 +177,19 @@ class ReferencePath:
 
         max_iter = 5
         tol = 1e-6
+        # Safeguarded Newton: the coarse-grid minimum is only refined by
+        # steps that (a) are descent steps (f'' > 0 — on a jagged path the
+        # squared distance is locally concave and an unsafeguarded step
+        # runs away, clips to u=0 and reports theta=0 while the cursor is
+        # mid-path), (b) stay within a few grid cells of the grid minimum,
+        # and (c) actually reduce the distance.
+        du_max = 3.0 * float(self.u_dense[1] - self.u_dense[0])
 
+        def _f(u):
+            c = splev(u, self.tck, der=0)
+            return (c[0] - px) ** 2 + (c[1] - py) ** 2
+
+        f0 = _f(u0)
         for _ in range(max_iter):
             c = splev(u0, self.tck, der=0)
             c1 = splev(u0, self.tck, der=1)
@@ -180,21 +203,18 @@ class ReferencePath:
             f_prime = 2.0 * (rx * c1x + ry * c1y)
             f_second = 2.0 * ((c1x * c1x + c1y * c1y) + (rx * c2x + ry * c2y))
 
-            if abs(f_second) < 1e-12:
+            if f_second <= 1e-12:
                 break
 
-            du = -f_prime / f_second
+            du = float(np.clip(-f_prime / f_second, -du_max, du_max))
             if abs(du) < tol:
                 break
 
-            u_new = u0 + du
-            u_new = float(np.clip(u_new, min_u, 1.0))
-
-            if abs(u_new - u0) < tol:
-                u0 = u_new
+            u_new = float(np.clip(u0 + du, min_u, 1.0))
+            f_new = _f(u_new)
+            if f_new >= f0 or abs(u_new - u0) < tol:
                 break
-
-            u0 = u_new
+            u0, f0 = u_new, f_new
 
         theta = float(np.interp(u0, self.u_dense, self.arclengths))
         return theta

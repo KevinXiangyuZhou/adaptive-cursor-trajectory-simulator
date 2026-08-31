@@ -622,7 +622,12 @@ def _meters_to_pixels(
     scale_x = screen_width / window_width_m
     scale_y = screen_height / window_height_m
     
-    return [[int(x * scale_x), int(y * scale_y)] for x, y in waypoints_m]
+    # Keep sub-pixel precision: truncating to integer pixels (1 px = 1 mm at
+    # the 460 px / 0.46 m task scale) put +-0.5 mm quantisation noise on
+    # centerlines sampled every ~2.5 mm (narrow tunnels), which the cubic
+    # reference-path spline then interpolated exactly — |kappa| ~ 200-300/m
+    # zig-zags on a curve whose true curvature is ~30/m.
+    return [[float(x * scale_x), float(y * scale_y)] for x, y in waypoints_m]
 
 
 def _generate_constraints(environment: Dict) -> Optional[Dict]:
