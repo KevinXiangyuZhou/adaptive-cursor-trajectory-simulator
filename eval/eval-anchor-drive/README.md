@@ -677,3 +677,19 @@ route, noise on): corner40 cut 2.8/4.2 mm (S9c 1.9/3.6; human 4.3/6.3), corner20
 2.8/6.4), dips unchanged; probe losses: tunnel 6.33/5.46 vs 6.29/5.22, pointing identical.
 Reference-path visualisations (no model runs, max_steps=0): eval/eval-main/refpath-viz-S9-B and
 refpath-viz-S9d-B (viz_ref_paths.py).
+
+**Stage-1 identifiability + cut-profile fit (S9e/S9f).** Follow-up on the corner-fair refit: the
+trajectory-RMSE family (raw or human-variability-normalised, per-round or against the mean path) is
+strategy-blind — deep- and shallow-corner routes differ by <0.2 mm in held-out spatial RMSE, so the
+optimiser cannot identify the corner cut from it. Resolution: Stage-1 loss = mean-path RMSE + cut-depth
+profile match (|route cut − human cut| at high-curvature points, per curved trial; refit_phase0.py
+--loss cutmatch). B (S9f route): corner20/40/50 1.1/4.4/5.7 mm, sinus 8.5 (human 2.8/4.3/5.6, 8.1) at
+unchanged held-out RMSE (2.78 mm); executed noise-on: corner40 3.1/4.7 (human 4.3/6.3), corner20
+1.1/2.2, sinus 7.9 — width contrast 1.1→3.1 (human 2.8→4.3); losses hold (tunnel 6.35/5.18, best test).
+A: the cut term overshoots (executed 4.5 vs 3.3) because A's stiff tracker (contour 817) does not
+attenuate; A uses the mean-path route (S9e): executed corner40 3.3 = human 3.3, sinus 6.8 vs 6.4.
+Execution notes: B attenuates route cut ~30% at the short apex window; stiffer contour (500/1000)
+REDUCES B's executed corner cut (progress-lag skips the apex window) — contour stays 176.
+Figure-3-style overlays (A=S9e, B=S9f, 5 noise-on runs vs human rounds): results/fig3_overlays_S9.png
+(fig3_overlays.py). Remaining gaps vs the paper figure: corner20 absolute cut (1.1 vs 2.8), gentle50
+depth (8.7 vs 12.3), and A's apex dip (0.43 vs 0.13, stop-and-turn).

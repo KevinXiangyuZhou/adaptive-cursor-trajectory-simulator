@@ -1,0 +1,14 @@
+{
+  "pid": "P170114",
+  "fitted": {
+    "w_cut": 0.4933712416405992,
+    "w_suppress": 0.5232115478957783,
+    "w_width_exp": 1.6214625480947402,
+    "cut_window_frac": 0.19961579946488658,
+    "global_clearance_ref": 0.005001833317086224
+  },
+  "norm_loss_train": 0.5669746745854406,
+  "seed": 42,
+  "loss_kind": "meanpath",
+  "_description": "Phase-0 refit; loss=meanpath"
+}

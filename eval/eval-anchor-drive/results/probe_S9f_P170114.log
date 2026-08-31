@@ -1,0 +1,26 @@
+  tunnel human-variability scales: {'lateral_rmse': 0.0055, 'speed_rmse': 0.0759, 'speed_corr': 0.8405, 'time_diff': 0.1332, 'log_time': 0.1415}
+  pointing human-variability scales: {'mt_rel': 0.2217, 'speed_rmse': 0.0897, 'speed_corr': 0.1393, 'end_depth': 0.2777, 'lateral_rmse': 0.0109}
+
+=== P170114 (B) persona=anchor  [32s]
+  tunnel train: loss 6.354 | CT ratio 1.01 | lat RMSE 4.1mm | spd corr 0.25 | timeouts 0/15
+  tunnel test : loss 5.182 | CT ratio 0.96 | lat RMSE 3.6mm | spd corr 0.18 | timeouts 0/10
+  width   loss  CTr  v_cruise  t_cross lead/v cycle
+    10mm   9.45  1.00  0.076    0.100  0.150  0.300
+    20mm   5.66  1.02  0.158    0.150  0.153  0.300
+    30mm   4.59  1.01  0.210    0.150  0.163  0.300
+    40mm   4.70  0.91  0.277    0.100  0.166  0.350
+    50mm   5.02  1.02  0.382    0.150  0.182  0.350
+  type                 loss  CTr  v_cruise  t_cross lead/v
+  ?                      3.26  0.94  0.210    0.150  0.175
+  corner                 4.73  0.96  0.194    0.100  0.141
+  gentle_sinusoidal      3.34  0.99  0.241    0.150  0.153
+  sharp_sinusoidal       7.21  0.73  0.202    0.150  0.184
+  straight              10.89  1.46  0.322    0.100  0.104
+  pointing train: loss 6.601 | MT ratio 0.87 | peak-v ratio 0.90 | timeouts 0/18
+  pointing test : loss 8.175 | MT ratio 0.80 | peak-v ratio 0.82 | timeouts 0/12
+    R= 5.0mm  MT model 0.85s human 1.02s  loss 6.52
+    R=10.0mm  MT model 0.77s human 1.00s  loss 7.48
+    R=15.0mm  MT model 0.73s human 0.68s  loss 8.56
+    R=20.0mm  MT model 0.70s human 0.83s  loss 8.87
+    R=25.0mm  MT model 0.70s human 0.96s  loss 4.72
+    Fitts MT=a+b*ID  model b=0.209 a=-0.005 | human b=0.170 a=0.282

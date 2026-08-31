@@ -38,12 +38,39 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pid", default="P170114"); ap.add_argument("--time-limit", type=float, default=900.0)
     ap.add_argument("--seed", type=int, default=42); ap.add_argument("--popsize", type=int, default=8)
+    ap.add_argument("--loss", choices=["norm", "meanpath", "cutmatch"], default="norm",
+                    help="norm: per-round RMSE / human scale; meanpath: RMSE of the mean-over-rounds "
+                         "residual profile (matches the participant's mean path — the round-to-round "
+                         "variance no longer pulls the route to the centerline)")
+    ap.add_argument("--tag", default="cornerfair")
+    ap.add_argument("--init-params", default=None, help="JSON dict of reference_path params to seed CMA-ES from (default: the S9c config's)")
+    ap.add_argument("--no-scale", action="store_true", help="equal per-trial weights (raw mm) instead of dividing by the human round-to-round scale")
     a = ap.parse_args()
     import cma
     rounds, t2c, t2b = fsm.load_participant(a.pid); tasks = fsm.build_tunnel_tasks(t2c, t2b)
     tun_train, tun_test = fsm.split_tunnel(rounds, t2c, t2b)
     geometry = fsm._precompute_task_geometry({tid: tasks[tid][0] for tid in tasks})
-    scales = {tid: trial_scale(rounds[tid]) for tid in {**tun_train, **tun_test} if tid in rounds}
+    scales = {tid: (1.0 if a.no_scale else trial_scale(rounds[tid])) for tid in {**tun_train, **tun_test} if tid in rounds}
+    # Per-trial human cut depth (mean |offset| at high-curvature centerline points) and
+    # the geometry needed to score a candidate route the same way — used by --loss cutmatch.
+    cutgeo, human_cut = {}, {}
+    if a.loss == "cutmatch":
+        for tid in {**tun_train, **tun_test}:
+            if tid not in rounds or t2b.get(tid) != "steering":
+                continue
+            sp = ReferencePath(fsm._waypoints_m(tasks[tid][0]), s=0.0, k=3)
+            ks = np.array([abs(sp.curvature(float(x))) for x in np.linspace(0, sp.total_length, 1200)])
+            if np.ptp(ks) < 1e-9:
+                continue   # straight: no apex, no cut term
+            thr = float(np.percentile(ks, 85))
+            if thr < 0.5:
+                continue   # effectively straight: no apex
+            vals = [ss.stats(h["trajectory"], h["speeds"], sp, thr)[0] for h in rounds[tid]]
+            hc = float(np.nanmean(vals)) / 1000.0
+            if not np.isfinite(hc):
+                continue
+            human_cut[tid] = hc
+            cutgeo[tid] = (sp, thr)
     print(f"{a.pid}: {len(tun_train)} train / {len(tun_test)} test tids; per-trial human scales (mm): "
           f"{ {t: round(s*1000,1) for t, s in sorted(scales.items())} }", flush=True)
 
@@ -58,18 +85,34 @@ def main():
                 poly, _ = fsm._build_ref_path_from_geometry(geometry[tid], rp)
             except Exception:
                 total += 1e6; continue
-            rm = []
-            for h in data[tid]:
-                _, _, lat = fsm.resample_by_progress(h["trajectory"], poly, 50)
-                rm.append(float(np.sqrt(np.mean(np.asarray(lat) ** 2))))
-            total += float(np.mean(rm)) / scales[tid]
+            if a.loss == "cutmatch":
+                lats = [np.asarray(fsm.resample_by_progress(h["trajectory"], poly, 50)[2]) for h in data[tid]]
+                mean_resid = np.mean(np.stack(lats), axis=0)
+                term = float(np.sqrt(np.mean(mean_resid ** 2)))
+                if tid in cutgeo:
+                    sp, thr = cutgeo[tid]
+                    o = ss.offsets(poly[::3], sp); hi = o[:, 1] > thr
+                    route_cut = float(np.mean(np.abs(o[hi, 0]))) if hi.any() else 0.0
+                    term += abs(route_cut - human_cut[tid])
+                total += term
+            elif a.loss == "meanpath":
+                lats = [np.asarray(fsm.resample_by_progress(h["trajectory"], poly, 50)[2]) for h in data[tid]]
+                mean_resid = np.mean(np.stack(lats), axis=0)
+                total += float(np.sqrt(np.mean(mean_resid ** 2))) / scales[tid]
+            else:
+                rm = []
+                for h in data[tid]:
+                    _, _, lat = fsm.resample_by_progress(h["trajectory"], poly, 50)
+                    rm.append(float(np.sqrt(np.mean(np.asarray(lat) ** 2))))
+                total += float(np.mean(rm)) / scales[tid]
         return total / max(n, 1)
 
     def eval_raw(vec, data):
         return fsm._eval_ref_path_spatial(vec, data, geometry)
 
     base = json.load(open(HERE / "results" / f"{a.pid}_anchor_config_S9c_s42.json"))
-    init = {s["name"]: base["reference_path"][s["name"]] for s in fsm.REF_PATH_PARAM_SPEC}
+    init_src = json.loads(a.init_params) if a.init_params else base["reference_path"]
+    init = {s["name"]: init_src[s["name"]] for s in fsm.REF_PATH_PARAM_SPEC}
     x0 = fsm.encode(init, fsm.REF_PATH_PARAM_SPEC)
     best_loss = eval_norm(x0, tun_train); best_x = np.array(x0, dtype=float)
     print(f"  initial normalised loss {best_loss:.4f}  params {json.dumps({k: round(v,4) for k,v in init.items()})}", flush=True)
@@ -109,10 +152,11 @@ def main():
         hm = np.nanmean([ss.stats(h["trajectory"], h["speeds"], sp, thr) for h in rounds[tid]], axis=0)
         print(line + f"  | human {hm[0]:4.1f}/{hm[1]:4.1f}", flush=True)
 
-    out = HERE / "results" / f"{a.pid}_refpath_cornerfair.json"
+    out = HERE / "results" / f"{a.pid}_refpath_{a.tag}.json"
     json.dump({"pid": a.pid, "fitted": {k: float(v) for k, v in fitted.items()},
                "norm_loss_train": best_loss, "seed": a.seed,
-               "_description": "Phase-0 refit, per-trial RMSE normalised by human round-to-round RMSE"},
+               "loss_kind": a.loss,
+               "_description": "Phase-0 refit; loss=" + a.loss},
               open(out, "w"), indent=2)
     print(f"  saved {out}", flush=True)
 
