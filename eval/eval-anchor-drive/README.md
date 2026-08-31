@@ -567,3 +567,72 @@ already adequate on the corrected centerlines; kept. S8 = S7 with `lag_anchor` =
 (along-path coupling) and `contour` free (lateral adherence = steering-strategy parameter);
 same 7-parameter joint fit, deadline 0.2 / budget fixed. Evaluation of the paper's claims via
 `strategy_stats.py` (cut depth + apex dip per condition, human vs personas).
+A budget calibration (gaze leads, non-straight; human A 16/20/32/30/40 mm): γ 0.66, D0 0.3 →
+11/25/28/25/39 (log-RMSE 0.24, cycle 0.45 s vs human 0.50, 76% arrival); D0 0.45 → 0.39;
+D0 0.65 → 0.69. A persona: D0 0.35, γ 0.66, deadline 0.25 (A crossing time), A's gaze latency
+(0.205 s, cv 0.84), A's aug-26 reference-path parameters; to be fitted with the S8 design after B.
+
+## S9 (09-01) — corner-cutting / corner-speed phenotypes: width-only gaze lead + turning-time deadline
+
+**Why S8 failed.** S8 (lag_anchor 2000 fixed, contour free) drove `contour` → 1573 and `safety` → 9.6e5:
+the joint loss is nearly flat in `contour` (6.59 → 6.26 for 30 → 1573, noise on) and `safety` is
+loss-neutral noise-off but blew up the noise-on persona (171 mm excursions at 1.65 m/s on corner 20 mm).
+The model tracks the Phase-0 reference path exactly (model cut == ref-path cut: 0.5/1.9/6.9/9.1 mm at
+corner20/40, sinus50, gentle50 vs human B 2.8/4.3/8.1/12.3) — nothing in the objective rewards a
+shortcut (projected progress under-counts it; a spatial via-point |p−anchor|² was tried and dropped:
+no extra cut, 9–25 % slower). Between-individual *route* strategy already lives in Phase-0 (w_cut A
+0.30 vs B 0.79); the paper's contrast is mostly *speed at the apex* (A dip 0.13 vs B 0.65 at 40 mm).
+
+**Gaze evidence (eval-gaze-cursor, `results/turn_time_calibration.json`).**
+- Human fixations cross corners at every width (B corner-trial onset lead 11/31/37/50/55 mm at 10–50
+  mm); the κ-weighted budget (turn toll 1.57·(W_ref/W)^γ ≫ D0 0.4) can never cross a 90° corner →
+  truncated lead → apex over-braking (B corner40 dip 0.32 vs 0.65).
+- Width-only lead fits: lead = D0·W^γ·W_ref^(1−γ): B γ 1.0/D0 1.21, A γ 0.66/D0 0.94, C 0.66/0.99.
+- Time-to-anchor grows with turning angle in the lead and is tolerance-scaled: LAD fit
+  T = T0 + τ·θ·(W_ref/W)^β, β = 1: B 0.13 + 0.23·θ·(W_ref/W) (corner crossing 0.46 s at 20 mm → 0.26 s
+  at 40–50 mm); A 0.21 + 0.25·θ·(…) with ≈0.5 s corners at all widths (stop-and-turn); C 0.15 + 0.24·θ.
+- B's straight-tunnel leads are ~40 mm at all widths with ttc ≈ 0.13 s (mean v 0.33–0.36 at all
+  widths); A's straight speed falls with width (0.06 → 0.29 m/s).
+
+**Design changes (all config-gated, defaults unchanged).**
+- `budget.curvature_weighted=false` (width-only lead) + `plan_turn_time_s` τ, `plan_turn_width_exp` β:
+  t_plan = max(T0, lead/v_max) + τ·θ_lead·(W_ref/W_local)^β; T0 = `plan_deadline_s` (gaze prior,
+  fitted 0.08–0.30). Horizon floor is numerical only (3 nodes): if t_plan is shorter, the via-point is
+  the schedule position at the horizon end (pace unchanged) — same rule the motor replans use.
+- Via-point lateness normalised by the lead, goal·((anchor−s)/lead)²: stiffness no longer scales with
+  lead² (fitted goal 2.6 was inert under short leads; goal 100 made walls soft → runaways).
+- Numerical guards: monotone best-iterate safeguard in the anchor re-linearisation loop (2-node
+  horizons + unbounded jerk ran to 5e3 m/s); `abort_on_breach_m` ends a trial that leaves the tunnel
+  (the experiment restarts such trials) and the fit/probe score it as a failure; `safety` bound ≤ 1e4.
+- Scripts: `contour_decomp.py` / `variant_decomp.py` (per-term loss + cut depth / apex dip per variant).
+
+**Pre-fit check (B, S8c weights, goal 0.5–8, T0 0.13, γ 1.0, τ 0.23, β 1; noise off):**
+corner20 CTr 0.87 (dip 0.47, human 0.17), corner40 CTr 0.82–1.16 (cut 1.5–2.8 mm, dip 0.59–0.84;
+human 4.3 mm, 0.65), corner50 CTr 0.95–1.24 (cut 2.3–3.1, human 5.6), sinus50 CTr 1.10–1.16
+(dip 0.74–0.78, human 0.97), straight30 CTr 1.5 (lead 36 mm / 0.13 s = 0.28 m/s vs human 0.35 mean).
+Fit S9 launched for B (`fit_S9_P170114.log`): budget fixed, τ/β fixed from gaze, T0/v_max/6 weights free.
+
+**S9 fit (B, 23 gens, loss 13.47):** jerk 1.2e-7, contour 228, constraint 15.8, goal 1.13, damping 0.268,
+safety 399, T0 0.12, v_max 0.49. Validation: tunnel 6.29/5.79, CT ratio by width flat 0.87–0.98 (S8c
+0.66–1.30), steering-law b 0.107 (human 0.184; S8c 0.065); strategy (noise on): corner40 cut 3.5/6.2 mm
+dip 0.58 (human 4.3/6.3, 0.65), corner20 1.3/2.7 dip 0.41 (human 2.8/6.4, 0.17), sinus50 8.0 (8.1) —
+width-dependent cutting emerges. Pointing regressed (MTr 0.74–0.85, Fitts R² 0.43).
+**Rhythm bug in S9 (fixed before S9c):** the 3-node horizon floor made motor plans shorter than the
+motor period, so the scheduler's plan exhaustion fired at every 0.2 s tick (94 % "exhausted", cycle
+0.20 s). Floor is now max(3, motor_steps+2) for fixation and motor plans; afterwards all fixations end
+by arrival, cycle 0.31–0.35 s (human 0.38), CTs at human values (corner40 2.65 vs 2.50 s, corner20
+4.55 vs 5.33, sinus50 1.70 vs 1.68, straight30 1.70 vs 1.28). S9c = refit under the fixed rhythm (B,
+then A with T0 0.21 / τ 0.25 / β 1 / D0 0.94 / γ 0.66).
+Pointing note: under the fixed rhythm the S9 persona's pointing MT is 0.9–1.07 s (R 25→5 mm), i.e. a
+weak width effect; the goal-precision well (`goal_precision` 1e-4…1e-2) adds ≤0.1 s at R 5 mm — a
+Fitts-strength width term for pointing remains open.
+
+**S9c (B, rhythm fixed; loss 12.89):** jerk 1.17e-7, contour 176, constraint 224, goal 1.12, damping
+0.30, safety 225, T0 0.11, v_max 0.49. Validation: tunnel 6.29/5.22 (best held-out anchor loss without
+stalls), CT ratio by width 0.99/1.00/1.01/0.94/1.05, by type corner 0.94 gentle 0.99 sharp 0.75
+straight 1.46, steering-law b 0.118 (human 0.184; S8c 0.065), gaze cycle 0.35 s (human 0.38) with 90 %
+arrival-triggered fixations, leads 9/16/27/35/46 mm (human 16/23/34/40/46). Pointing 6.60/8.18,
+MTr 0.87/0.80, Fitts b 0.238 R² 0.59 (open: no tolerance term in pointing time).
+Strategy (noise on, 3 runs): corner20 cut 1.0/2.0 mm dip 0.31; corner40 1.9/3.6 dip 0.56 (human
+2.8/6.4, 0.17 and 4.3/6.3, 0.65); sinus50 6.3 (8.1); gentle50 8.8 (12.3). Width contrast present in cut
+depth and apex speed, cut depth ≈ half the human; `contour` sweep on this persona pending.
