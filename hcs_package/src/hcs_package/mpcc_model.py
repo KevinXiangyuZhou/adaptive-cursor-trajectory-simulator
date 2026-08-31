@@ -239,6 +239,13 @@ def generate_mpcc(
     w_acc = float(weights.get('acc_weight', 1e4))
     w_contour = weights.get('contour', 1.0)
     w_lag = weights.get('lag', 0.1)
+    # Anchor mode: lateral adherence ('contour') and along-path consistency
+    # ('lag_anchor') are different things — the first is a steering STRATEGY
+    # (how much the planner cuts inside the walls), the second is the
+    # coupling that lets the progress via-point drive the cursor and must be
+    # stiff. A single full-distance weight forces both stiff and removes
+    # corner-cutting. None = legacy full-distance tracking with 'contour'.
+    w_lag_anchor = weights.get('lag_anchor', None)
     # Free-space (pointing) LQ weights: q on |p-goal|^2, r on |v|^2, rho on
     # |a|^2 (jerk weight shared with the tunnel objective). Provisional
     # defaults; to be replaced by formal fitting to the pointing data.
@@ -438,7 +445,10 @@ def generate_mpcc(
                 # the plan coasts past a corner (progress freezes while the
                 # cursor runs on) or past the path end; lateral mismatch is
                 # the contour error. No special cases.
-                tracking_cost += w_contour * float(pos_error @ pos_error)
+                if w_lag_anchor is None:
+                    tracking_cost += w_contour * float(pos_error @ pos_error)
+                else:
+                    tracking_cost += w_contour * e_contour**2 + float(w_lag_anchor) * e_lag**2
                 if k == k_deadline:
                     # Progress via-point: be at the anchor at the deadline.
                     tracking_cost += w_goal * (anchor_s_target - float(s_traj[k]))**2

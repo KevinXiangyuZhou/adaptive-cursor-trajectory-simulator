@@ -528,3 +528,33 @@ curvatures: 2 / 90 (one 0.15 s each). Corners: 7 / 36, mostly the 10 mm corner (
 where humans also spend 12% of the time below 25% cruise (apex slowdown); one 0.6 s window
 remains suspicious. The naive count (speed < 0.05 m/s anywhere) is confounded by the start-
 from-rest fixation and by genuinely slow narrow tunnels (human 10 mm sharp: 0.026 m/s).
+
+## Corner cutting / steering strategy (2026-08-31)
+
+Why race-tracing vanished: S7 tracks the reference path to <0.1 mm (apex offsets 0.5 / 1.9 /
+6.8 / 9.5 mm at corner20 / corner40 / sinus50 / gentle50) and the reference-path generator
+cuts corners only 0.5–1.9 mm; the aug-26 persona cut 3.0 / 8.8 mm because its lateral weight
+was tiny (contour 3.35) and the MPCC cut on its own. The merged full-distance tracking term in
+anchor mode also carries the along-path progress coupling, so the fit drove it to ~2000 and
+lateral freedom vanished with it.
+
+Fix: separate weights again — `contour` = lateral adherence (strategy), `lag_anchor` =
+along-path consistency (plumbing, stiff). B persona, lag_anchor = 1878:
+
+| contour | corner20 cut (mean/p90 mm) | corner40 | sinus50 | corner40 CT |
+|---|---|---|---|---|
+| full-distance (1878) | 0.4 / 0.6 | 1.8 / 2.2 | 6.8 / 7.3 | 3.25 s |
+| 300 | 1.0 / 2.5 | 1.9 / 2.5 | 6.8 / 7.2 | 2.88 s |
+| 100 | 0.9 / 1.8 | 6.5 / 11.4 | 6.7 / 7.2 | 2.33 s |
+| 30 | 2.4 / 4.8 | 8.4 / 16.4 | 6.5 / 7.3 | 2.10 s |
+| human A / B / C | 2.8 / 2.8 / 3.0 | 3.3 / 4.3 / 2.8 | 6.4 / 8.1 / 13.2 | — |
+
+Width dependence of cutting emerges from the walls; sinusoid cut depth is set by the
+reference-path (Phase 0) parameters. Human strategy contrast (corner40): apex speed dip
+A 0.13 (stop-and-go), B 0.65 (flowing), C 0.50; at corner20 everyone ~0.15.
+Corner apex speed dip (model B persona, min speed at high-κ / median speed): full-distance
+tracking 0.21 / 0.17 (corner20 / corner40); contour 100 → 0.27 / 0.33; contour 30 → 0.16 / 0.60.
+Human B 0.17 / 0.65, A 0.15 / 0.13, C 0.16 / 0.50. One lateral weight moves the model from the
+stop-and-go phenotype (A) to the flowing/cutting phenotype (B) and reproduces B's width-dependent
+transition; the reference-path (Phase 0) parameters set sinusoid cut depth (A 6.4 / B 8.1 /
+C 13.2 mm). `lag_anchor` is config-gated (None = legacy full-distance tracking).
