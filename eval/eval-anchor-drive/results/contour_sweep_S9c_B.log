@@ -1,0 +1,7 @@
+P170114: 25 steering tids, noise on, 2 seed(s); loss terms scaled by human variability (log_time x2)
+human            | corner20 cut  2.8 dip 0.17 | corner40 cut  4.3 dip 0.65 | sinuso50 cut  8.1 dip 0.97 | gentle50 cut 12.3 dip 0.87
+variant                                  |  total   lat  spdR  corr  time | CTr  | corner20 cut/dip | corner40 cut/dip | sinuso50 cut/dip | gentle50 cut/dip | to
+{"contour":176}                          |   6.25  0.70  1.60  1.00  2.94 | 1.00 |  1.2mm 0.30 |  1.9mm 0.59 |  6.4mm 0.74 |  8.4mm 0.83 | 0
+{"contour":60}                           |   6.24  0.71  1.60  1.00  2.93 | 1.00 |  1.1mm 0.34 |  1.7mm 0.64 |  6.3mm 0.73 |  8.0mm 0.83 | 0
+{"contour":30}                           |   6.23  0.73  1.60  0.99  2.91 | 1.00 |  1.9mm 0.28 |  1.7mm 0.54 |  6.2mm 0.72 |  7.9mm 0.82 | 0
+{"contour":15}                           |   6.28  0.74  1.61  1.00  2.94 | 0.99 |  1.3mm 0.29 |  1.9mm 0.55 |  6.2mm 0.72 |  7.7mm 0.70 | 0

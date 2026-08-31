@@ -1,0 +1,7 @@
+P170114: 25 tunnel tids, 2 seeds; loss terms are scaled (units of human variability), log_time weight 2
+ contour |  total   lat  spdR  corr  time | CTr  | corner20 cut/dip | corner40 cut/dip | to
+      30 |   6.59  0.77  1.57  0.85  3.40 | 0.95 |   2.1mm 0.19 |   2.3mm 0.46 | 0
+     100 |   6.54  0.74  1.72  0.84  3.24 | 0.96 |   1.8mm 0.47 |   3.1mm 0.23 | 0
+     300 |   6.46  0.71  1.51  0.79  3.45 | 0.99 |   1.1mm 0.12 |   1.7mm 0.26 | 0
+    1000 |   6.35  0.70  1.46  0.78  3.40 | 1.02 |   0.6mm 0.14 |   1.8mm 0.25 | 0
+    1573 |   6.26  0.70  1.41  0.79  3.36 | 1.04 |   0.5mm 0.08 |   1.7mm 0.27 | 0

@@ -1,0 +1,16 @@
+straight30 | goal  0.50: CT 1.95s (ratio 1.53; human cut nan dip nan) vmax 0.31 vmed 0.26 solves   7 abort None [1s] | cut 0.0mm dip 1.00
+straight30 | goal  2.00: CT 1.90s (ratio 1.49; human cut nan dip nan) vmax 0.32 vmed 0.26 solves   7 abort None [1s] | cut 0.0mm dip 1.00
+straight30 | goal  8.00: CT 1.90s (ratio 1.49; human cut nan dip nan) vmax 0.32 vmed 0.26 solves   7 abort None [1s] | cut 0.1mm dip 1.00
+corner20 | goal  0.50: CT 4.60s (ratio 0.86; human cut 2.8 dip 0.17) vmax 0.21 vmed 0.16 solves  15 abort None [6s] | cut 1.0mm dip 0.45
+corner20 | goal  2.00: CT 4.70s (ratio 0.88; human cut 2.8 dip 0.17) vmax 0.21 vmed 0.15 solves  15 abort None [4s] | cut 0.9mm dip 0.47
+corner20 | goal  8.00: CT 4.65s (ratio 0.87; human cut 2.8 dip 0.17) vmax 0.21 vmed 0.16 solves  15 abort None [5s] | cut 0.8mm dip 0.47
+corner40 | goal  0.50: CT 2.70s (ratio 1.08; human cut 4.3 dip 0.65) vmax 0.41 vmed 0.25 solves   9 abort None [5s] | cut 1.5mm dip 0.61
+corner40 | goal  2.00: CT 2.05s (ratio 0.82; human cut 4.3 dip 0.65) vmax 0.78 vmed 0.29 solves   6 abort None [15s] | cut 2.5mm dip 0.84
+corner40 | goal  8.00: CT 2.90s (ratio 1.16; human cut 4.3 dip 0.65) vmax 0.56 vmed 0.23 solves   8 abort None [8s] | cut 2.8mm dip 0.59
+corner50 | goal  0.50: CT 2.95s (ratio 1.24; human cut 5.6 dip 0.64) vmax 0.46 vmed 0.18 solves   8 abort None [10s] | cut 2.3mm dip 0.83
+corner50 | goal  2.00: CT 2.25s (ratio 0.95; human cut 5.6 dip 0.64) vmax 0.79 vmed 0.34 solves   6 abort None [11s] | cut 24.9mm dip 0.99
+corner50 | goal  8.00: CT 2.50s (ratio 1.05; human cut 5.6 dip 0.64) vmax 0.56 vmed 0.26 solves   7 abort None [6s] | cut 3.1mm dip 0.64
+sinusoidal50 | goal  0.50: CT 1.95s (ratio 1.16; human cut 8.1 dip 0.97) vmax 0.37 vmed 0.27 solves   6 abort None [2s] | cut 6.9mm dip 0.78
+sinusoidal50 | goal  2.00: CT 1.85s (ratio 1.10; human cut 8.1 dip 0.97) vmax 0.38 vmed 0.29 solves   6 abort None [2s] | cut 7.1mm dip 0.74
+sinusoidal50 | goal  8.00: CT 1.90s (ratio 1.13; human cut 8.1 dip 0.97) vmax 0.38 vmed 0.28 solves   6 abort None [2s] | cut 7.2mm dip 0.77
+DONE

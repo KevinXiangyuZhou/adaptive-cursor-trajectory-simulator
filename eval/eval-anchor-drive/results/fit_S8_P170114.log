@@ -1,0 +1,60 @@
+P170114: tunnel train 15 tids, test 16; pointing train 9 tids (18 rounds); deadline 0.2s
+  tunnel human-variability scales: {'lateral_rmse': 0.0055, 'speed_rmse': 0.0759, 'speed_corr': 0.8405, 'time_diff': 0.1332, 'log_time': 0.1415}
+  pointing human-variability scales: {'mt_rel': 0.2217, 'speed_rmse': 0.0897, 'speed_corr': 0.1393, 'end_depth': 0.2777, 'lateral_rmse': 0.0109}
+
+--- anchor joint fit P170114: CMA-ES over ['jerk', 'contour', 'constraint', 'goal', 'free_velocity', 'safety', 'plan_vmax'] ---
+  initial loss 13.8542; 12 workers, popsize 12, budget 14400s
+  gen   1 best 13.8542 mean 24.3068 (180s)
+  gen   2 best 13.8542 mean 20.1475 (321s)
+  gen   3 best 13.8542 mean 20.5411 (462s)
+  gen   4 best 12.9199 mean 26.0537 (804s)
+  gen   5 best 12.9199 mean 43.4256 (1888s)
+  gen   6 best 12.9199 mean 24.5519 (2162s)
+  gen   7 best 12.9199 mean 33.4952 (2556s)
+  gen   8 best 12.9199 mean 24.3335 (2717s)
+  gen   9 best 12.9199 mean 40.0538 (3349s)
+  gen  10 best 12.9199 mean 21.9295 (3590s)
+  gen  11 best 12.9199 mean 27.4792 (4076s)
+  gen  12 best 12.9199 mean 21.4946 (4334s)
+  gen  13 best 12.9199 mean 16.9936 (4536s)
+  gen  14 best 12.9199 mean 24.5473 (4764s)
+  gen  15 best 12.9199 mean 19.5152 (4893s)
+  gen  16 best 12.9199 mean 18.1398 (4999s)
+  gen  17 best 12.9199 mean 19.2094 (5103s)
+  anchor joint fit P170114 done: 17 generations, 5104s
+    jerk            : 1.086e-07 -> 1.00887e-07
+    contour         : 60 -> 1573.47
+    constraint      : 258 -> 125.279
+    goal            : 2.63 -> 2.60441
+    free_velocity   : 0.0159 -> 0.0194076
+    safety          : 2253 -> 962362
+    plan_vmax       : 0.69 -> 0.664651
+
+fitted: {"jerk": 1.0088723122432536e-07, "contour": 1573.4730342530222, "constraint": 125.27873364358827, "goal": 2.6044134629286453, "free_velocity": 0.019407567547748184, "safety": 962362.3453825198, "plan_vmax": 0.66465146174352}
+best joint loss 12.9199; saved /Users/xiangyz/Desktop/adaptive-cursor-trajectory-simulator/eval/eval-anchor-drive/results/P170114_anchor_config_S8_s42.json
+  tunnel human-variability scales: {'lateral_rmse': 0.0055, 'speed_rmse': 0.0759, 'speed_corr': 0.8405, 'time_diff': 0.1332, 'log_time': 0.1415}
+  pointing human-variability scales: {'mt_rel': 0.2217, 'speed_rmse': 0.0897, 'speed_corr': 0.1393, 'end_depth': 0.2777, 'lateral_rmse': 0.0109}
+
+=== P170114 (B) persona=anchor  [44s]
+  tunnel train: loss 6.974 | CT ratio 0.98 | lat RMSE 4.0mm | spd corr 0.47 | timeouts 0/15
+  tunnel test : loss 5.414 | CT ratio 0.97 | lat RMSE 3.6mm | spd corr 0.31 | timeouts 0/10
+  width   loss  CTr  v_cruise  t_cross lead/v cycle
+    10mm  10.14  0.66  0.115    0.300  0.358  0.400
+    20mm   5.50  0.85  0.187    0.300  0.364  0.500
+    30mm   4.24  1.09  0.225    0.300  0.340  0.450
+    40mm   5.33  1.10  0.238    0.300  0.405  0.450
+    50mm   6.55  1.30  0.267    0.300  0.399  0.450
+  type                 loss  CTr  v_cruise  t_cross lead/v
+  ?                      4.97  1.02  0.235    0.300  0.348
+  corner                10.03  0.97  0.180    0.325  0.384
+  gentle_sinusoidal      5.46  0.95  0.225    0.300  0.378
+  sharp_sinusoidal       7.55  0.85  0.128    0.300  0.372
+  straight               3.75  1.08  0.422    nan  0.863
+  pointing train: loss 5.946 | MT ratio 1.09 | peak-v ratio 0.89 | timeouts 0/18
+  pointing test : loss 7.402 | MT ratio 1.03 | peak-v ratio 0.95 | timeouts 0/12
+    R= 5.0mm  MT model 1.20s human 1.02s  loss 4.89
+    R=10.0mm  MT model 0.98s human 1.00s  loss 7.62
+    R=15.0mm  MT model 0.87s human 0.68s  loss 7.69
+    R=20.0mm  MT model 0.83s human 0.83s  loss 7.18
+    R=25.0mm  MT model 0.75s human 0.96s  loss 5.26
+    Fitts MT=a+b*ID  model b=0.258 a=-0.006 | human b=0.170 a=0.282

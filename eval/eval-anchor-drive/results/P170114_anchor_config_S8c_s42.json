@@ -1,0 +1,51 @@
+{
+  "Tp": 0.05,
+  "Th": 0.3,
+  "nc": [
+    0.2,
+    0.02
+  ],
+  "forearm": 0.35,
+  "planner_weights": {
+    "jerk": 1.0088723122432536e-07,
+    "progress": 9.815009291809508e-06,
+    "constraint": 125.27873364358827,
+    "contour": 1573.4730342530222,
+    "lag": 4.946449364379044,
+    "desired_speed": 0.2,
+    "goal": 2.6044134629286453,
+    "free_velocity": 0.019407567547748184,
+    "goal_precision": 0.0,
+    "safety": 10000.0,
+    "bend": 0.0,
+    "lag_anchor": 2000.0
+  },
+  "speed_model": {
+    "type": "none"
+  },
+  "horizon_mode": "budget",
+  "replan_mode": "intermittent",
+  "budget": {
+    "D0": 0.4,
+    "T_min": 0.1,
+    "gamma": 0.66,
+    "W_ref": 0.026,
+    "curvature_weighted": true
+  },
+  "replan_latency_s": 0.1901,
+  "replan_latency_cv": 0.0,
+  "replan_deviation_frac": 0.3,
+  "reference_path": {
+    "w_cut": 0.7927872477095913,
+    "w_suppress": 0.8169875815922716,
+    "w_width_exp": 0.3907112040517968,
+    "cut_window_frac": 0.13872309082671583,
+    "global_clearance_ref": 0.025772346126785643
+  },
+  "add_noise": false,
+  "plan_deadline_s": 0.2,
+  "plan_vmax": 0.66465146174352,
+  "arrival_mode": "distance",
+  "anchor_lead_floor": true,
+  "motor_period_s": 0.1
+}

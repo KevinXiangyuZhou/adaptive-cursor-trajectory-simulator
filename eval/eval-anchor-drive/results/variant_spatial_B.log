@@ -1,0 +1,10 @@
+P170114: 25 steering tids, noise off, 1 seed(s); loss terms scaled by human variability (log_time x2)
+human            | corner20 cut  2.8 dip 0.17 | corner40 cut  4.3 dip 0.65 | sinuso50 cut  8.1 dip 0.97 | gentle50 cut 12.3 dip 0.87
+variant                                  |  total   lat  spdR  corr  time | CTr  | corner20 cut/dip | corner40 cut/dip | sinuso50 cut/dip | gentle50 cut/dip | to
+{}                                       |   6.26  0.69  1.37  0.74  3.45 | 0.96 |  0.5mm 0.10 |  1.6mm 0.32 |  6.9mm 0.91 |  8.7mm 1.16 | 0
+{"anchor_spatial":1}                     |   8.32  0.69  1.36  0.73  5.53 | 1.25 |  0.5mm 0.04 |  1.8mm 0.16 |  6.9mm 0.81 |  8.7mm 1.17 | 0
+{"anchor_spatial":1,"contour":100}       |   7.84  0.83  1.72  0.81  4.47 | 1.09 |  4.3mm 0.32 |  1.7mm 0.26 |  6.8mm 0.90 |  8.9mm 1.13 | 0
+{"anchor_spatial":1,"contour":30}        |   8.10  0.78  1.62  0.80  4.89 | 1.11 |  1.0mm 0.06 |  1.8mm 0.10 |  6.6mm 0.63 |  8.5mm 1.21 | 0
+{"anchor_spatial":1,"contour":100,"lag_anchor":100} |   7.33  0.69  1.39  0.73  4.52 | 1.04 |  0.7mm 0.11 |  1.8mm 0.11 |  7.0mm 0.72 |  9.3mm 1.00 | 0
+{"anchor_spatial":1,"contour":30,"lag_anchor":30} |   7.87  0.70  1.47  0.81  4.88 | 1.00 |  1.8mm 0.29 |  2.6mm 0.24 |  7.9mm 0.86 |  9.4mm 0.82 | 0
+{"contour":30}                           |   7.40  0.86  1.94  0.83  3.77 | 0.84 |  1.7mm 0.29 |  4.3mm 0.37 |  6.8mm 0.86 |  8.4mm 1.03 | 0

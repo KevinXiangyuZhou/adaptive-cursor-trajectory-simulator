@@ -1,0 +1,13 @@
+
+P170114 (B) — full trial sets, corrected geometry, same build
+aug-26 GAM   tunnel   7.81/  6.29 CTr 0.79/0.82 spdcorr 0.22 | pointing   6.01/  6.76 MTr 0.90/0.88 | Fitts b 0.140 R² 0.91 (hum 0.170) | steering b 0.049 (hum 0.184) CTr 0.82
+   by type: straig 1.06  corner 0.84  gentle 0.86  sharp_ 0.57 | by width: 10:0.52 20:0.72 30:0.90 40:0.92 50:1.03
+anchor S7    tunnel   7.34/  6.06 CTr 0.86/0.90 spdcorr 0.43 | pointing   5.78/  7.34 MTr 0.97/0.89 | Fitts b 0.239 R² 0.81 (hum 0.170) | steering b 0.066 (hum 0.184) CTr 0.99
+   by type: straig 0.98  corner 0.86  gentle 0.89  sharp_ 0.75 | by width: 10:0.54 20:0.76 30:0.94 40:1.05 50:1.24
+   gaze: cycle 0.40s (hum 0.38) arrival/early/exh 0.70/0.15/0.15 | lead mm {0.01: 23.0, 0.02: 31.0, 0.03: 44.0, 0.04: 44.0, 0.05: 43.0} (hum 16/23/34/40/46) | lead/v {'corner': 0.33, 'gentle_sinusoidal': 0.32, 'sharp_sinusoidal': 0.28} (hum .18/.22/.22/.25)
+anchor S8c   tunnel   6.97/  5.41 CTr 0.98/0.97 spdcorr 0.47 | pointing   5.95/  7.40 MTr 1.09/1.03 | Fitts b 0.300 R² 0.87 (hum 0.170) | steering b 0.065 (hum 0.184) CTr 1.04
+   by type: straig 1.08  corner 0.97  gentle 0.95  sharp_ 0.85 | by width: 10:0.66 20:0.85 30:1.09 40:1.10 50:1.30
+   gaze: cycle 0.45s (hum 0.38) arrival/early/exh 0.74/0.10/0.16 | lead mm {0.01: 14.0, 0.02: 28.0, 0.03: 36.0, 0.04: 50.0, 0.05: 33.0} (hum 16/23/34/40/46) | lead/v {'corner': 0.29, 'gentle_sinusoidal': 0.36, 'sharp_sinusoidal': 0.3} (hum .18/.22/.22/.25)
+anchor S9    tunnel   6.29/  5.79 CTr 0.98/0.92 spdcorr 0.29 | pointing   7.20/  8.79 MTr 0.85/0.74 | Fitts b 0.210 R² 0.43 (hum 0.170) | steering b 0.107 (hum 0.184) CTr 0.97
+   by type: straig 1.44  corner 0.87  gentle 0.95  sharp_ 0.71 | by width: 10:0.98 20:0.98 30:0.97 40:0.87 50:0.98
+   gaze: cycle 0.20s (hum 0.38) arrival/early/exh 0.05/0.01/0.94 | lead mm {0.01: 9.0, 0.02: 17.0, 0.03: 26.0, 0.04: 34.0, 0.05: 42.0} (hum 16/23/34/40/46) | lead/v {'corner': 0.1, 'gentle_sinusoidal': 0.1, 'sharp_sinusoidal': 0.14} (hum .18/.22/.22/.25)
