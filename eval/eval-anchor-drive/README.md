@@ -653,3 +653,27 @@ T0 0.16, v_max 0.64. Validation: tunnel 8.73/5.92 (aug-26 GAM 5.87/5.36), spdcor
 0.43 vs 0.56 (human 0.13 vs 0.65). Raising the coast-safety weight to 1e4/1e5 does not change it (dip
 0.39–0.44) — the hinge is not binding. Next candidate: A's short corner fixations are rest points
 (pointing-like); the via-point is by design not a rest point.
+
+**Correction (old-implementation / old-config comparison).** The earlier "corner-cut ceiling is the
+generator" claim was wrong: `generate_optimal_reference_path` is byte-identical from the old commit
+(83fe93b, the attached old reference_path.py) to HEAD — only `find_closest_theta` (global coarse
+search + safeguarded Newton) and the vectorised `tangents()` changed, and `_smooth_offsets` is dead
+code in both. The corner cut is limited by the aug-26 Phase-0 *parameter point*, specifically the wide
+`cut_window_frac` 0.139: phi = ∫|κ|ds over the window drives exp(-w_suppress·phi), which fires at an
+isolated 90° corner as hard as in dense curvature. Reference-path-only comparison on B's eval-main
+corner tasks (cut mean/p90, mm): aug-26 B 1.9/2.1 at corner40 vs the OLD fitted config (w_cut 0.55,
+window 0.023, suppress 1.11 — old dataset participant) 4.1/5.5 ≈ human B 4.3/6.3; B with the old
+narrow window 6.3/7.6 (over), with w_suppress=0 6.7/9.5. A Phase-0 refit that does not let sinusoid
+RMSE swallow the window (corner-weighted, or window fitted per type) can recover human-scale corner
+cuts with the existing generator.
+
+**Phase-0 corner-fair refit (S9d, B).** refit_phase0.py: per-trial spatial RMSE normalised by the
+trial's human round-to-round RMSE (floor 1.5 mm) — the pipeline's human-variability normalisation
+applied to Phase-0. Fitted (32 gens, 15 min): w_cut 0.523, w_suppress 0.539, w_width_exp 0.601,
+cut_window_frac 0.199, global_clearance_ref 0.005 (task scaling saturated on). Held-out raw RMSE
+unchanged (2.79 → 2.78 mm); ref-path corner cuts: corner20 0.5 → 1.4, corner40 1.9 → 3.3, corner50
+2.5 → 3.8 mm (human 2.8/4.3/5.6), sinusoids unchanged. Executed persona (S9d = S9c weights + this
+route, noise on): corner40 cut 2.8/4.2 mm (S9c 1.9/3.6; human 4.3/6.3), corner20 1.3/2.1 (human
+2.8/6.4), dips unchanged; probe losses: tunnel 6.33/5.46 vs 6.29/5.22, pointing identical.
+Reference-path visualisations (no model runs, max_steps=0): eval/eval-main/refpath-viz-S9-B and
+refpath-viz-S9d-B (viz_ref_paths.py).

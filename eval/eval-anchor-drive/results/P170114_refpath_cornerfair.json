@@ -1,0 +1,13 @@
+{
+  "pid": "P170114",
+  "fitted": {
+    "w_cut": 0.5234318985887163,
+    "w_suppress": 0.5385442531739184,
+    "w_width_exp": 0.6013895824238057,
+    "cut_window_frac": 0.19875621913295513,
+    "global_clearance_ref": 0.005010274143440525
+  },
+  "norm_loss_train": 0.7346254784802506,
+  "seed": 42,
+  "_description": "Phase-0 refit, per-trial RMSE normalised by human round-to-round RMSE"
+}
