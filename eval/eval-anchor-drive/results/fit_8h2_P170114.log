@@ -1,0 +1,227 @@
+P170114: tunnel train 15 tids, test 16; pointing train 9 tids (18 rounds); deadline 0.25s
+  tunnel human-variability scales: {'lateral_rmse': 0.0055, 'speed_rmse': 0.0759, 'speed_corr': 0.8405, 'time_diff': 0.1332, 'log_time': 0.1415}
+  pointing human-variability scales: {'mt_rel': 0.2217, 'speed_rmse': 0.0897, 'speed_corr': 0.1393, 'end_depth': 0.2777, 'lateral_rmse': 0.0109}
+
+--- anchor joint fit P170114: CMA-ES over ['jerk', 'contour', 'constraint', 'goal', 'free_velocity', 'bend', 'plant_lag_s', 'plan_deadline_s', 'plan_vmax'] ---
+  initial loss 18.0262; 12 workers, popsize 12, budget 28800s
+  gen   1 best 16.4530 mean 40.3860 (299s)
+  gen   2 best 16.4530 mean 25.4849 (463s)
+  gen   3 best 16.4277 mean 47.6423 (667s)
+  gen   4 best 16.4277 mean 39.4259 (990s)
+  gen   5 best 16.4277 mean 36.0678 (1288s)
+  gen   6 best 16.4277 mean 34.3096 (1661s)
+  gen   7 best 15.8102 mean 34.9181 (2194s)
+  gen   8 best 15.8102 mean 24.0803 (2476s)
+  gen   9 best 15.8102 mean 24.4949 (2733s)
+  gen  10 best 15.8102 mean 21.4512 (2862s)
+  gen  11 best 15.8102 mean 25.1489 (3062s)
+  gen  12 best 15.8102 mean 20.1315 (3218s)
+  gen  13 best 15.8102 mean 18.1728 (3355s)
+  gen  14 best 15.8102 mean 20.5410 (3541s)
+  gen  15 best 15.8102 mean 25.6286 (3956s)
+  gen  16 best 15.7710 mean 17.3313 (4066s)
+  gen  17 best 15.4843 mean 18.9655 (4226s)
+  gen  18 best 15.4843 mean 18.0142 (4324s)
+  gen  19 best 15.4843 mean 16.9452 (4422s)
+  gen  20 best 15.4843 mean 16.7588 (4528s)
+  gen  21 best 15.4843 mean 16.8990 (4642s)
+  gen  22 best 15.4843 mean 17.0311 (4738s)
+  gen  23 best 15.4843 mean 17.0171 (4864s)
+  gen  24 best 15.4843 mean 17.3450 (5019s)
+  gen  25 best 15.4843 mean 16.4181 (5128s)
+  gen  26 best 15.4843 mean 16.5151 (5235s)
+  gen  27 best 15.4843 mean 16.3506 (5339s)
+  gen  28 best 15.4843 mean 16.6775 (5449s)
+  gen  29 best 15.4843 mean 16.6810 (5587s)
+  gen  30 best 15.4843 mean 17.0099 (5702s)
+  gen  31 best 15.4843 mean 16.6185 (5831s)
+  gen  32 best 15.4843 mean 16.4730 (5969s)
+  gen  33 best 15.4843 mean 16.7011 (6097s)
+  gen  34 best 15.4843 mean 17.0813 (6227s)
+  gen  35 best 15.4843 mean 16.4000 (6302s)
+  gen  36 best 15.4843 mean 16.3584 (6397s)
+  gen  37 best 15.3435 mean 16.6007 (6480s)
+  gen  38 best 15.3435 mean 16.1661 (6578s)
+  gen  39 best 15.3435 mean 15.9490 (6672s)
+  gen  40 best 15.3435 mean 15.8762 (6765s)
+  gen  41 best 15.3435 mean 16.1607 (6885s)
+  gen  42 best 15.0806 mean 16.1472 (6992s)
+  gen  43 best 15.0806 mean 15.8093 (7076s)
+  gen  44 best 15.0806 mean 15.7622 (7169s)
+  gen  45 best 15.0646 mean 16.3700 (7305s)
+  gen  46 best 15.0646 mean 15.6835 (7392s)
+  gen  47 best 15.0646 mean 15.9948 (7499s)
+  gen  48 best 15.0646 mean 16.1228 (7609s)
+  gen  49 best 14.9157 mean 16.0464 (7707s)
+  gen  50 best 14.9157 mean 15.5218 (7804s)
+  gen  51 best 14.8794 mean 15.3591 (7895s)
+  gen  52 best 14.8794 mean 15.4870 (7984s)
+  gen  53 best 14.8794 mean 15.5798 (8086s)
+  gen  54 best 14.8794 mean 15.4826 (8169s)
+  gen  55 best 14.8794 mean 15.5957 (8273s)
+  gen  56 best 14.8794 mean 15.4064 (8357s)
+  gen  57 best 14.8794 mean 15.3805 (8442s)
+  gen  58 best 14.8794 mean 15.4219 (8543s)
+  gen  59 best 14.8794 mean 15.3478 (8631s)
+  gen  60 best 14.8794 mean 15.4188 (8726s)
+  gen  61 best 14.8794 mean 15.4185 (8815s)
+  gen  62 best 14.8794 mean 15.1928 (8900s)
+  gen  63 best 14.8794 mean 15.1734 (8985s)
+  gen  64 best 14.8794 mean 15.1957 (9066s)
+  gen  65 best 14.8379 mean 15.2446 (9148s)
+  gen  66 best 14.8379 mean 15.2632 (9232s)
+  gen  67 best 14.7836 mean 15.0449 (9314s)
+  gen  68 best 14.7836 mean 15.1490 (9399s)
+  gen  69 best 14.7836 mean 15.1784 (9481s)
+  gen  70 best 14.7692 mean 15.1517 (9566s)
+  gen  71 best 14.7229 mean 15.3006 (9659s)
+  gen  72 best 14.7229 mean 15.2233 (9747s)
+  gen  73 best 14.7229 mean 15.1911 (9828s)
+  gen  74 best 14.7229 mean 15.2239 (9917s)
+  gen  75 best 14.7229 mean 15.1392 (10002s)
+  gen  76 best 14.7229 mean 15.1971 (10088s)
+  gen  77 best 14.7229 mean 15.4371 (10179s)
+  gen  78 best 14.7229 mean 15.0125 (10262s)
+  gen  79 best 14.7229 mean 15.1814 (10344s)
+  gen  80 best 14.7229 mean 15.0711 (10433s)
+  gen  81 best 14.7229 mean 15.1885 (10518s)
+  gen  82 best 14.7229 mean 15.1279 (10604s)
+  gen  83 best 14.7229 mean 15.2635 (10693s)
+  gen  84 best 14.7229 mean 15.0841 (10777s)
+  gen  85 best 14.7229 mean 15.1636 (10867s)
+  gen  86 best 14.7229 mean 15.0310 (10949s)
+  gen  87 best 14.7229 mean 14.9839 (11032s)
+  gen  88 best 14.7229 mean 15.0485 (11114s)
+  gen  89 best 14.7229 mean 15.0322 (11198s)
+  gen  90 best 14.7229 mean 15.0729 (11280s)
+  gen  91 best 14.7229 mean 15.0503 (11360s)
+  gen  92 best 14.7229 mean 14.9642 (11441s)
+  gen  93 best 14.7229 mean 15.0383 (11525s)
+  gen  94 best 14.7229 mean 15.0635 (11606s)
+  gen  95 best 14.7229 mean 15.0517 (11693s)
+  gen  96 best 14.7229 mean 15.0264 (11775s)
+  gen  97 best 14.7229 mean 14.9842 (11852s)
+  gen  98 best 14.7229 mean 14.9914 (11938s)
+  gen  99 best 14.7229 mean 15.0183 (12015s)
+  gen 100 best 14.7229 mean 14.9906 (12094s)
+  gen 101 best 14.7229 mean 14.9546 (12174s)
+  gen 102 best 14.7229 mean 14.9946 (12255s)
+  gen 103 best 14.7229 mean 14.9760 (12335s)
+  gen 104 best 14.7229 mean 14.9481 (12417s)
+  gen 105 best 14.7229 mean 15.0058 (12499s)
+  gen 106 best 14.7229 mean 14.9849 (12580s)
+  gen 107 best 14.7229 mean 15.0262 (12658s)
+  gen 108 best 14.7229 mean 14.9180 (12737s)
+  gen 109 best 14.7229 mean 14.9206 (12818s)
+  gen 110 best 14.7229 mean 14.9290 (12899s)
+  gen 111 best 14.7229 mean 14.9643 (12980s)
+  gen 112 best 14.7229 mean 15.0144 (13059s)
+  gen 113 best 14.7229 mean 15.0536 (13150s)
+  gen 114 best 14.7229 mean 14.9532 (13228s)
+  gen 115 best 14.7229 mean 15.0188 (13312s)
+  gen 116 best 14.7229 mean 15.0349 (13392s)
+  gen 117 best 14.7229 mean 15.0258 (13472s)
+  gen 118 best 14.7229 mean 15.0459 (13567s)
+  gen 119 best 14.7229 mean 15.0304 (13646s)
+  gen 120 best 14.7229 mean 15.2309 (13751s)
+  gen 121 best 14.6937 mean 15.0123 (13834s)
+  gen 122 best 14.6937 mean 15.1542 (13919s)
+  gen 123 best 14.6937 mean 15.1638 (14011s)
+  gen 124 best 14.6937 mean 15.3114 (14097s)
+  gen 125 best 14.6937 mean 14.9782 (14181s)
+  gen 126 best 14.6937 mean 15.0904 (14262s)
+  gen 127 best 14.6937 mean 15.0346 (14343s)
+  gen 128 best 14.6937 mean 15.2289 (14437s)
+  gen 129 best 14.6937 mean 15.2342 (14523s)
+  gen 130 best 14.6937 mean 15.2708 (14611s)
+  gen 131 best 14.6937 mean 15.1653 (14695s)
+  gen 132 best 14.6937 mean 15.2413 (14790s)
+  gen 133 best 14.6937 mean 15.1766 (14875s)
+  gen 134 best 14.6937 mean 15.1265 (14960s)
+  gen 135 best 14.6937 mean 15.4815 (15048s)
+  gen 136 best 14.6937 mean 15.3021 (15145s)
+  gen 137 best 14.6937 mean 15.0764 (15227s)
+  gen 138 best 14.6937 mean 14.9557 (15307s)
+  gen 139 best 14.6937 mean 15.1090 (15388s)
+  gen 140 best 14.6937 mean 15.1817 (15488s)
+  gen 141 best 14.6937 mean 15.0766 (15574s)
+  gen 142 best 14.6937 mean 15.0630 (15657s)
+  gen 143 best 14.6937 mean 15.0301 (15739s)
+  gen 144 best 14.6937 mean 15.2272 (15819s)
+  gen 145 best 14.6937 mean 19.2642 (15906s)
+  gen 146 best 14.6937 mean 15.1108 (15990s)
+  gen 147 best 14.6937 mean 15.1144 (16068s)
+  gen 148 best 14.6937 mean 15.1563 (16148s)
+  gen 149 best 14.6937 mean 15.1850 (16230s)
+  gen 150 best 14.6937 mean 15.1527 (16308s)
+  gen 151 best 14.6937 mean 15.0563 (16387s)
+  gen 152 best 14.6937 mean 15.0800 (16470s)
+  gen 153 best 14.6937 mean 15.0095 (16554s)
+  gen 154 best 14.6937 mean 14.9693 (16635s)
+  gen 155 best 14.6937 mean 15.0247 (16714s)
+  gen 156 best 14.6937 mean 15.0961 (16797s)
+  gen 157 best 14.6937 mean 15.0388 (16876s)
+  gen 158 best 14.6937 mean 15.1016 (16960s)
+  gen 159 best 14.6937 mean 15.1106 (17043s)
+  gen 160 best 14.6937 mean 14.9850 (17127s)
+  gen 161 best 14.6937 mean 15.0553 (17211s)
+  gen 162 best 14.6937 mean 15.0510 (17293s)
+  gen 163 best 14.6937 mean 15.1201 (17388s)
+  gen 164 best 14.6937 mean 15.1738 (17470s)
+  gen 165 best 14.6937 mean 15.0411 (17549s)
+  gen 166 best 14.6937 mean 15.1990 (17640s)
+  gen 167 best 14.6937 mean 15.0905 (17720s)
+  gen 168 best 14.6937 mean 14.9354 (17800s)
+  gen 169 best 14.6937 mean 15.0251 (17880s)
+  gen 170 best 14.6937 mean 14.9668 (17964s)
+  gen 171 best 14.6937 mean 15.0668 (18053s)
+  gen 172 best 14.6937 mean 14.9901 (18139s)
+  gen 173 best 14.6937 mean 15.0011 (18223s)
+  gen 174 best 14.6937 mean 15.1432 (18311s)
+  gen 175 best 14.6937 mean 14.9090 (18391s)
+  gen 176 best 14.6937 mean 14.9400 (19399s)
+  gen 177 best 14.6937 mean 15.0224 (20153s)
+  gen 178 best 14.6937 mean 14.9907 (20230s)
+  gen 179 best 14.6937 mean 15.0480 (20320s)
+  gen 180 best 14.6937 mean 15.0952 (20408s)
+  gen 181 best 14.6937 mean 15.0222 (20488s)
+  gen 182 best 14.6937 mean 14.9825 (20573s)
+  anchor joint fit P170114 done: 182 generations, 20573s
+    jerk            : 0.00031 -> 2.02735e-06
+    contour         : 346.2 -> 107.111
+    constraint      : 552.1 -> 999.119
+    goal            : 575.9 -> 110.252
+    free_velocity   : 0.0306 -> 0.0136179
+    bend            : 0.0021 -> 0.000317295
+    plant_lag_s     : 0.16 -> 0.0924751
+    plan_deadline_s : 0.25 -> 0.15
+    plan_vmax       : 0.5 -> 0.405344
+
+fitted: {"jerk": 2.0273478575134196e-06, "contour": 107.1106399874507, "constraint": 999.11858949426, "goal": 110.25196135942133, "free_velocity": 0.013617925414042688, "bend": 0.00031729539942355087, "plant_lag_s": 0.09247505885644028, "plan_deadline_s": 0.15, "plan_vmax": 0.40534356315742365}
+best joint loss 14.6937; saved /Users/xiangyz/Desktop/adaptive-cursor-trajectory-simulator/eval/eval-anchor-drive/results/P170114_anchor_config_8h2_s42.json
+  tunnel human-variability scales: {'lateral_rmse': 0.0055, 'speed_rmse': 0.0759, 'speed_corr': 0.8405, 'time_diff': 0.1332, 'log_time': 0.1415}
+  pointing human-variability scales: {'mt_rel': 0.2217, 'speed_rmse': 0.0897, 'speed_corr': 0.1393, 'end_depth': 0.2777, 'lateral_rmse': 0.0109}
+
+=== P170114 (B) persona=anchor  [27s]
+  tunnel train: loss 7.548 | CT ratio 0.94 | lat RMSE 4.0mm | spd corr 0.20 | timeouts 0/15
+  tunnel test : loss 5.993 | CT ratio 0.98 | lat RMSE 3.7mm | spd corr 0.18 | timeouts 0/10
+  width   loss  CTr  v_cruise  t_cross lead/v cycle
+    10mm  12.32  0.76  0.114    0.150  0.223  0.400
+    20mm   7.02  1.02  0.164    0.150  0.235  0.400
+    30mm   5.20  1.02  0.205    0.150  0.254  0.400
+    40mm   4.97  0.95  0.294    0.150  0.220  0.400
+    50mm   5.12  1.07  0.274    0.150  0.247  0.400
+  type                 loss  CTr  v_cruise  t_cross lead/v
+  ?                      6.26  0.86  0.205    0.150  0.241
+  corner                 4.00  1.00  0.175    0.150  0.235
+  gentle_sinusoidal      6.10  0.83  0.242    0.150  0.206
+  sharp_sinusoidal       7.40  0.79  0.169    0.200  0.286
+  straight              10.88  1.44  0.287    0.150  0.191
+  pointing train: loss 7.207 | MT ratio 0.84 | peak-v ratio 1.04 | timeouts 0/18
+  pointing test : loss 8.654 | MT ratio 0.86 | peak-v ratio 1.02 | timeouts 0/12
+    R= 5.0mm  MT model 0.88s human 1.02s  loss 6.26
+    R=10.0mm  MT model 0.87s human 1.00s  loss 7.37
+    R=15.0mm  MT model 0.68s human 0.68s  loss 8.79
+    R=20.0mm  MT model 0.67s human 0.83s  loss 9.94
+    R=25.0mm  MT model 0.65s human 0.96s  loss 6.57
+    Fitts MT=a+b*ID  model b=0.192 a=0.054 | human b=0.170 a=0.282

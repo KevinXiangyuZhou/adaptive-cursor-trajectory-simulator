@@ -1,0 +1,53 @@
+{
+  "Tp": 0.05,
+  "Th": 0.3,
+  "nc": [
+    0.2,
+    0.02
+  ],
+  "forearm": 0.35,
+  "planner_weights": {
+    "jerk": 1.0859436488546951e-07,
+    "progress": 9.815009291809508e-06,
+    "constraint": 257.9636607425944,
+    "contour": 1877.6288877891427,
+    "lag": 4.946449364379044,
+    "desired_speed": 0.2,
+    "goal": 2.6290866142460274,
+    "free_velocity": 0.015946912166418643,
+    "goal_precision": 0.0,
+    "bend": 0.0,
+    "safety": 2252.6841275287607,
+    "plant_lag_s": 0.1
+  },
+  "speed_model": {
+    "type": "none"
+  },
+  "horizon_mode": "budget",
+  "replan_mode": "intermittent",
+  "budget": {
+    "D0": 0.4,
+    "T_min": 0.1,
+    "gamma": 0.66,
+    "W_ref": 0.026,
+    "curvature_weighted": true
+  },
+  "replan_latency_s": 0.1901,
+  "replan_latency_cv": 0.7633,
+  "replan_deviation_frac": 0.3,
+  "reference_path": {
+    "w_cut": 0.7927872477095913,
+    "w_suppress": 0.8169875815922716,
+    "w_width_exp": 0.3907112040517968,
+    "cut_window_frac": 0.13872309082671583,
+    "global_clearance_ref": 0.025772346126785643
+  },
+  "add_noise": true,
+  "plan_deadline_s": 0.2,
+  "plan_vmax": 0.6940841107086939,
+  "arrival_mode": "distance",
+  "anchor_lead_floor": true,
+  "motor_period_s": 0.1,
+  "random_seed": 1000,
+  "_description": "anchor persona S7 for P170114, noise on"
+}
