@@ -636,3 +636,20 @@ MTr 0.87/0.80, Fitts b 0.238 R² 0.59 (open: no tolerance term in pointing time)
 Strategy (noise on, 3 runs): corner20 cut 1.0/2.0 mm dip 0.31; corner40 1.9/3.6 dip 0.56 (human
 2.8/6.4, 0.17 and 4.3/6.3, 0.65); sinus50 6.3 (8.1); gentle50 8.8 (12.3). Width contrast present in cut
 depth and apex speed, cut depth ≈ half the human; `contour` sweep on this persona pending.
+
+**Corner-cut ceiling = Phase-0 route generator (S9c-B, noise off).** For every planner lateral weight
+(contour 15–176) the loss is flat (6.23–6.28) and the cut depth does not move (corner40 1.7–1.9 mm);
+for every reference-path setting the model's cut equals the reference path's own cut (corner40:
+Phase-0 1.9 → model 1.5/2.3; w_cut 1.0 → 2.4 → 1.8/3.0; sinus50: 6.9 → 6.4, 8.8 → 8.1). The generator
+cannot produce B's 4.3 mm corner cut with any of its parameters (it is a sinusoid-oriented cut window),
+so the residual corner-cut amplitude is a route-generation limitation, not a planner one; the planner
+reproduces the width contrast in apex speed (dip 0.31 → 0.56 at 20 → 40 mm; human 0.17 → 0.65).
+
+**S9c (A; loss 16.26):** jerk 7.4e-6, contour 817, constraint 26, goal 1.58, damping 0.19, safety 198,
+T0 0.16, v_max 0.64. Validation: tunnel 8.73/5.92 (aug-26 GAM 5.87/5.36), spdcorr 0.04, CT by width
+0.57/0.87/1.06/1.04/1.12, gaze cycle 0.35 s (90 % arrival), leads 10/17/21/25/30 mm (human
+16/23/34/40/46). Strategy: corner20 cut 0.8/1.4 dip 0.37, corner40 2.5/3.7 dip 0.43 (human 2.8/5.5,
+0.15 and 3.3/6.4, 0.13). A's stop-and-turn is NOT reproduced: the model's A/B apex contrast at 40 mm is
+0.43 vs 0.56 (human 0.13 vs 0.65). Raising the coast-safety weight to 1e4/1e5 does not change it (dip
+0.39–0.44) — the hinge is not binding. Next candidate: A's short corner fixations are rest points
+(pointing-like); the via-point is by design not a rest point.
