@@ -21,12 +21,18 @@ import gaze_data as gd, lookahead_difficulty as ld
 W_REF = 0.026
 
 
-def build_events(L):
+def build_events(L, clean=False):
     s = gd.load_samples(L); ev = gd.fixation_events(s)
-    ev = ev[(~ev["tunnel_type"].astype(str).str.contains("pointing")) & (ev["lead_onset"] > 0.003) & (~ev["blink_corrupted"])]
+    ev = ev[(~ev["tunnel_type"].astype(str).str.contains("pointing")) & (~ev["blink_corrupted"])]
     ev, geoms = ld.attach_geometry(s, ev)
-    ev = ev.dropna(subset=["s_c", "lead_onset"])
-    return ev, geoms
+    if clean:
+        import pandas as pd
+        cl = pd.read_csv(HERE.parents[1] / "human_data" / "processed_gaze_events" / f"{L}_fixation_events_clean.csv")
+        cl = cl[cl["keep"] == True][["trial_id", "block_id", "fixation_id", "lead_corr"]]  # noqa: E712
+        ev = ev.merge(cl, on=["trial_id", "block_id", "fixation_id"], how="inner")
+        ev["lead_onset"] = ev["lead_corr"]
+    ev = ev[ev["lead_onset"] > 0.003]
+    return ev.dropna(subset=["s_c", "lead_onset"]), geoms
 
 
 def predict(ev, geoms, D0, gamma, lam, beta):
@@ -92,11 +98,12 @@ def table(ev, geoms, params, label):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--letters", nargs="*", default=["B", "A", "C"])
     ap.add_argument("--time-limit", type=float, default=120.0)
+    ap.add_argument("--clean", action="store_true", help="use the cleaned processed events (corrected leads, keep-flagged)")
     a = ap.parse_args()
     bounds = [(0.1, 4.0), (0.0, 2.0), (0.0, 0.6), (0.0, 3.0)]   # D0, gamma, lam (m/rad), beta
     results = {}
     for L in a.letters:
-        ev, geoms = build_events(L)
+        ev, geoms = build_events(L, clean=a.clean)
         print(f"== {L}: {len(ev)} events", flush=True)
         p_w, l_w = fit(ev, geoms, [1.2, 1.0, 0.0, 1.0], bounds, fixed={2: 0.0}, time_limit=a.time_limit)
         p_a, l_a = fit(ev, geoms, [max(p_w[0], .3), p_w[1], 0.05, 1.0], bounds, time_limit=2 * a.time_limit)
@@ -105,7 +112,8 @@ def main():
         table(ev, geoms, p_w, "width-only"); table(ev, geoms, p_a, "additive")
         results[L] = {"width_only": {"D0": p_w[0], "gamma": p_w[1], "loss": l_w},
                       "additive": {"D0": p_a[0], "gamma": p_a[1], "lam": p_a[2], "beta": p_a[3], "loss": l_a}}
-    out = "budget_additive_fit_" + "_".join(a.letters[:1]) + f"_{len(a.letters)}p.json" if len(a.letters) > 3 else "budget_additive_fit.json"
+    out = ("budget_additive_fit_" + "_".join(a.letters[:1]) + f"_{len(a.letters)}p.json" if len(a.letters) > 3 else "budget_additive_fit.json")
+    if a.clean: out = out.replace(".json", "_clean.json")
     json.dump(results, open(HERE / "results" / out, "w"), indent=2, default=float)
     print("saved results/" + out); print("DONE")
 
