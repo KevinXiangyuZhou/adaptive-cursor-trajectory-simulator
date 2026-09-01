@@ -201,12 +201,21 @@ def apply_params(cfg, params):
 
 def load_participant(pid):
     """Returns (rounds_by_tid, tid_to_condition, tid_to_bucket).
-    rounds_by_tid: {tid: [round dict with trajectory, speeds, timestamps, completion_time, condition]}"""
-    tid_to_condition, tid_to_bucket = em.scan_conditions(HUMAN_DATA_DIR)
-    tids = [t for t, b in tid_to_bucket.items() if b in ("steering", "id4scs_w2n", "id4scs_n2w", "fitts")]
-    all_data = em.load_trials_by_participant(tids, HUMAN_DATA_DIR)
-    if pid not in all_data:
-        raise FileNotFoundError(f"No data for participant {pid} in {HUMAN_DATA_DIR}")
+    rounds_by_tid: {tid: [round dict with trajectory, speeds, timestamps, completion_time, condition]}
+    Searches HUMAN_DATA_DIR first, then human_data/task_aligned_all (the p01..p10 batch)."""
+    dirs = [Path(HUMAN_DATA_DIR), Path(HUMAN_DATA_DIR).parent / "task_aligned_all"]
+    last_err = None
+    for d in dirs:
+        try:
+            tid_to_condition, tid_to_bucket = em.scan_conditions(d)
+            tids = [t for t, b in tid_to_bucket.items() if b in ("steering", "id4scs_w2n", "id4scs_n2w", "fitts")]
+            all_data = em.load_trials_by_participant(tids, d)
+        except Exception as e:
+            last_err = e; continue
+        if pid in all_data:
+            break
+    else:
+        raise FileNotFoundError(f"No data for participant {pid} in {dirs} ({last_err})")
     rounds_by_tid = {tid: [d[k] for k in sorted(d)] for tid, d in all_data[pid].items() if d}
     return rounds_by_tid, tid_to_condition, tid_to_bucket
 
