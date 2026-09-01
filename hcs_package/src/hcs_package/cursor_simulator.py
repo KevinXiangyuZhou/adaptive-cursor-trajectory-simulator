@@ -198,6 +198,9 @@ class CursorSimulator:
         self.budget_T_min = float(budget_cfg.get('T_min', 0.1))
         self.budget_gamma = float(budget_cfg.get('gamma', 1.0))
         self.budget_W_ref = float(budget_cfg.get('W_ref', 0.026))
+        # Additive curvature toll in the lookahead budget (0 = width-only).
+        self.budget_lam = float(budget_cfg.get('lam', 0.0))
+        self.budget_beta = float(budget_cfg.get('beta', 1.0))
         self.budget_curvature_weighted = bool(budget_cfg.get('curvature_weighted', False))
         self.replan_mode = str(config.get('replan_mode', 'every_step'))
         if self.replan_mode not in ('every_step', 'intermittent'):
@@ -568,6 +571,7 @@ class CursorSimulator:
                 D0=self.budget_D0, T_min=self.budget_T_min,
                 gamma=self.budget_gamma, W_ref=self.budget_W_ref,
                 kappa_profile=k_prof, curvature_weighted=self.budget_curvature_weighted,
+                lam=self.budget_lam, beta=self.budget_beta,
             )
         tau_steps = max(0, int(round(self.replan_latency_s / self.interval)))
         # Time-based solve-horizon floor: the plan must always cover at least

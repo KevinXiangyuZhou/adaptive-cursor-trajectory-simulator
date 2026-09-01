@@ -55,11 +55,15 @@ _PREFIX_RENAMES = {
 
 def csv_path(letter: str) -> Path:
     # Prefer the re-exported "(1)" CSVs, which add saccade_id / blink_id /
-    # time_to_catch_s on top of the original export.
-    matches = sorted(DATA_DIR.glob(f"{letter}_task_aligned_analysis*.csv"),
-                     key=lambda p: (" (1)" not in p.name, p.name))
+    # time_to_catch_s on top of the original export. The 10-participant batch
+    # (p01..p10) lives in human_data/task_aligned_all with the same schema.
+    dirs = [DATA_DIR, DATA_DIR.parent / "task_aligned_all"]
+    matches = []
+    for d in dirs:
+        matches += sorted(d.glob(f"{letter}_task_aligned_analysis*.csv"),
+                          key=lambda p: (" (1)" not in p.name, p.name))
     if not matches:
-        raise FileNotFoundError(f"no gaze CSV for participant {letter} in {DATA_DIR}")
+        raise FileNotFoundError(f"no gaze CSV for participant {letter} in {dirs}")
     return matches[0]
 
 

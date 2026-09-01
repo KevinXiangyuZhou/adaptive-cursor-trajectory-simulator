@@ -80,6 +80,8 @@ class DifficultyBudgetHorizon:
         W_ref: float = 0.026,
         kappa_profile=None,
         curvature_weighted: bool = False,
+        lam: float = 0.0,
+        beta: float = 1.0,
     ):
         self.s = np.asarray(s_profile, dtype=float)
         self.D0 = float(D0)
@@ -97,6 +99,14 @@ class DifficultyBudgetHorizon:
         # rescaling it is absorbed by D0. See the module docstring for why
         # there is deliberately NO curvature term here.
         density = ((self.W_ref / width) ** self.gamma) / self.W_ref
+        if lam and float(lam) > 0.0:
+            # Additive curvature toll (config-gated): rho = width toll +
+            # lam*|kappa|*(W_ref/W)^beta. At fixed width a straight stretch is
+            # cheap and a curved one dear (straight-W10 easier than curved-W10);
+            # the turn toll shrinks with room, so wide corners stay crossable.
+            # lam (m/rad-ish) and beta are gaze-calibrated per participant.
+            kap_a = np.abs(np.asarray(kappa_profile, dtype=float)) if kappa_profile is not None else np.zeros_like(width)
+            density = density + float(lam) * kap_a * ((self.W_ref / width) ** float(beta))
         if curvature_weighted:
             # Curvature-weighted difficulty: density = |kappa| (W_ref/W)^gamma
             # (1/length; W_ref cancels in the toll's scale). A straight costs no
