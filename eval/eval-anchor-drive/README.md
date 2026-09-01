@@ -693,3 +693,19 @@ REDUCES B's executed corner cut (progress-lag skips the apex window) — contour
 Figure-3-style overlays (A=S9e, B=S9f, 5 noise-on runs vs human rounds): results/fig3_overlays_S9.png
 (fig3_overlays.py). Remaining gaps vs the paper figure: corner20 absolute cut (1.1 vs 2.8), gentle50
 depth (8.7 vs 12.3), and A's apex dip (0.43 vs 0.13, stop-and-turn).
+
+**S10/S10b (B): fitted peak-acceleration bound + noise-on stability gate.** Reflection: the paper
+draft's Figure 3 arcs came from carried speed + soft tracking (old contour 16), with geometry emerging
+from dynamics; our stiff tracker executed the route instead. S10 added `acc_max` to ANCHOR_SPEC (hinge
+on |a| — cornering radius v²/a turns carried speed into arcs) and the fit immediately chose the soft
+regime (contour 23, loss 12.75) — but noise-off fitting made it wall-fragile (strategy p90 16.7 mm,
+strays in the figure). S10b adds a noise-ON stability gate to every fit evaluation (_noise_stability:
+3 widest train trials, 1 seed, breach/incomplete = failure penalty). Fitted: contour 14.8 (old model:
+16), constraint 2705 (containment moved from centering to walls), acc_max 3.7 m/s², v_max 0.53, loss
+12.54 (best). Strategy (noise on): corner20 cut 2.4/5.0 dip 0.42 (human 2.8/6.4, 0.17), corner40
+3.2/5.4 dip 0.48 (human 4.3/6.3, 0.65), sinus 7.6/9.5 (8.1/12.4), gentle 7.8/9.4 (12.3/15.6) — no
+breaches. Validation: tunnel 6.42/5.40, CT by width 1.00–1.07, straight 1.59 (residual), pointing
+6.35/7.81 MTr 0.83/0.80, Fitts R² 0.65. Figure: results/fig3_overlays_S10b.png — smooth inside arcs at
+Cor W=40, tight at W=20, all runs in-corridor. Current personas: A=S9e, B=S10b. Open: straight-tunnel
+pace (1.59×), corner apex dips (0.42/0.48 vs 0.17/0.65 — the 20/40 contrast direction is right but
+compressed), gentle-50 depth, A's stop-and-turn, pointing width term.

@@ -28,6 +28,9 @@ ANCHOR_SPEC = [
     {"name": "free_velocity", "bounds": (-4.0, -0.5), "log_scale": True},
     # coast-safety hinge weight (review: was hand-set)
     {"name": "safety", "bounds": (2.0, 4.0), "log_scale": True},
+    # peak hand acceleration (m/s^2, log10): cornering speed capped at
+    # sqrt(acc_max * cut radius) — the dynamics that turn carried speed into arcs
+    {"name": "acc_max", "bounds": (0.3, 1.1), "log_scale": True},
     # curvature-weighted gaze budget constants (re-estimated on cursor data)
     {"name": "D0", "bounds": (0.2, 1.5)},
     {"name": "gamma", "bounds": (0.3, 1.5)},
@@ -86,18 +89,39 @@ def _pointing_part(cfg, train_data):
     return total / max(n, 1)
 
 
+def _noise_stability(cfg, stab):
+    """Noise-on wall-breach check: a persona must survive its own motor noise.
+    Runs each stability trial once with noise on (latency cv 0); an aborted or
+    incomplete run scores the failure penalty. Keeps noise-off-only optima
+    (soft lateral weights that breach walls under noise) out of the fit."""
+    cfg_n = copy.deepcopy(cfg); cfg_n["add_noise"] = True
+    cfg_n["replan_latency_cv"] = 0.0; cfg_n["random_seed"] = 777
+    sim = fsm._make_sim(cfg_n)
+    pen = 0.0
+    for tc, cl in stab:
+        try:
+            traj, spd, dt = fsm.run_single_sim(sim, tc)
+        except Exception:
+            pen += fsm.INCOMPLETE_PENALTY; continue
+        comp = fsm._completion(traj, cl) if len(traj) >= 5 else 0.0
+        if comp < 0.95:
+            pen += fsm.INCOMPLETE_PENALTY * (1.0 - min(comp, 1.0))
+    return pen
+
+
 def _eval_joint(args):
-    vec, spec, base, tun_train, tasks, scales, pt_train, pscales, w_pt = args
+    vec, spec, base, tun_train, tasks, scales, pt_train, pscales, w_pt, stab = args
     fsm.TUNNEL_SCALES.update(scales); fsm.POINT_SCALES.update(pscales)
     cfg = copy.deepcopy(base); fsm.apply_params(cfg, fsm.decode(vec, spec))
     cfg["add_noise"] = False; cfg["replan_latency_cv"] = 0.0
     t0 = time.time()
     lt = _tunnel_part(cfg, tun_train, tasks)
     lp = _pointing_part(cfg, pt_train) if pt_train else 0.0
+    ls = _noise_stability(cfg, stab) if stab else 0.0
     el = time.time() - t0
     if el > 240:
         print(f"    [slow candidate {el:.0f}s] tunnel {lt:.2f} pointing {lp:.2f} params {json.dumps({k: round(float(v), 4) for k, v in fsm.decode(vec, spec).items()})}", file=sys.stderr, flush=True)
-    return lt + w_pt * lp
+    return lt + w_pt * lp + ls
 
 
 def main():
@@ -157,7 +181,20 @@ def main():
     spec = [sp for sp in ANCHOR_SPEC if not (a.fix_budget and sp["name"] in ("D0", "gamma"))
             and not (a.fix_deadline and sp["name"] == "plan_deadline_s")]
     init = {s["name"]: _init_val(s["name"]) for s in spec}
-    shared = (spec, base, tun_train, tasks, scales, pt_train, pscales, a.w_point)
+    # Noise-on stability trials: the widest corner/sinusoid TRAIN conditions,
+    # capped at 3x the human completion time like the fit trials.
+    stab = []
+    for ty, w in (("corner", 0.05), ("corner", 0.03), ("sinusoidal", 0.05)):
+        tid = next((t for t in tun_train if abs(t2c[t]["tunnelWidth"] - w) < 1e-6
+                    and (t2c[t].get("tunnelType") or "sinusoidal") == ty), None)
+        if tid is None:
+            continue
+        tc, cl, hw = tasks[tid]
+        ct_h = float(np.mean([(h["timestamps"][-1] - h["timestamps"][0]) / 1000.0 for h in tun_train[tid]]))
+        tc = dict(tc); tc["max_steps"] = int(min(fsm.MAX_SIM_STEPS, max(60, 3.0 * ct_h / 0.05)))
+        stab.append((tc, cl))
+    print(f"  noise-on stability trials: {len(stab)}")
+    shared = (spec, base, tun_train, tasks, scales, pt_train, pscales, a.w_point, stab)
     t0 = time.time()
     fitted, best, hist = fsm.run_cmaes(f"anchor joint fit {a.pid}", spec, init, _eval_joint, shared,
                                        a.time_limit, a.seed, a.popsize, a.workers, sigma0=0.2, patience=a.patience)
