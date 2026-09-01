@@ -1,0 +1,7 @@
+
+P170114 (B) — full trial sets, corrected geometry, same build
+aug-26 GAM   tunnel   7.81/  6.29 CTr 0.79/0.82 spdcorr 0.22 | pointing   6.01/  6.76 MTr 0.90/0.88 | Fitts b 0.140 R² 0.91 (hum 0.170) | steering b 0.049 (hum 0.184) CTr 0.82
+   by type: straig 1.06  corner 0.84  gentle 0.86  sharp_ 0.57 | by width: 10:0.52 20:0.72 30:0.90 40:0.92 50:1.03
+anchor S12   tunnel   7.19/  6.39 CTr 1.17/1.15 spdcorr 0.04 | pointing   6.61/  7.52 MTr 0.85/0.79 | Fitts b 0.318 R² 0.52 (hum 0.170) | steering b 0.172 (hum 0.184) CTr 1.14
+   by type: straig 1.81  corner 1.03  gentle 1.18  sharp_ 0.87 | by width: 10:1.31 20:1.25 30:1.21 40:1.05 50:1.02
+   gaze: cycle 0.35s (hum 0.38) arrival/early/exh 0.85/0.01/0.14 | lead mm {0.01: 9.0, 0.02: 18.0, 0.03: 27.0, 0.04: 38.0, 0.05: 48.0} (hum 16/23/34/40/46) | lead/v {'corner': 0.11, 'gentle_sinusoidal': 0.13, 'sharp_sinusoidal': 0.16} (hum .18/.22/.22/.25)

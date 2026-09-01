@@ -1,0 +1,9 @@
+corner40 human: hf-lateral RMS 2.01mm sign-changes 1.8/100mm
+corner40 human: hf-lateral RMS 1.24mm sign-changes 1.7/100mm
+corner40 model noise-on: hf-lateral RMS 1.98mm sign-changes 2.3/100mm max|a| 3.4 p95|a| 3.2 fixations 8 aborted False
+corner40 model noise-off: hf-lateral RMS 1.80mm sign-changes 2.3/100mm max|a| 3.7 p95|a| 2.5 fixations 8 aborted False
+corner20 human: hf-lateral RMS 0.59mm sign-changes 7.3/100mm
+corner20 human: hf-lateral RMS 0.66mm sign-changes 5.3/100mm
+corner20 model noise-on: hf-lateral RMS 1.38mm sign-changes 3.4/100mm max|a| 1.9 p95|a| 1.3 fixations 13 aborted False
+corner20 model noise-off: hf-lateral RMS 0.87mm sign-changes 2.7/100mm max|a| 3.0 p95|a| 1.6 fixations 16 aborted False
+saved eval/eval-anchor-drive/results/jiggle_diag_S12_C.png
