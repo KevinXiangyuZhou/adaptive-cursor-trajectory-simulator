@@ -191,3 +191,7 @@ results-*/
 
 # Local project spec, not for version control
 CLAUDE.md
+# Transient evaluation visualisations (current iterations are force-added explicitly)
+eval/eval-gaze-lead/model-gaze-lead-*/
+eval/eval-gaze-lead/gl-*/
+eval/eval-main/refpath-viz-*/
