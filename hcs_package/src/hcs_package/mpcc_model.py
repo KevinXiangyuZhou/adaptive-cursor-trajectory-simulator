@@ -262,6 +262,11 @@ def generate_mpcc(
         # Coast-safety: number of latency steps over which the deadline
         # state's ballistic continuation must stay inside the corridor.
         n_safety = int(anchor[3]) if len(anchor) > 3 and anchor[3] else 0
+        # Pace-holding tail (config-gated): beyond the deadline node the schedule
+        # continues at the fixation's pace, so a plan executed past its deadline
+        # (single plan per fixation, no motor replans) keeps moving instead of
+        # braking into the anchor — the stall fix without a second timescale.
+        anchor_pace = float(anchor[4]) if len(anchor) > 4 and anchor[4] else 0.0
         t_safety = dt * np.arange(1, n_safety + 1)
         if s_sched.shape[0] != num_steps:
             # Pad with the last value (np.resize tiles cyclically — review-flagged latent trap).
@@ -456,6 +461,9 @@ def generate_mpcc(
                     # so the drive's stiffness does not scale with lead^2 — a
                     # 60 mm and a 300 mm plan are held to the same fraction.
                     tracking_cost += w_goal * ((anchor_s_target - float(s_traj[k])) / anchor_lead_norm)**2
+                elif k > k_deadline and anchor_pace > 0.0:
+                    s_tail = min(anchor_s_target + anchor_pace * dt * (k - k_deadline), ref_path.total_length)
+                    tracking_cost += w_goal * ((s_tail - float(s_traj[k])) / anchor_lead_norm)**2
             elif any_free and free_mask[k]:
                 # Goal-directed pointing: lateral error stays w.r.t. the path
                 # (keeps the movement on the straight line); the drive is the

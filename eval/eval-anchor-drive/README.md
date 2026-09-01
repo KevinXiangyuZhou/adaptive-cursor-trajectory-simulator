@@ -709,3 +709,19 @@ breaches. Validation: tunnel 6.42/5.40, CT by width 1.00–1.07, straight 1.59 (
 Cor W=40, tight at W=20, all runs in-corridor. Current personas: A=S9e, B=S10b. Open: straight-tunnel
 pace (1.59×), corner apex dips (0.42/0.48 vs 0.17/0.65 — the 20/40 contrast direction is right but
 compressed), gentle-50 depth, A's stop-and-turn, pointing width term.
+
+**Reference-path generator redesign (09-01).** Diagnosis of the route "ears" (outward bumps at corner
+entry/exit, also present with the old fitted config): (1) the cut side/magnitude came from the pointwise
+curvature of the cubic centerline spline, which rings at a polyline vertex (10 sign flips within ±50 mm)
+so the offset flipped to the wrong side; (2) the interpolating spline overshoots sharp offset
+transitions (bump ∝ cut depth); (3) the base spline through 10 mm waypoints overshoots vertices by
+0.8 mm. Deeper: a normal offset of a sharp vertex is another equally sharp vertex — it cannot make a
+fillet, and a deep inward offset folds into a loop (routes leaving the tunnel once the ringing was
+removed). New generator (reference_path.py): the smoothest path (minimum curvature energy) within the
+inside slack band a = w_cut·f_room·room_inside, knots p = C + d·n + e·t with tangential freedom e (what
+lets a vertex become an arc), turn direction from the smoothed waypoint-polyline heading, base spline
+through the densified polyline, one-sided band (no outward swings), band → 0 at inflections/ends;
+sparse bounded least squares (~60 ms/path). Parameters per participant: w_cut, w_width_exp, w_center
+(lobe extent), global_clearance_ref (w_suppress/cut_window_frac dropped). No bumps/loops by
+construction; all 25 routes in-corridor for A and B with the old parameters. Stage-1 refits (cutmatch)
+rerun under the new generator; all planner personas need the new routes.

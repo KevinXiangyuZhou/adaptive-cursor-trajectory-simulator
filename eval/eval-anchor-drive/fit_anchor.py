@@ -26,11 +26,12 @@ ANCHOR_SPEC = [
     {"name": "constraint", "bounds": (1.0, 4.0), "log_scale": True},
     {"name": "goal", "bounds": (0.0, 4.0), "log_scale": True},
     {"name": "free_velocity", "bounds": (-4.0, -0.5), "log_scale": True},
-    # coast-safety hinge weight (review: was hand-set)
-    {"name": "safety", "bounds": (2.0, 4.0), "log_scale": True},
-    # peak hand acceleration (m/s^2, log10): cornering speed capped at
-    # sqrt(acc_max * cut radius) — the dynamics that turn carried speed into arcs
-    {"name": "acc_max", "bounds": (0.3, 1.1), "log_scale": True},
+    # coast-safety hinge removed from the fit (S12): with walls and the pace-holding
+    # plan tail it was redundant (B: tunnel loss 8.77/5.59 -> 6.74/5.54 without it).
+    # peak hand acceleration is NOT fitted: fixed at 4 m/s^2 in the base config
+    # (minimum-jerk peak for a ~15 cm / 0.5 s reach; above every participant's
+    # observed p99 cursor acceleration: A 1.6, B 2.8, C 3.4 m/s^2; B's fitted
+    # value was 3.7). Set via --override planner_weights.acc_max.
     # curvature-weighted gaze budget constants (re-estimated on cursor data)
     {"name": "D0", "bounds": (0.2, 1.5)},
     {"name": "gamma", "bounds": (0.3, 1.5)},

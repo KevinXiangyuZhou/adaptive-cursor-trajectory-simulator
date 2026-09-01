@@ -14,7 +14,7 @@ from .model import model, FREE_SPACE_CLEARANCE_M
 W_TASK_FINITE_CAP = 1.0
 from .mpcc_model import reset_warm_start
 from .params import SteeringModelInput, BumpParams, EnvParams, TunnelInfo
-from .reference_path import ReferencePath, generate_optimal_reference_path
+from .reference_path import ReferencePath, generate_optimal_reference_path, densify_polyline
 from .noise import single_step_motor_and_device_noise
 from .constraints import ConstraintConfig, ConstraintRegion, ConstraintType, PathConstraint, RectangleConstraint, PolygonConstraint
 from .constraint_utils import parse_constraints_from_json, convert_constraints_to_corridor_bounds
@@ -231,6 +231,9 @@ class CursorSimulator:
         # Turning-time deadline (s per radian of turning inside the lead); 0 = off.
         self.plan_turn_time_s = float(config.get('plan_turn_time_s', 0.0))
         self.plan_turn_width_exp = float(config.get('plan_turn_width_exp', 0.0))
+        # Single plan per fixation with a pace-holding tail (item-4 ablation of the
+        # motor-replan loop): use with motor_period_s = 0.
+        self.anchor_tail_pace = bool(config.get('anchor_tail_pace', False))
         # Trial abort on leaving the tunnel by more than this margin (m); the
         # steering experiment restarts such trials. None = never abort.
         self.abort_on_breach_m = config.get('abort_on_breach_m', None)
@@ -436,14 +439,13 @@ class CursorSimulator:
 
             rp = self.reference_path_params
             w_cut                = rp['w_cut']
-            w_suppress           = rp['w_suppress']
             w_width_exp          = rp['w_width_exp']
-            cut_window_frac      = rp['cut_window_frac']
+            w_center             = rp.get('w_center', 1.0)
             global_clearance_ref = rp['global_clearance_ref']
 
             # Cache centerline spline — reused later for curvature rate profile
             centerline_corridor_bounds = None
-            centerline_spline = ReferencePath(waypoints_norm, s=0.0, k=3)
+            centerline_spline = ReferencePath(densify_polyline(waypoints_norm), s=0.0, k=3)
             if constraint_config is not None:
                 centerline_corridor_bounds = convert_constraints_to_corridor_bounds(
                     constraint_config,
@@ -457,9 +459,8 @@ class CursorSimulator:
                 margin=self.planner_margin,
                 num_knots=None,
                 w_cut=w_cut,
-                w_suppress=w_suppress,
                 w_width_exp=w_width_exp,
-                cut_window_frac=cut_window_frac,
+                w_center=w_center,
                 global_clearance_ref=global_clearance_ref,
                 cartesian_constraints=cartesian_regions if cartesian_regions else None,
                 corridor_bounds=centerline_corridor_bounds,
@@ -823,6 +824,7 @@ class CursorSimulator:
                 model_input.anchor_s = (anchor_solve_s if (self.anchor_drive and anchor_solve_s is not None)
                                         else (anchor_s if self.anchor_drive else None))
                 model_input.deadline_steps = n_base
+                model_input.anchor_pace = (float(fix['pace']) if (self.anchor_tail_pace and fix is not None) else 0.0)
                 model_input.safety_steps = tau_steps if (self.anchor_drive and self.coast_safety) else 0
 
                 cursor_info, plan_debug = model(model_input)

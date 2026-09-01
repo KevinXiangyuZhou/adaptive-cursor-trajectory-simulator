@@ -113,7 +113,8 @@ def model(model_input: SteeringModelInput):
         # speed (gentle floor; re-linearised to self-consistency inside).
         s_sched0 = s0_init + max(speed_now, 0.05) * interval * np.arange(1, pred_horizon + 1)
         anchor = (float(np.clip(anchor_s, 0.0, ref_path.total_length)), k_deadline, s_sched0,
-                  int(getattr(model_input, 'safety_steps', 0) or 0))
+                  int(getattr(model_input, 'safety_steps', 0) or 0),
+                  float(getattr(model_input, 'anchor_pace', 0.0) or 0.0))
     else:
         speed_profile = speed_model.compute_speed_profile(
             s_estimated, clearance_at_s, kappa_at_s, dkappa_at_s,

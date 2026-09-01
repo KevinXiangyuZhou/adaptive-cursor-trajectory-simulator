@@ -110,8 +110,13 @@ def main():
     def eval_raw(vec, data):
         return fsm._eval_ref_path_spatial(vec, data, geometry)
 
-    base = json.load(open(HERE / "results" / f"{a.pid}_anchor_config_S9c_s42.json"))
-    init_src = json.loads(a.init_params) if a.init_params else base["reference_path"]
+    base_path = HERE / "results" / f"{a.pid}_anchor_config_S9c_s42.json"
+    if base_path.exists():
+        base = json.load(open(base_path))
+    else:   # participant without an anchor config yet: start from the aug-26 GAM config's route params
+        base = json.load(open(HERE.parents[1] / "model_fitting-8-26-26-1" / f"{a.pid}_gam_config_s42.json"))
+    init_src = dict(json.loads(a.init_params) if a.init_params else base["reference_path"])
+    init_src.setdefault("w_center", 1.0)
     init = {s["name"]: init_src[s["name"]] for s in fsm.REF_PATH_PARAM_SPEC}
     x0 = fsm.encode(init, fsm.REF_PATH_PARAM_SPEC)
     best_loss = eval_norm(x0, tun_train); best_x = np.array(x0, dtype=float)

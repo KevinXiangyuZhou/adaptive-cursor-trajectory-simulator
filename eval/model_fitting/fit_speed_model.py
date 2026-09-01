@@ -80,7 +80,7 @@ for p in (PROJECT_ROOT, PROJECT_ROOT / "hcs_package" / "src", PROJECT_ROOT / "ev
 import run_eval as em  # eval/eval-main/run_eval.py: data loading, task builders, alignment  # noqa: E402
 from hcs_package.cursor_simulator import CursorSimulator  # noqa: E402
 from hcs_package.speed_model import GAMSpeedModel  # noqa: E402
-from hcs_package.reference_path import ReferencePath, generate_optimal_reference_path  # noqa: E402
+from hcs_package.reference_path import ReferencePath, generate_optimal_reference_path, densify_polyline  # noqa: E402
 from hcs_package.constraints import PathConstraint, RectangleConstraint, PolygonConstraint  # noqa: E402
 from hcs_package.constraint_utils import parse_constraints_from_json, convert_constraints_to_corridor_bounds  # noqa: E402
 from utils.stats import (  # noqa: E402
@@ -114,9 +114,8 @@ POINT_TEST_R = {0.010, 0.020}
 
 REF_PATH_PARAM_SPEC = [
     {"name": "w_cut",                "bounds": (0.0, 1.0)},
-    {"name": "w_suppress",           "bounds": (0.0, 2.0)},
     {"name": "w_width_exp",          "bounds": (0.0, 3.0)},
-    {"name": "cut_window_frac",      "bounds": (0.02, 0.20)},
+    {"name": "w_center",             "bounds": (-2.0, 3.0), "log_scale": True},
     {"name": "global_clearance_ref", "bounds": (0.005, 0.05)},
 ]
 REF_PATH_KEYS = {s["name"] for s in REF_PATH_PARAM_SPEC}
@@ -343,7 +342,7 @@ def _precompute_task_geometry(task_configs, margin=0.0):
                     cart.append(region)
         if width is None:
             width = 0.02
-        spline = ReferencePath(wp, s=0.0, k=3)
+        spline = ReferencePath(densify_polyline(wp), s=0.0, k=3)
         cb = convert_constraints_to_corridor_bounds(cc, spline, default_margin=margin) if cc is not None else None
         geometry[tid] = {"waypoints_norm": wp, "tunnel_width": width, "centerline_spline": spline,
                          "corridor_bounds": cb, "cartesian_regions": cart, "margin": margin}
@@ -353,8 +352,9 @@ def _precompute_task_geometry(task_configs, margin=0.0):
 def _build_ref_path_from_geometry(geom, rp):
     ref = generate_optimal_reference_path(
         tunnel_path=geom["waypoints_norm"], tunnel_width=geom["tunnel_width"], margin=geom["margin"],
-        w_cut=rp["w_cut"], w_suppress=rp["w_suppress"], w_width_exp=rp["w_width_exp"],
-        cut_window_frac=rp["cut_window_frac"], global_clearance_ref=rp["global_clearance_ref"],
+        w_cut=rp["w_cut"], w_width_exp=rp["w_width_exp"],
+        w_center=rp.get("w_center", 1.0),
+        global_clearance_ref=rp["global_clearance_ref"],
         cartesian_constraints=geom["cartesian_regions"] or None, corridor_bounds=geom["corridor_bounds"],
         centerline_cache=geom["centerline_spline"])
     thetas = np.linspace(0, ref.total_length, 200)
@@ -386,7 +386,7 @@ def fit_reference_path_params(train_data, task_configs, base_config, time_limit=
     print("\n--- Phase 0: reference-path params (spatial-only) ---", flush=True)
     geometry = _precompute_task_geometry(task_configs)
     rp = base_config.get("reference_path", {}); pw = base_config.get("planner_weights", {})
-    sim_defaults = {"w_cut": 0.01, "w_suppress": 0.0, "w_width_exp": 1.0, "cut_window_frac": 0.05, "global_clearance_ref": 0.025}
+    sim_defaults = {"w_cut": 0.01, "w_width_exp": 1.0, "w_center": 1.0, "global_clearance_ref": 0.025}
     init = {s["name"]: rp.get(s["name"], pw.get(s["name"], sim_defaults[s["name"]])) for s in REF_PATH_PARAM_SPEC}
     x0 = encode(init, REF_PATH_PARAM_SPEC)
     obj = lambda x: _eval_ref_path_spatial(x, train_data, geometry)
