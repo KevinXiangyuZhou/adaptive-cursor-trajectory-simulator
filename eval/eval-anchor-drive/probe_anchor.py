@@ -12,6 +12,12 @@ Usage:
   python probe_anchor.py --pids P105835 [--personas gam anchor] [--quick]
         [--override '{"planner_weights": {...}, "plan_deadline_s": 0.19}']
 """
+# BLAS threading OFF: every fit/eval worker process otherwise spawns a full set of BLAS
+# threads (12 workers x 14 threads -> load average 200-330 on 14 cores, 60x slower sims).
+import os as _os
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    _os.environ.setdefault(_v, "1")
+
 import argparse, copy, json, math, os, sys, tempfile, time
 from pathlib import Path
 import numpy as np
