@@ -282,6 +282,10 @@ class CursorSimulator:
             'w_suppress': rp_cfg.get('w_suppress', pw.get('w_suppress', 0.0)),
             'w_width_exp': rp_cfg.get('w_width_exp', pw.get('w_width_exp', 1.0)),
             'cut_window_frac': rp_cfg.get('cut_window_frac', pw.get('cut_window_frac', 0.05)),
+            # lobe extent of the min-curvature generator — was dropped by this
+            # whitelist, so every simulator route ran with the default 1.0 while
+            # Stage-1 fitted ~0.03 (sinusoid cut 3.8 vs 9.4 mm).
+            'w_center': rp_cfg.get('w_center', pw.get('w_center', 1.0)),
             'global_clearance_ref': rp_cfg.get('global_clearance_ref', pw.get('global_clearance_ref', 0.025)),
         }
 

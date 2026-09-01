@@ -415,6 +415,13 @@ def generate_optimal_reference_path(
     a = a * np.clip((np.abs(kappa_s) / k_max) / 0.05, 0.0, 1.0)   # fade through inflections
     lo = np.where(kappa_s >= 0.0, -a, 0.0)
     hi = np.where(kappa_s >= 0.0, 0.0, a)
+    import os as _os
+    if _os.environ.get('HCS_DEBUG_ROUTE'):
+        print(f"[route] L={L*1000:.0f}mm N={N} tunnel_width={tunnel_width*1000:.1f}mm margin={margin*1000:.2f}mm "
+              f"lb[min,med]={np.min(lb)*1000:.1f},{np.median(lb)*1000:.1f} ub[med,max]={np.median(ub)*1000:.1f},{np.max(ub)*1000:.1f} "
+              f"room_in[med,max]={np.median(room_in)*1000:.1f},{np.max(room_in)*1000:.1f} f_room[med]={np.median(f_room):.2f} "
+              f"a[max]={np.max(a)*1000:.1f}mm k_max={k_max:.1f} cart={'y' if cartesian_constraints else 'n'} corr={'y' if corridor_bounds is not None else 'n'} "
+              f"nwp={len(waypoints)}", flush=True)
     lo[[0, -1]] = 0.0; hi[[0, -1]] = 0.0
     hi = np.maximum(hi, lo + 1e-9)
     e_lim = np.maximum(np.maximum(-lo, hi), 1e-9)
