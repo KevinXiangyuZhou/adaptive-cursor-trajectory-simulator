@@ -1,0 +1,70 @@
+P160254: tunnel train 15 tids, test 16; pointing train 9 tids (18 rounds); deadline 0.165s
+  tunnel human-variability scales: {'lateral_rmse': 0.0038, 'speed_rmse': 0.0491, 'speed_corr': 0.5804, 'time_diff': 0.1026, 'log_time': 0.0977}
+  pointing human-variability scales: {'mt_rel': 0.179, 'speed_rmse': 0.2926, 'speed_corr': 0.1213, 'end_depth': 0.2453, 'lateral_rmse': 0.0039}
+  noise-on stability trials: 3
+
+--- anchor joint fit P160254: CMA-ES over ['jerk', 'contour', 'constraint', 'goal', 'free_velocity', 'plan_deadline_s', 'plan_vmax'] ---
+  initial loss 26.2784; 12 workers, popsize 12, budget 10800s
+  gen   1 best 23.8039 mean 27.2627 (158s)
+  gen   2 best 23.6110 mean 27.1927 (317s)
+  gen   3 best 23.6110 mean 30.5902 (494s)
+  gen   4 best 23.6110 mean 26.0432 (630s)
+  gen   5 best 23.6110 mean 25.9388 (764s)
+  gen   6 best 23.6110 mean 24.7202 (912s)
+  gen   7 best 23.4416 mean 24.1825 (1059s)
+  gen   8 best 23.4416 mean 25.3683 (1206s)
+  gen   9 best 23.4416 mean 25.6872 (1381s)
+  gen  10 best 23.2475 mean 25.2311 (1575s)
+  gen  11 best 23.2475 mean 24.0444 (1746s)
+  gen  12 best 23.2475 mean 25.9175 (1925s)
+  gen  13 best 23.0106 mean 24.8303 (2105s)
+  gen  14 best 23.0106 mean 24.6818 (2274s)
+  gen  15 best 23.0106 mean 25.6522 (2460s)
+  gen  16 best 23.0106 mean 24.1454 (2633s)
+  gen  17 best 23.0106 mean 24.0614 (2810s)
+  gen  18 best 23.0106 mean 23.6169 (2988s)
+  gen  19 best 23.0106 mean 24.8667 (3173s)
+  gen  20 best 23.0106 mean 24.4573 (3359s)
+  gen  21 best 23.0106 mean 24.2837 (3537s)
+  gen  22 best 23.0106 mean 28.0557 (3694s)
+  gen  23 best 23.0106 mean 26.6635 (3866s)
+  gen  24 best 23.0106 mean 24.6828 (4029s)
+  gen  25 best 22.9350 mean 23.8779 (4204s)
+  early stop: no >1% improvement in 12 generations
+  anchor joint fit P160254 done: 25 generations, 4204s
+    jerk            : 1e-07 -> 5.51553e-07
+    contour         : 14.8 -> 40.1003
+    constraint      : 2705 -> 1861
+    goal            : 1.27 -> 39.6271
+    free_velocity   : 0.29 -> 0.134494
+    plan_deadline_s : 0.165 -> 0.12
+    plan_vmax       : 0.5 -> 0.774288
+
+fitted: {"jerk": 5.51553439380052e-07, "contour": 40.10034257047317, "constraint": 1860.9978412179012, "goal": 39.62714273793287, "free_velocity": 0.1344942198657725, "plan_deadline_s": 0.12, "plan_vmax": 0.77428781040754}
+best joint loss 22.9350; saved /Users/xiangyz/Desktop/adaptive-cursor-trajectory-simulator/eval/eval-anchor-drive/results/P160254_anchor_config_S12_s42.json
+  tunnel human-variability scales: {'lateral_rmse': 0.0038, 'speed_rmse': 0.0491, 'speed_corr': 0.5804, 'time_diff': 0.1026, 'log_time': 0.0977}
+  pointing human-variability scales: {'mt_rel': 0.179, 'speed_rmse': 0.2926, 'speed_corr': 0.1213, 'end_depth': 0.2453, 'lateral_rmse': 0.0039}
+
+=== P160254 (C) persona=anchor  [39s]
+  tunnel train: loss 13.838 | CT ratio 0.91 | lat RMSE 4.1mm | spd corr 0.06 | timeouts 0/15
+  tunnel test : loss 12.851 | CT ratio 1.10 | lat RMSE 4.0mm | spd corr 0.03 | timeouts 0/10
+  width   loss  CTr  v_cruise  t_cross lead/v cycle
+    10mm  13.70  0.61  0.069    0.125  0.156  0.250
+    20mm   8.87  0.94  0.122    0.150  0.160  0.250
+    30mm  16.08  1.06  0.176    0.150  0.158  0.250
+    40mm  16.83  1.29  0.215    0.100  0.155  0.250
+    50mm  11.74  1.16  0.264    0.100  0.149  0.250
+  type                 loss  CTr  v_cruise  t_cross lead/v
+  ?                      8.34  0.86  0.171    0.150  0.170
+  corner                 8.23  0.88  0.176    0.100  0.139
+  gentle_sinusoidal     11.69  1.15  0.182    0.150  0.155
+  sharp_sinusoidal      12.51  0.68  0.142    0.200  0.181
+  straight              26.45  1.54  0.238    0.100  0.120
+  pointing train: loss 9.073 | MT ratio 0.94 | peak-v ratio 0.73 | timeouts 0/18
+  pointing test : loss 10.976 | MT ratio 0.98 | peak-v ratio 0.67 | timeouts 0/12
+    R= 5.0mm  MT model 0.73s human 0.77s  loss 8.32
+    R=10.0mm  MT model 0.65s human 0.64s  loss 11.57
+    R=15.0mm  MT model 0.47s human 0.48s  loss 8.98
+    R=20.0mm  MT model 0.45s human 0.46s  loss 10.38
+    R=25.0mm  MT model 0.45s human 0.50s  loss 9.92
+    Fitts MT=a+b*ID  model b=0.170 a=-0.066 | human b=0.138 a=0.070

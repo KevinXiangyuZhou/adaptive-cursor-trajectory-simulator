@@ -1,0 +1,28 @@
+P105835: reference_path params = {"w_cut": 0.30948827411426905, "w_width_exp": 0.4881118623842161, "w_center": 0.010121579799558512, "global_clearance_ref": 0.014400107460189278}
+  tid   1  sinusoidal         W= 10mm  cut  0.9/ 0.9 mm  ripple  0.0 mm  min clearance    4.1 mm
+  tid   2  sinusoidal         W= 20mm  cut  2.4/ 2.5 mm  ripple  0.5 mm  min clearance    7.5 mm
+  tid   3  sinusoidal         W= 30mm  cut  4.2/ 4.2 mm  ripple  0.9 mm  min clearance   10.8 mm
+  tid   4  sinusoidal         W= 40mm  cut  5.9/ 6.0 mm  ripple  1.2 mm  min clearance   14.0 mm
+  tid   5  sinusoidal         W= 50mm  cut  7.6/ 7.8 mm  ripple  1.6 mm  min clearance   17.2 mm
+  tid   6  corner             W= 10mm  cut  0.3/ 1.3 mm  ripple  0.0 mm  min clearance    3.0 mm
+  tid   7  corner             W= 20mm  cut  1.1/ 3.0 mm  ripple  0.0 mm  min clearance    6.7 mm
+  tid   8  corner             W= 30mm  cut  2.1/ 4.5 mm  ripple  0.0 mm  min clearance    9.6 mm
+  tid   9  corner             W= 40mm  cut  3.6/ 6.5 mm  ripple  0.0 mm  min clearance   12.7 mm
+  tid  10  corner             W= 50mm  cut  2.7/ 5.0 mm  ripple  0.0 mm  min clearance   16.5 mm
+  tid  11  straight           W= 10mm  cut  0.0/ 0.0 mm  ripple  0.0 mm  min clearance    5.0 mm
+  tid  12  straight           W= 20mm  cut  0.0/ 0.0 mm  ripple  0.0 mm  min clearance   10.0 mm
+  tid  13  straight           W= 30mm  cut  0.0/ 0.0 mm  ripple  0.0 mm  min clearance   15.0 mm
+  tid  14  straight           W= 40mm  cut  0.0/ 0.0 mm  ripple  0.0 mm  min clearance   20.0 mm
+  tid  15  straight           W= 50mm  cut  0.0/ 0.0 mm  ripple  0.0 mm  min clearance   25.0 mm
+  tid  26  gentle_sinusoidal  W= 10mm  cut  0.5/ 0.6 mm  ripple  0.1 mm  min clearance    4.4 mm
+  tid  27  gentle_sinusoidal  W= 20mm  cut  2.4/ 2.4 mm  ripple  0.5 mm  min clearance    7.5 mm
+  tid  28  gentle_sinusoidal  W= 30mm  cut  4.1/ 4.2 mm  ripple  1.0 mm  min clearance   10.8 mm
+  tid  29  gentle_sinusoidal  W= 40mm  cut  5.8/ 5.9 mm  ripple  1.4 mm  min clearance   14.0 mm
+  tid  30  gentle_sinusoidal  W= 50mm  cut  7.6/ 7.6 mm  ripple  1.6 mm  min clearance   17.3 mm
+  tid  31  sharp_sinusoidal   W= 10mm  cut  0.9/ 0.9 mm  ripple  0.0 mm  min clearance    4.1 mm
+  tid  32  sharp_sinusoidal   W= 20mm  cut  2.4/ 2.5 mm  ripple  0.0 mm  min clearance    7.5 mm
+  tid  33  sharp_sinusoidal   W= 30mm  cut  4.2/ 4.4 mm  ripple  0.3 mm  min clearance   10.6 mm
+  tid  34  sharp_sinusoidal   W= 40mm  cut  6.0/ 6.2 mm  ripple  0.7 mm  min clearance   13.8 mm
+  tid  35  sharp_sinusoidal   W= 50mm  cut  7.7/ 8.1 mm  ripple  1.1 mm  min clearance   16.9 mm
+
+saved /Users/xiangyz/Desktop/adaptive-cursor-trajectory-simulator/eval/eval-main/refpath-viz-S12-A/refpaths_P105835.pdf and refpaths_overview_P105835.png (25 steering tasks, 0 model steps run)
