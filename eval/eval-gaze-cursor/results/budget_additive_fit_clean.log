@@ -1,0 +1,65 @@
+== B: 545 events
+  width-only : D0=1.56 gamma=0.72                    log-loss 0.6592
+  additive   : D0=1.66 gamma=0.66 lam=0.283 beta=2.34  log-loss 0.6554
+    width-only: median pred/obs lead (mm) by type x width [10, 20, 30, 40, 50]
+      constrai |   20/  26 |    -/-   |   45/  57 |    -/-   |   65/  71
+      corner   |   20/  14 |   34/  30 |   45/  34 |   55/  61 |   65/  59
+      gentle_s |   20/  28 |   34/  42 |   45/  49 |   55/  54 |   65/  39
+      mid_sinu |   20/  25 |   34/  45 |   45/  47 |   55/  52 |   65/  64
+      narrow_t |   20/  37 |   34/ 234 |   45/   7 |    -/-   |   65/  50
+      sharp_si |   20/  14 |   34/  28 |   45/  41 |   55/  59 |   65/  60
+      straight |   20/  50 |   34/   7 |   45/  36 |   55/  47 |   65/  38
+      wide_to_ |   20/  20 |   34/  56 |   35/  71 |   51/  72 |    -/-  
+    additive: median pred/obs lead (mm) by type x width [10, 20, 30, 40, 50]
+      constrai |   23/  26 |    -/-   |   47/  57 |    -/-   |   66/  71
+      corner   |   23/  14 |   36/  30 |   47/  34 |   55/  61 |   66/  59
+      gentle_s |   19/  28 |   34/  42 |   45/  49 |   56/  54 |   65/  39
+      mid_sinu |   18/  25 |   34/  45 |   45/  47 |   55/  52 |   64/  64
+      narrow_t |   23/  37 |   36/ 234 |   47/   7 |    -/-   |   65/  50
+      sharp_si |   19/  14 |   33/  28 |   45/  41 |   56/  59 |   65/  60
+      straight |   23/  50 |   36/   7 |   47/  36 |   57/  47 |   66/  38
+      wide_to_ |   23/  20 |   36/  56 |   37/  71 |   53/  72 |    -/-  
+== A: 637 events
+  width-only : D0=1.40 gamma=0.13                    log-loss 0.4369
+  additive   : D0=1.44 gamma=0.08 lam=0.155 beta=1.42  log-loss 0.4310
+    width-only: median pred/obs lead (mm) by type x width [10, 20, 30, 40, 50]
+      constrai |   32/  36 |    -/-   |   37/  38 |    -/-   |   40/  33
+      corner   |   32/  28 |   35/  28 |   37/  34 |   39/  30 |   40/  50
+      gentle_s |   32/  34 |   35/  44 |   37/  43 |   39/  48 |   40/  52
+      mid_sinu |   32/  25 |   35/  30 |   37/  41 |   39/  34 |   40/  64
+      narrow_t |   32/  38 |   35/  43 |   37/  30 |    -/-   |   13/  13
+      sharp_si |   32/  26 |   35/  27 |   37/  26 |   39/  38 |   40/  45
+      straight |   32/  40 |   35/  40 |   37/  31 |   39/  40 |   40/  24
+      wide_to_ |   32/  25 |   35/  47 |   37/  52 |   39/  45 |    -/-  
+    additive: median pred/obs lead (mm) by type x width [10, 20, 30, 40, 50]
+      constrai |   35/  36 |    -/-   |   38/  38 |    -/-   |   39/  33
+      corner   |   35/  28 |   37/  28 |   38/  34 |   39/  30 |   39/  50
+      gentle_s |   32/  34 |   35/  44 |   37/  43 |   38/  48 |   39/  52
+      mid_sinu |   30/  25 |   34/  30 |   37/  41 |   38/  34 |   38/  64
+      narrow_t |   35/  38 |   37/  43 |   38/  30 |    -/-   |   13/  13
+      sharp_si |   32/  26 |   34/  27 |   37/  26 |   37/  38 |   39/  45
+      straight |   35/  40 |   37/  40 |   38/  31 |   39/  40 |   39/  24
+      wide_to_ |   35/  25 |   37/  47 |   38/  52 |   39/  45 |    -/-  
+== C: 552 events
+  width-only : D0=1.69 gamma=0.24                    log-loss 0.4258
+  additive   : D0=1.72 gamma=0.24 lam=0.131 beta=1.96  log-loss 0.4214
+    width-only: median pred/obs lead (mm) by type x width [10, 20, 30, 40, 50]
+      constrai |   35/  37 |    -/-   |   46/  32 |    -/-   |   51/  33
+      corner   |   35/  26 |   41/  41 |   46/  37 |   49/  47 |   51/  54
+      gentle_s |   35/  45 |   41/  36 |   46/  51 |   49/ 127 |   51/  48
+      mid_sinu |   35/  46 |   41/  42 |   46/  52 |   49/  62 |   51/  41
+      narrow_t |   35/  38 |   41/  54 |   46/  35 |    -/-   |   35/  24
+      sharp_si |   35/  52 |   41/  36 |   46/  31 |   49/  46 |   51/  63
+      straight |   35/  29 |   41/  32 |   35/  28 |   49/  42 |   51/  89
+      wide_to_ |   35/  32 |   41/  46 |   46/  62 |   44/  37 |    -/-  
+    additive: median pred/obs lead (mm) by type x width [10, 20, 30, 40, 50]
+      constrai |   36/  37 |    -/-   |   46/  32 |    -/-   |   52/  33
+      corner   |   36/  26 |   42/  41 |   46/  37 |   50/  47 |   52/  54
+      gentle_s |   32/  45 |   41/  36 |   46/  51 |   49/ 127 |   52/  48
+      mid_sinu |   31/  46 |   40/  42 |   46/  52 |   49/  62 |   52/  41
+      narrow_t |   36/  38 |   42/  54 |   46/  35 |    -/-   |   35/  24
+      sharp_si |   30/  52 |   40/  36 |   45/  31 |   49/  46 |   52/  63
+      straight |   36/  29 |   42/  32 |   35/  28 |   50/  42 |   52/  89
+      wide_to_ |   36/  32 |   42/  46 |   46/  62 |   45/  37 |    -/-  
+saved results/budget_additive_fit_clean.json
+DONE
