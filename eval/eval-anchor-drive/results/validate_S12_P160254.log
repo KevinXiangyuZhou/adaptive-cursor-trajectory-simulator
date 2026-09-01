@@ -1,0 +1,7 @@
+
+P160254 (C) — full trial sets, corrected geometry, same build
+aug-26 GAM   tunnel  11.25/ 11.55 CTr 0.84/0.93 spdcorr 0.36 | pointing   6.80/  9.24 MTr 0.95/0.98
+   by type: straig 1.07  corner 0.87  gentle 1.15  sharp_ 0.59 | by width: 10:0.67 20:0.79 30:0.85 40:1.09 50:1.04
+anchor S12   tunnel  13.84/ 12.85 CTr 0.91/1.10 spdcorr 0.06 | pointing   9.07/ 10.98 MTr 0.94/0.98 | Fitts b 0.330 R² 0.66 (hum 0.138) | steering b 0.127 (hum 0.305) CTr 0.95
+   by type: straig 1.54  corner 0.88  gentle 1.15  sharp_ 0.68 | by width: 10:0.61 20:0.94 30:1.06 40:1.29 50:1.16
+   gaze: cycle 0.25s (hum 0.38) arrival/early/exh 0.80/0.01/0.19 | lead mm {0.01: 9.0, 0.02: 15.0, 0.03: 20.0, 0.04: 26.0, 0.05: 30.0} (hum 16/23/34/40/46) | lead/v {'corner': 0.1, 'gentle_sinusoidal': 0.11, 'sharp_sinusoidal': 0.13} (hum .18/.22/.22/.25)

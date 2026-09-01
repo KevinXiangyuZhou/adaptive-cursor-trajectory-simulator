@@ -725,3 +725,29 @@ sparse bounded least squares (~60 ms/path). Parameters per participant: w_cut, w
 (lobe extent), global_clearance_ref (w_suppress/cut_window_frac dropped). No bumps/loops by
 construction; all 25 routes in-corridor for A and B with the old parameters. Stage-1 refits (cutmatch)
 rerun under the new generator; all planner personas need the new routes.
+
+**S12 (B): corrected pipeline (w_center pass-through, BLAS pinned), qp3 route, single plan + pace tail,
+acc_max 4 fixed, no coast-safety; 7 fitted params.** Fitted: jerk 1.1e-7, contour 4.8, constraint 103,
+goal 1.89, damping 0.23, T0 0.15, v_max 0.48; joint loss 13.22 (15 gens). Strategy (noise on): corner20
+3.0/4.6 dip 0.48 (human 2.8/6.4, 0.17); corner40 3.8/6.6 dip 0.66 (human 4.3/6.3, 0.65); sinus 8.2/9.6
+(8.1/12.4); gentle 8.9/11.4 (12.3/15.6) — cut depths human-scale at both corner widths and sinusoids.
+Validation: tunnel 7.19/6.39, CT 1.17/1.15 (straight 1.81, widths 10–30 mm 1.2–1.3×), steering b 0.172
+(human 0.184), gaze cycle 0.35 s 85 % arrival, pointing 6.61/7.52. Smoothness: corner40 HF lateral RMS
+1.8–2.0 mm (human 1.2–2.0), corner20 0.9–1.4 (human 0.6–0.7). Open: overall pace (+15 %), corner-20
+apex dip, gentle-50 depth. A and C fits/evals in progress.
+**S12 (A):** fitted jerk 4.1e-7, contour 26, constraint 660, goal 4.0, damping 0.31, T0 0.17, v_max 0.76;
+loss 15.59 (S9c 16.26). Strategy (noise on): corner20 1.9/3.6 dip **0.15 (human 0.15)**; corner40 4.7/7.5
+dip 0.43 (human 3.3/6.4, 0.13); sinus 7.7 (6.4); gentle 8.1 (8.1). Validation: tunnel 8.53/6.06,
+CT by width 0.58/0.90/1.10/1.08/1.12, Fitts b 0.143 (human 0.138), steering b 0.158 (human 0.369),
+gaze cycle 0.35 s 84 % arrival, leads 10–30 mm (human 16–46). Open for A: 10 mm tunnels too fast,
+corner-40 apex dip, steering-law slope.
+**S12 (C, P160254):** fitted jerk 5.5e-7, contour 40, constraint 1861, goal 39.6, damping 0.13, T0 0.12,
+v_max 0.77; loss 22.94. Evaluation pending.
+**S12 (C) evaluation:** strategy corner20 2.4/4.4 dip 0.32 (human 3.0/5.8, 0.16); corner40 5.1/6.9 dip 0.47
+(human 2.8/5.0, 0.50); sinus 13.3/14.4 (13.2/16.6); gentle 12.3/13.6 (13.7/18.2). Validation: tunnel
+13.84/12.85 (GAM-era scale for C), CT 0.91/1.10, by width 0.61/0.94/1.06/1.29/1.16, straight 1.54,
+Fitts b 0.330 (human 0.138), steering b 0.127 (human 0.305), gaze cycle 0.25 s (human 0.38) 80 %
+arrival, leads 9–30 mm (human 16–46). C's routes match its deep sinusoid cutting; corners over-cut at
+40 mm and the leads are short — C's gaze constants (D0 0.99, γ 0.73) deserve a re-check.
+Figure-3 overlays for S12: results/fig3_overlays_S12.png. All S12 outputs: eval-main-S12-{A,B,C},
+model-gaze-lead-S12-{A,B,C}, refpath-viz-S12-{A,B,C}, jiggle_diag_S12_{A,B,C}.png, strategy_S12_*.log.
