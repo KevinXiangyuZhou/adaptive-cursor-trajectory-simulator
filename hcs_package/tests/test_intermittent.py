@@ -1,10 +1,9 @@
 """Tests for the difficulty-budget horizon and intermittent replan scheduler.
 
-The backward-compatibility guarantee (horizon_mode="fixed" +
-replan_mode="every_step" reproduces the pre-module simulator bit-for-bit) was
-verified against git HEAD via trajectory fingerprints; the tests here cover
-the module math, the trigger state machine, and the simulator-level behavior
-of the new modes.
+The simulator-level tests run the anchor-drive model (the only model since
+the s14-variant-graveyard prune) on the built-in office_worker persona
+(S14 base); the module tests cover the budget math and the trigger state
+machine directly.
 """
 
 import json
@@ -50,10 +49,10 @@ def test_budget_anchor_narrower_is_shorter():
     assert h_narrow == pytest.approx(1.4 * 0.01, rel=1e-3)
 
 
-def test_budget_density_is_width_only():
-    # the density has NO curvature term (removed 2026-08-24): the anchor on
-    # a uniform corridor depends only on width, and corner dwell emerges
-    # from the apex slowdown, not from a shorter corner lead
+def test_budget_density_is_width_only_by_default():
+    # with lam=0 (the default) the density has no curvature term: the anchor
+    # on a uniform corridor depends only on width; the additive lam|kappa|
+    # toll is opt-in (fitted per participant in the S14 line)
     n = 2001
     s = np.linspace(0.0, 2.0, n)
     kappa_free = DifficultyBudgetHorizon(
@@ -226,14 +225,15 @@ def test_warm_start_survives_horizon_change():
 
     ref = ReferencePath([(0.0, 0.0), (0.2, 0.0)], s=0.0, k=1)
     state = [0.0, 0.0, 0.05, 0.0, 0.0, 0.0, 0.0]
-    weights = {"jerk": 1.2e-6, "progress": 1e-7, "contour": 20, "lag": 0.05}
-    limits = {"acc_max": 100.0}
+    weights = {"jerk": 1.2e-6, "contour": 20, "lag_anchor": 2000.0,
+               "goal": 1.0, "free_velocity": 0.1}
 
     reset_warm_start()
     for n in (10, 6, 14):  # shrink then grow the horizon
+        s_sched = 0.05 * 0.05 * np.arange(1, n + 1)
         controls, info = generate_mpcc(
-            ref, state, n, 0.05, weights, limits,
-            speed_profile=np.full(n, 0.1), desired_speed=0.1,
+            ref, state, n, 0.05, weights,
+            anchor_s=0.05, k_deadline=n - 1, s_schedule=s_sched,
             corridor_bounds=(0.02, 0.02), warm_shift=2)
         assert controls.shape == (n, 3)
         assert np.all(np.isfinite(controls))
@@ -244,7 +244,6 @@ def test_warm_start_survives_horizon_change():
 def _make_sim(overrides, seed=11):
     from hcs_package.cursor_simulator import CursorSimulator
     cfg = json.load(open(CONFIG_DIR / "office_worker.json"))
-    cfg["speed_model"]["path"] = str(CONFIG_DIR / "population_gam.pkl")
     cfg["random_seed"] = seed
     cfg.update(overrides)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
@@ -267,7 +266,7 @@ def sinusoidal_task():
 
 
 def test_sim_every_step_solves_each_step(sinusoidal_task):
-    sim = _make_sim({})
+    sim = _make_sim({"replan_mode": "every_step"})
     sim.generate_trajectory_with_waypoints(
         task_file=sinusoidal_task, max_steps=120, target_radius=0.015)
     d = sim.last_diagnostics
@@ -283,13 +282,16 @@ def test_sim_intermittent_replans_sparsely(sinusoidal_task):
     assert d["n_solves"] <= d["n_steps_executed"] / 3
     cycles = np.diff([e["t"] for e in d["replan_events"]])
     assert np.median(cycles) >= 0.2  # plan-execute cycles, not per-step
-    # cursor keeps moving between solves
-    assert d["n_steps_executed"] > 50
+    # cursor keeps moving between solves (S14 persona crosses the tunnel in
+    # ~45 steps; the guard is against instant/stalled termination)
+    assert d["n_steps_executed"] > 30
 
 
 def test_sim_intermittent_noiseless_arrives_at_anchor(sinusoidal_task):
     # deterministic execution follows the plan exactly, so every non-final
-    # cycle should end at/past its anchor (arrival-triggered, not exhausted)
+    # cycle should end at/past its anchor (arrival-triggered, not exhausted);
+    # under arrival_mode "distance" (S14 base) arrival fires within the local
+    # room of the anchor, so allow that tolerance on the crossing check
     sim = _make_sim({"replan_mode": "intermittent", "add_noise": False})
     sim.generate_trajectory_with_waypoints(
         task_file=sinusoidal_task, max_steps=300, target_radius=0.015)
@@ -300,7 +302,8 @@ def test_sim_intermittent_noiseless_arrives_at_anchor(sinusoidal_task):
     assert len(arrival) >= 0.6 * len(non_init)
     for prev, nxt in zip(ev[:-1], ev[1:]):
         if nxt["trigger"] == "arrival+latency":
-            assert nxt["theta"] >= prev["anchor"] - 1e-9
+            tol = prev.get("arrival_tol") or 0.0
+            assert nxt["theta"] >= prev["anchor"] - tol - 1e-9
 
 
 def test_sim_budget_horizon_adapts_to_width():
@@ -316,8 +319,7 @@ def test_sim_budget_horizon_adapts_to_width():
         task = generate_task_config(env, include_constraints=True)
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump(task, f)
-        sim = _make_sim({"horizon_mode": "budget",
-                         "replan_mode": "intermittent"})
+        sim = _make_sim({})
         sim.generate_trajectory_with_waypoints(
             task_file=f.name, max_steps=300, target_radius=width / 2)
         ev = sim.last_diagnostics["replan_events"]
@@ -329,7 +331,7 @@ def test_sim_budget_horizon_adapts_to_width():
 
 def test_sim_budget_every_step_matches_baseline_shape(sinusoidal_task):
     # budget + every_step: solves each step, but with adaptive horizons
-    sim = _make_sim({"horizon_mode": "budget"})
+    sim = _make_sim({"replan_mode": "every_step"})
     sim.generate_trajectory_with_waypoints(
         task_file=sinusoidal_task, max_steps=120, target_radius=0.015)
     d = sim.last_diagnostics
@@ -341,9 +343,8 @@ def test_sim_budget_every_step_matches_baseline_shape(sinusoidal_task):
 def test_sim_budget_solve_horizon_floored_in_time(sinusoidal_task):
     # With T_min > 0 the solve horizon never collapses below ceil(T_min/dt),
     # even when the anchor caps at the path end (the old stall/timeout mode).
-    # budget dict carries a legacy "lam" key on purpose: it must be ignored
-    sim = _make_sim({"horizon_mode": "budget",
-                     "budget": {"D0": 1.66, "lam": 0.5, "T_min": 0.2}})
+    # (lam here is the live additive curvature toll, not a legacy key.)
+    sim = _make_sim({"budget": {"D0": 1.66, "lam": 0.5, "T_min": 0.2}})
     sim.generate_trajectory_with_waypoints(
         task_file=sinusoidal_task, max_steps=300, target_radius=0.015)
     d = sim.last_diagnostics

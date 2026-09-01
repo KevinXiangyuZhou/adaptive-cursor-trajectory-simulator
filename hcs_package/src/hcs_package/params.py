@@ -58,8 +58,15 @@ class SteeringModelInput:
     clearance_profile: Optional[Tuple] = None  # (s_array, clearance_array)
     curvature_rate_profile: Optional[Tuple] = None  # (s_array, rate_array)
     curvature_profile: Optional[Tuple] = None  # (s_array, kappa_array)
-    speed_model: Optional[Any] = None
-    target_radius: float = 0.01  # added as dead code for using target_radius in mpcc_model.py
+    # --- anchor-drive planning (the gaze module's per-solve decision) ---
+    # Arc length of the gaze anchor: the plan's via-point target. Required.
+    anchor_s: Optional[float] = None
+    # Horizon node count by which the plan must reach the anchor (the plan
+    # deadline); nodes beyond it are the coast/pace tail.
+    deadline_steps: Optional[int] = None
+    # Progress pace (m/s) of the pace-holding tail beyond the deadline node;
+    # 0 disables the tail.
+    anchor_pace: float = 0.0
     # Steps executed since the previous solve — the warm-start shift for the
     # MPCC. 1 for per-step replanning; >1 under intermittent replanning.
     warm_shift: int = 1

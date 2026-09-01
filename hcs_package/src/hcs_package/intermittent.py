@@ -17,14 +17,11 @@ independently switchable so each can be ablated against the baseline
    -> 0, and h runs to the path end — capped). The integral is
    dimensionless, so D0 transfers between task units and meters unchanged.
 
-   The density is WIDTH-ONLY: gaze lead shrinks with narrowing width and
-   with nothing else. An additive curvature term lam*|kappa| was removed
-   2026-08-24 — corner-dwell analysis showed humans dwell ~1.4-1.5x longer
-   when the anchor sits at a corner, and the model reproduces this
-   emergently (constant lead + apex slowdown -> longer catch-up) exactly
-   when lam=0, while a fitted lam>0 (participant B) shrank the corner lead
-   enough to cancel the effect and doubled the anchor overshoot; the CV
-   gain of lam>0 was ~1% (lookahead_floor_summary.json).
+   The density is width-led with an optional additive curvature toll
+   lam*|kappa|*(W_ref/W)^beta (lam=0 gives the pure width-only budget; the
+   S14 line fits lam>0 per participant). A multiplicative
+   curvature-weighted density variant was pruned — see git tag
+   s14-variant-graveyard.
 
    The lookahead additionally has a visuomotor-delay floor h >= v * T_min
    (refit_floor.py): human leads at the narrowest widths do NOT shrink
@@ -79,7 +76,6 @@ class DifficultyBudgetHorizon:
         gamma: float = 1.0,
         W_ref: float = 0.026,
         kappa_profile=None,
-        curvature_weighted: bool = False,
         lam: float = 0.0,
         beta: float = 1.0,
     ):
@@ -96,8 +92,7 @@ class DifficultyBudgetHorizon:
         # the human lead ~ w^0.66 scaling that a linear budget cannot. W_ref
         # (geometric mean of the studied widths) keeps the density in
         # 1/length so D0 stays dimensionless; it is not a behavioural knob —
-        # rescaling it is absorbed by D0. See the module docstring for why
-        # there is deliberately NO curvature term here.
+        # rescaling it is absorbed by D0.
         density = ((self.W_ref / width) ** self.gamma) / self.W_ref
         if lam and float(lam) > 0.0:
             # Additive curvature toll (config-gated): rho = width toll +
@@ -107,14 +102,6 @@ class DifficultyBudgetHorizon:
             # lam (m/rad-ish) and beta are gaze-calibrated per participant.
             kap_a = np.abs(np.asarray(kappa_profile, dtype=float)) if kappa_profile is not None else np.zeros_like(width)
             density = density + float(lam) * kap_a * ((self.W_ref / width) ** float(beta))
-        if curvature_weighted:
-            # Curvature-weighted difficulty: density = |kappa| (W_ref/W)^gamma
-            # (1/length; W_ref cancels in the toll's scale). A straight costs no
-            # budget -> the anchor runs to the end of the straight (ballistic);
-            # a bend costs in proportion to how tight AND how narrow; a corner
-            # is a lump of difficulty the anchor stops at (fixate the apex).
-            kap = np.abs(np.asarray(kappa_profile, dtype=float)) if kappa_profile is not None else np.zeros_like(width)
-            density = kap * ((self.W_ref / width) ** self.gamma)
 
         v_ref = np.clip(np.asarray(v_ref_profile, dtype=float), _SPEED_FLOOR, None)
 

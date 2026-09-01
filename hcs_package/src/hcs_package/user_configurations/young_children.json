@@ -1,22 +1,50 @@
 {
-  "_description": "Young children \u2014 short planning horizon, small forearm, high motor noise, weak awareness, underdeveloped motor control",
+  "_description": "Young children — high noise, short arm (anchor-drive S14 base; persona nc/forearm carried over from the GAM-era fit, anchor-drive refit pending)",
   "Tp": 0.05,
   "Th": 0.25,
+  "planner_weights": {
+    "jerk": 3.5972845308941953e-07,
+    "constraint": 13.940680489040078,
+    "contour": 5.122455441436621,
+    "desired_speed": 0.2,
+    "goal": 1.000337616451122,
+    "free_velocity": 0.31585147585517287,
+    "lag_anchor": 2000.0,
+    "acc_max": 4.0
+  },
+  "speed_model": {
+    "type": "none"
+  },
+  "horizon_mode": "budget",
+  "replan_mode": "intermittent",
+  "budget": {
+    "D0": 1.657,
+    "T_min": 0.1,
+    "gamma": 0.657,
+    "W_ref": 0.026,
+    "lam": 0.2832,
+    "beta": 2.337
+  },
+  "replan_latency_s": 0.1901,
+  "replan_latency_cv": 0.7633,
+  "replan_deviation_frac": 0.3,
+  "reference_path": {
+    "w_cut": 0.3367214340332282,
+    "w_width_exp": 0.00039204398988715024,
+    "w_center": 0.01002787978319478,
+    "global_clearance_ref": 0.0152937958468396
+  },
+  "add_noise": true,
+  "plan_deadline_s": 0.147,
+  "plan_vmax": 0.6020310062823898,
+  "arrival_mode": "distance",
+  "anchor_lead_floor": true,
+  "anchor_tail_pace": true,
+  "plan_turn_time_s": 0.2,
+  "plan_turn_width_exp": 1.0,
   "nc": [
     0.36,
     0.036
   ],
-  "forearm": 0.22,
-  "planner_weights": {
-    "jerk": 3e-07,
-    "progress": 3e-08,
-    "constraint": 20,
-    "contour": 1,
-    "lag": 0.5,
-    "desired_speed": 0.18
-  },
-  "speed_model": {
-    "type": "gam",
-    "path": "population_gam.pkl"
-  }
+  "forearm": 0.22
 }
