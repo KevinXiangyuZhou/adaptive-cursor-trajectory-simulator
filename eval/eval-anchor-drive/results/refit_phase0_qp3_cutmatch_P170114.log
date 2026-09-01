@@ -1,0 +1,20 @@
+P170114: 15 train / 16 test tids; per-trial human scales (mm): {1: 2.1, 2: 3.1, 3: 4.9, 4: 4.2, 5: 5.3, 6: 2.1, 7: 3.4, 8: 6.8, 9: 8.1, 10: 5.2, 11: 3.3, 12: 1.5, 13: 6.0, 14: 6.2, 15: 6.6, 26: 1.5, 27: 3.7, 28: 7.0, 29: 7.2, 30: 7.5, 31: 2.0, 32: 4.0, 33: 10.0, 34: 5.7, 35: 9.7, 36: 1.5, 37: 2.3, 38: 2.6, 39: 2.6, 40: 2.1, 41: 1.5}
+  initial normalised loss 0.0042  params {"w_cut": 0.3991, "w_width_exp": 0.0958, "w_center": 0.0345, "global_clearance_ref": 0.0465}
+  gen   1 best 0.0042 mean 0.0056 (33s)
+  gen   2 best 0.0041 mean 0.0056 (66s)
+  gen   3 best 0.0041 mean 0.0054 (99s)
+  gen   5 best 0.0041 mean 0.0049 (164s)
+  gen  10 best 0.0041 mean 0.0042 (324s)
+  gen  15 best 0.0041 mean 0.0041 (486s)
+  gen  20 best 0.0041 mean 0.0042 (644s)
+  gen  25 best 0.0041 mean 0.0041 (806s)
+  done: 28 gens; fitted {"w_cut": 0.3367, "w_width_exp": 0.0004, "w_center": 0.01, "global_clearance_ref": 0.0153}
+  aug-26: norm train 0.0042 test 0.0028 | raw train 3.88 mm test 2.80 mm
+  cornerfair: norm train 0.0041 test 0.0026 | raw train 3.84 mm test 2.78 mm
+  ref-path cut mean/p90 (mm) at high-curvature points:
+    corner20:  aug-26  2.0/ 3.5  cornerfair  1.9/ 3.5  | human  2.8/ 6.4
+    corner40:  aug-26  5.0/ 7.6  cornerfair  4.7/ 7.1  | human  4.3/ 6.3
+    corner50:  aug-26  3.1/ 5.1  cornerfair  3.1/ 5.1  | human  5.6/ 9.5
+    sinuso50:  aug-26  9.4/ 9.6  cornerfair  8.5/ 8.7  | human  8.1/12.4
+    gentle50:  aug-26  9.4/ 9.4  cornerfair  8.5/ 8.5  | human 12.3/15.6
+  saved /Users/xiangyz/Desktop/adaptive-cursor-trajectory-simulator/eval/eval-anchor-drive/results/P170114_refpath_qp3_cutmatch.json

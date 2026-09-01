@@ -1,0 +1,13 @@
+{
+  "pid": "P105835",
+  "fitted": {
+    "w_cut": 0.30948827411426905,
+    "w_width_exp": 0.4881118623842161,
+    "w_center": 0.010121579799558512,
+    "global_clearance_ref": 0.014400107460189278
+  },
+  "norm_loss_train": 0.00309653389345802,
+  "seed": 42,
+  "loss_kind": "cutmatch",
+  "_description": "Phase-0 refit; loss=cutmatch"
+}
