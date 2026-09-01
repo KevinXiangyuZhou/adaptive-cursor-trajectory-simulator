@@ -1,24 +1,24 @@
 """Playwright-compatible cursor simulator for generating human-like trajectories."""
 
 import json
-import os
 import numpy as np
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any, Union
-from .model import model, FREE_SPACE_CLEARANCE_M
+from .model import FREE_SPACE_CLEARANCE_M
 
 # Finite stand-in for "no constraint" when a consumer needs a finite number
 # (interpolation). Purely numerical: the free-space mask (threshold
 # FREE_SPACE_CLEARANCE_M) is insensitive to anything this large.
 W_TASK_FINITE_CAP = 1.0
 from .mpcc_model import reset_warm_start
-from .params import SteeringModelInput, BumpParams, EnvParams, TunnelInfo
 from .reference_path import ReferencePath, generate_optimal_reference_path, densify_polyline
 from .noise import single_step_motor_and_device_noise
 from .constraints import ConstraintConfig, ConstraintRegion, ConstraintType, PathConstraint, RectangleConstraint, PolygonConstraint
 from .constraint_utils import parse_constraints_from_json, convert_constraints_to_corridor_bounds
 from .adapt import compute_clearance_profile
-from .intermittent import DifficultyBudgetHorizon, ReplanEvent, ReplanScheduler
+from .intermittent import DifficultyBudgetHorizon, ReplanScheduler
+from .gaze_module import GazeModule
+from .motor_module import MotorModule
 
 #imports for baseline
 from .baseline_model import generate_baseline_mpc
@@ -520,9 +520,37 @@ class CursorSimulator:
             min_open_loop_steps=max(0, int(round(self.min_open_loop_s / self.interval))),
             rng=self._replan_rng,
         )
-        plan = None            # planned velocity/displacement sequences of the current solve
-        theta_track = 0.0      # warm guess for arc-length projection
-        fix = None             # current fixation: dict(t0, s0, pace)
+        # The paper's two modules: the gaze module decides WHERE the anchor
+        # sits and WHEN to replan; the motor module solves the plan's SHAPE.
+        gaze = GazeModule(
+            reference_path, budget_horizon, scheduler,
+            clearance_profile, curvature_profile,
+            interval=self.interval, tau_steps=tau_steps,
+            target_radius=float(target_radius),
+            replan_mode=self.replan_mode, arrival_mode=self.arrival_mode,
+            deviation_frac=self.replan_deviation_frac,
+            anchor_lead_floor=self.anchor_lead_floor,
+            plan_deadline_s=self.plan_deadline_s, plan_vmax=self.plan_vmax,
+            plan_turn_time_s=self.plan_turn_time_s,
+            plan_turn_width_exp=self.plan_turn_width_exp,
+            budget_W_ref=self.budget_W_ref,
+            acc_max=float(self.planner_weights.get('acc_max', 0.0) or 0.0),
+            horizon_min_steps=self.horizon_min_steps,
+            horizon_max_steps=self.horizon_max_steps,
+        )
+        motor = MotorModule(
+            reference_path,
+            interval=self.interval, tp=self.tp, nc=self.nc,
+            planner_weights=self.planner_weights,
+            planner_margin=self.planner_margin,
+            tunnel_path=waypoints_norm, tunnel_width=tunnel_width,
+            corridor_bounds=corridor_bounds,
+            cartesian_regions=cartesian_regions,
+            clearance_profile=clearance_profile,
+            curvature_profile=curvature_profile,
+            target_radius=float(target_radius),
+            anchor_tail_pace=self.anchor_tail_pace,
+        )
 
         # Termination: DWELL_S of consecutive samples inside the target
         # (stands in for the human click latency; the pointing data show
@@ -539,208 +567,19 @@ class CursorSimulator:
             else:
                 dwell_steps = 0
 
-            theta_now = None
-            if scheduler.wants_theta:
-                theta_now = float(reference_path.find_closest_theta(
-                    cursor_pos, initial_guess=theta_track))
-                theta_track = theta_now
-            # Early-replan interrupt: realised drift from the open-loop plan,
-            # scaled by the usable width at the last solve. Zero until at
-            # least one step of the plan has executed (the plan starts at the
-            # realised cursor state, and noiseless execution tracks exactly).
-            deviation_ratio = None
-            if (scheduler.mode == 'intermittent'
-                    and self.replan_deviation_frac > 0.0
-                    and plan is not None and scheduler.plan_idx >= 2
-                    and plan.get('dev_scale')):
-                k_exec = min(scheduler.plan_idx - 2, plan['n_steps'] - 1)
-                dev = float(np.hypot(
-                    cursor_pos[0] - plan['pos_x'][k_exec],
-                    cursor_pos[1] - plan['pos_y'][k_exec]))
-                deviation_ratio = dev / plan['dev_scale']
-            theta_for_trigger = theta_now if theta_now is not None else -np.inf
-            if (self.arrival_mode == 'distance' and plan is not None
-                    and plan.get('anchor_xy') is not None and scheduler.wants_theta):
-                d_anchor = float(np.hypot(cursor_pos[0] - plan['anchor_xy'][0],
-                                          cursor_pos[1] - plan['anchor_xy'][1]))
-                # Arrival = reached OR passed the fixation point: within the local
-                # room of the anchor point, or progress beyond its arc position.
-                # (Distance alone is missed at speed — 13 mm/step at 0.26 m/s skips
-                # a 5 mm window — leaving the fixation alive and the schedule
-                # sliding ahead; progress alone stalls in a corner's wedge.)
-                passed = (theta_now is not None and plan.get('anchor_s') is not None
-                          and theta_now >= plan['anchor_s'] - 1e-9)
-                theta_for_trigger = np.inf if (d_anchor <= plan['arrival_tol'] or passed) else -np.inf
-            trigger = scheduler.needs_replan(theta_for_trigger, deviation_ratio=deviation_ratio)
-
+            trigger = gaze.check_trigger(cursor_pos, motor.plan)
             if trigger is not None:
-                theta0 = float(reference_path.find_closest_theta(
-                    cursor_pos, initial_guess=theta_track))
-                theta_track = theta0
-                anchor_solve_s = None
-                s_from = min(theta0, float(reference_path.total_length))
-                anchor_s = budget_horizon.anchor(
-                    s_from, v_now=float(np.hypot(cursor_vel[0], cursor_vel[1])))
-                if self.anchor_lead_floor and clearance_profile is not None:
-                    # Lead floor BEFORE the deadline: if the floor extends
-                    # the anchor, the deadline must stretch with it
-                    # (review finding: floor applied after n_base made the
-                    # via-point demand the extended lead in the old time).
-                    s_cl0, c_cl0 = clearance_profile
-                    w_here0 = float(np.interp(theta0, s_cl0, c_cl0))
-                    room0 = 0.5 * w_here0 if w_here0 < FREE_SPACE_CLEARANCE_M else float(target_radius)
-                    anchor_s = min(max(float(anchor_s), theta0 + room0), float(reference_path.total_length))
-                # Fixed plan duration: speed = lookahead / deadline.
-                # Round half-up with a float guard (0.175/0.05 = 3.4999.. -> 4).
-                lead_now = max(0.0, float(anchor_s) - theta0)
-                t_plan = max(self.plan_deadline_s, lead_now / max(self.plan_vmax, 1e-6))
-                # Turning-time mode: t_plan = max(T0, lead/v_max) + tau*theta*(W_ref/W)^beta,
-                # T0 = plan_deadline_s (gaze: straight-segment time-to-anchor, ~0.1-0.2 s).
-                # The numerical horizon floor (3 nodes) is separate, see below.
-                if self.plan_turn_time_s > 0.0 and curvature_profile is not None:
-                    # Turning-time deadline (config-gated): the planned
-                    # time-to-anchor grows with the turning angle inside
-                    # the lead, tau_turn seconds per radian. Gaze data:
-                    # the lead is width-only and crosses corners, while
-                    # the time to reach the anchor lengthens in bends —
-                    # one slower movement, not a shorter look-ahead.
-                    s_kp, k_kp = curvature_profile
-                    s_lo, s_hi = theta0, float(anchor_s)
-                    if s_hi > s_lo + 1e-9:
-                        s_grid = np.linspace(s_lo, s_hi, max(4, int((s_hi - s_lo) / 0.001) + 2))
-                        theta_lead = float(np.trapz(np.interp(s_grid, s_kp, k_kp), s_grid))
-                        w_fac = 1.0
-                        if self.plan_turn_width_exp > 0.0 and clearance_profile is not None:
-                            # Tolerance-scaled turning time: seconds per
-                            # radian grow as the room shrinks, (W_ref/W)^beta
-                            # (gaze data: B's corner crossing 0.46 s at 20 mm
-                            # vs 0.26 s at 40-50 mm; beta = 1 fits best).
-                            s_cw, c_cw = clearance_profile
-                            w_loc = float(np.interp(theta0, s_cw, c_cw))
-                            if 0.0 < w_loc < FREE_SPACE_CLEARANCE_M:
-                                w_fac = (self.budget_W_ref / w_loc) ** self.plan_turn_width_exp
-                        t_plan += self.plan_turn_time_s * theta_lead * w_fac
-                a_max = float(self.planner_weights.get('acc_max', 0.0) or 0.0)
-                if a_max > 0.0:
-                    # ... nor faster than the bounded hand can cover the
-                    # lead from its current speed: 1/2 a t^2 + v t = h.
-                    v_now = float(np.hypot(cursor_vel[0], cursor_vel[1]))
-                    t_acc = (-v_now + np.sqrt(v_now * v_now + 2.0 * a_max * lead_now)) / a_max
-                    t_plan = max(t_plan, float(t_acc))
-                n_base = max(1, int(np.floor(t_plan / self.interval + 0.5 + 1e-9)))
-                if self.plan_turn_time_s > 0.0:
-                    # Numerical floor: >= 3 nodes (shorter horizons
-                    # destabilise the solve).
-                    n_min = 3
-                    if n_base < n_min:
-                        # Horizon floor: demand the schedule position at the
-                        # horizon end (pace unchanged), not the fixation
-                        # point itself.
-                        n_base = n_min
-                        pace0 = lead_now / max(t_plan, 1e-6)
-                        anchor_solve_s = min(theta0 + pace0 * n_base * self.interval,
-                                             float(reference_path.total_length))
-                fix = {'t0': current_time, 's0': theta0,
-                       'pace': lead_now / max(t_plan, 1e-6)}
-                if os.environ.get('HCS_DEBUG_PLAN'):
-                    print(f"[plan] t={current_time:.2f} s0={theta0*1000:.0f}mm lead={lead_now*1000:.1f}mm "
-                          f"t_plan={t_plan:.3f}s pace={fix['pace']:.3f} n_base={n_base} solve_anchor={'%.0f' % (anchor_solve_s*1000) if anchor_solve_s is not None else '-'}", flush=True)
-                anchor_s = min(float(anchor_s), float(reference_path.total_length))
-                if self.replan_mode == 'intermittent':
-                    # The plan must survive the post-arrival latency (the old
-                    # plan keeps executing past the anchor), plus the same
-                    # margin again as slack for arrival running later than the
-                    # reference-speed estimate (start-up, corners, noise).
-                    # This is plan availability, not behaviour: the replan time
-                    # is still set by arrival + tau; exhaustion only backstops.
-                    n_solve = n_base + 2 * tau_steps
-                else:
-                    n_solve = n_base
-                n_solve = int(np.clip(
-                    n_solve, self.horizon_min_steps, self.horizon_max_steps))
-
-                tunnel_path = waypoints_norm
-                model_input = SteeringModelInput(
-                    state_cog=(
-                        float(cursor_pos[0]),
-                        float(cursor_pos[1]),
-                        float(cursor_vel[0]),
-                        float(cursor_vel[1])
-                    ),
-                    bump=BumpParams(
-                        pred_horizon=n_solve,
-                        Tp=self.tp,
-                        nc=self.nc
-                    ),
-                    env=EnvParams(interval=self.interval),
-                    tunnel=TunnelInfo(
-                        tunnel_path=tunnel_path,
-                        tunnel_width=tunnel_width or 0.1,
-                        top_wall=None,
-                        bottom_wall=None
-                    ),
-                    planner_weights=self.planner_weights,
-                    planner_margin=self.planner_margin,
-                    reference_path=reference_path,
-                    current_acc=(float(cursor_acc[0]), float(cursor_acc[1])),
-                    corridor_bounds=corridor_bounds,
-                    cartesian_constraints=cartesian_regions if cartesian_regions else None,
-                    clearance_profile=clearance_profile,
-                    curvature_profile=curvature_profile,
-                    # The gaze anchor is the plan's via point at the deadline
-                    # node (n_base steps); the padded tail coasts (or holds
-                    # the fixation's pace with anchor_tail_pace).
-                    anchor_s=(anchor_solve_s if anchor_solve_s is not None else anchor_s),
-                    deadline_steps=n_base,
-                    anchor_pace=(float(fix['pace']) if self.anchor_tail_pace else 0.0),
-                    # Warm-start shift = steps executed since the previous solve.
-                    warm_shift=max(1, scheduler.plan_idx - 1),
-                )
-
-                cursor_info, plan_debug = model(model_input)
-                c_pos_dx, c_pos_dy, c_vel_x, c_vel_y = cursor_info
-                # Absolute planned positions after each step, and the
-                # deviation trigger's scale: the local usable width where the
-                # task is constrained; in free space (no walls) the task's
-                # own accuracy scale, the target diameter. If even that is
-                # free-space wide, the plan's own span (a plan that has
-                # drifted by deviation_frac of the distance it set out to
-                # cover is invalid), floored at the target diameter so
-                # terminal micro-plans keep a sane threshold.
-                w_solve = None
-                if clearance_profile is not None:
-                    s_cl, c_cl = clearance_profile
-                    w_here = float(np.interp(theta0, s_cl, c_cl))
-                    w_solve = (w_here if w_here < FREE_SPACE_CLEARANCE_M
-                               else 2.0 * target_radius)
-                dev_scale = w_solve if (w_solve and w_solve > 0) else None
-                if dev_scale is not None and dev_scale >= FREE_SPACE_CLEARANCE_M:
-                    span = float(np.hypot(np.sum(c_pos_dx), np.sum(c_pos_dy)))
-                    dev_scale = max(span, 2.0 * target_radius)
-                plan = {
-                    'anchor_xy': None, 'arrival_tol': 0.0,
-                    'c_pos_dx': c_pos_dx, 'c_pos_dy': c_pos_dy,
-                    'c_vel_x': c_vel_x, 'c_vel_y': c_vel_y,
-                    'n_steps': len(c_pos_dx),
-                    'pos_x': cursor_pos[0] + np.cumsum(c_pos_dx),
-                    'pos_y': cursor_pos[1] + np.cumsum(c_pos_dy),
-                    'dev_scale': dev_scale,
-                }
-                a_xy = reference_path(float(anchor_s))
-                plan['anchor_xy'] = (float(a_xy[0]), float(a_xy[1]))
-                plan['anchor_s'] = float(anchor_s)
-                # room at the anchor: half the local usable width, or the target radius in free space
-                tol = 0.5 * dev_scale if (dev_scale and dev_scale < FREE_SPACE_CLEARANCE_M) else float(target_radius)
-                plan['arrival_tol'] = max(float(tol), 1e-3)
-                _ev = ReplanEvent(step=step, t=current_time, theta=theta0,
-                                  anchor=anchor_s, n_steps=n_solve, trigger=trigger)
-                _ev.arrival_tol = plan.get('arrival_tol')
-                scheduler.on_replan(_ev, anchor=anchor_s, plan_len=plan['n_steps'])
+                fixation = gaze.plan_fixation(cursor_pos, cursor_vel,
+                                              current_time, trigger)
+                plan = motor.solve(cursor_pos, cursor_vel, cursor_acc,
+                                   fixation, warm_shift=gaze.warm_shift)
+                gaze.commit(step, current_time, fixation, plan)
 
             # Execute the next step of the current plan. j indexes the planned
             # velocity at the END of the step (c_vel_* start with the solve-time
             # velocity at index 0); the matching displacement is c_pos_d*[j-1].
-            j = min(scheduler.plan_idx, plan['n_steps'])
+            plan = motor.plan
+            j = min(gaze.plan_step_index, plan['n_steps'])
             c_vel_x = plan['c_vel_x']
             c_vel_y = plan['c_vel_y']
 
@@ -775,7 +614,7 @@ class CursorSimulator:
                 cursor_acc[1] = (c_vel_y[j] - c_vel_y[j - 1]) / self.interval
             cursor_vel[0] = c_vel_x_step
             cursor_vel[1] = c_vel_y_step
-            scheduler.on_step_executed()
+            gaze.on_step_executed()
 
             screen_x = cursor_pos[0] / screen_width_m * screen_width
             screen_y = cursor_pos[1] / screen_height_m * screen_height
@@ -791,7 +630,7 @@ class CursorSimulator:
                 # Trial failure: the cursor left the tunnel by more than the
                 # margin (the experiment restarts such trials). Stops the
                 # runaway sims that otherwise burn the 30 s cap.
-                th_b = float(reference_path.find_closest_theta(cursor_pos, initial_guess=theta_track))
+                th_b = float(reference_path.find_closest_theta(cursor_pos, initial_guess=gaze.theta_track))
                 s_cb, c_cb = clearance_profile
                 w_b = float(np.interp(th_b, s_cb, c_cb))
                 if 0.0 < w_b < FREE_SPACE_CLEARANCE_M:
@@ -813,13 +652,13 @@ class CursorSimulator:
             'interval': self.interval,
             'n_steps_executed': len(trajectory),
             'aborted_breach': aborted_breach,
-            'n_solves': len(scheduler.events),
+            'n_solves': len(gaze.events),
             'total_length': float(reference_path.total_length),
             'replan_events': [
                 {'step': e.step, 't': e.t, 'theta': e.theta, 'anchor': e.anchor,
                  'n_steps': e.n_steps, 'trigger': e.trigger,
                  'arrival_tol': getattr(e, 'arrival_tol', None)}
-                for e in scheduler.events
+                for e in gaze.events
             ],
         }
 

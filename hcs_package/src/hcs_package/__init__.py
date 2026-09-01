@@ -8,12 +8,17 @@ human cursor trajectories using models based on motor control and human behavior
 __version__ = "0.1.0"
 
 from .cursor_simulator import CursorSimulator
+from .gaze_module import GazeModule, Fixation
+from .motor_module import MotorModule
 from .model import model
 from .mpcc_model import reset_warm_start
 from .noise import motor_and_device_noise, single_step_motor_and_device_noise
 
 __all__ = [
     "CursorSimulator",
+    "GazeModule",
+    "Fixation",
+    "MotorModule",
     "model",
     "reset_warm_start",
     "motor_and_device_noise",
