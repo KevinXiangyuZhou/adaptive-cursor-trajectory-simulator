@@ -1,0 +1,5 @@
+A: n=535  T = 0.277 + 0.199*theta*(Wref/W)^1.5   MAD 0.1853
+B: n=479  T = 0.147 + 0.200*theta*(Wref/W)^1   MAD 0.1199
+C: n=463  T = 0.231 + 0.183*theta*(Wref/W)^1.5   MAD 0.1635
+saved results/turn_time_clean.json
+DONE
