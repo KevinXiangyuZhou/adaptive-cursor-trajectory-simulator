@@ -10,6 +10,7 @@ free_space_mask branch, the goal_precision well, coast safety) are preserved
 at git tag ``s14-variant-graveyard``.
 """
 
+import os
 import numpy as np
 from scipy.optimize import minimize
 
@@ -203,6 +204,18 @@ def generate_mpcc(
     # dependence comes from the corner-cut radius.
     acc_max_w = float(weights.get('acc_max', 0.0) or 0.0)
     w_acc = float(weights.get('acc_weight', 1e4))
+    # Chance-constraint corridor tightening (config-gated, chance_z > 0): the wall
+    # hinge activates early by the lateral scatter that along-track motor noise
+    # (nc0, the 10x channel) acquires where the tangent turns:
+    #   tighten_k = 0.5 * z * nc0 * |kappa(s_k)| * (v_k * T_ol)^2
+    # T_ol = the actual open-loop interval (replan latency). Zero on straights;
+    # binds as speed * curvature outruns the room left by execution scatter.
+    chance_z = float(weights.get('chance_z', 0.0) or 0.0)
+    chance_nc0 = float(weights.get('chance_nc0', 0.2))
+    chance_tol = float(weights.get('chance_t_ol', 0.2))
+    # Enforced as a penalty-method CONSTRAINT: its own stiff hinge (like acc_weight),
+    # not the fitted wall weight — a behavioral weight cannot enforce a constraint.
+    w_chance = float(weights.get('chance_weight', 1e4))
     w_contour = weights.get('contour', 1.0)
     # Lateral adherence ('contour') and along-path consistency ('lag_anchor')
     # are different things — the first is a steering STRATEGY (how much the
@@ -355,6 +368,16 @@ def generate_mpcc(
                 s_b = float(min(max(s_traj[k], 0.0), s_end_total))
                 w_left = b_left_in(s_b) if callable(b_left_in) else float(b_left_in)
                 w_right = b_right_in(s_b) if callable(b_right_in) else float(b_right_in)
+                if chance_z > 0.0:
+                    kap_k = abs(float(ref_path.curvature(s_b)))
+                    v_sq = float(vx[k] * vx[k] + vy[k] * vy[k])
+                    tighten = 0.5 * chance_z * chance_nc0 * kap_k * v_sq * (chance_tol ** 2)
+                    # The z-sigma scatter ellipse must FIT in the room: hinge on
+                    # (|e_c| + tighten - room). At e_c=0 this binds as soon as the
+                    # scatter alone exceeds the room, capping speed at
+                    # v <= sqrt(2*room/(z*nc0*kappa*T_ol^2)).
+                    tracking_cost += w_chance * (max(0.0, e_k[0] + tighten - w_left) ** 2
+                                                 + max(0.0, -e_k[0] + tighten - w_right) ** 2)
                 violation_left = max(0.0, e_k[0] - w_left)
                 violation_right = max(0.0, -e_k[0] - w_right)
                 tracking_cost += w_corridor * (violation_left**2 + violation_right**2)
