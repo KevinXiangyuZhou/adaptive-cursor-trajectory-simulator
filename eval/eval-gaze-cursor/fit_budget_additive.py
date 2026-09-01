@@ -79,10 +79,11 @@ def fit(ev, geoms, x0, bounds, fixed=None, time_limit=120, seed=42):
 def table(ev, geoms, params, label):
     h = predict(ev, geoms, *params)
     e = ev.copy(); e["h_pred"] = h
-    print(f"    {label}: median pred/obs lead (mm) by type x width")
-    for ty in ("straight", "corner", "mid_sinusoidal", "gentle_sinusoidal", "sharp_sinusoidal"):
-        row = f"      {ty[:8]:<8}"
-        for w in (0.01, 0.02, 0.03, 0.04, 0.05):
+    widths = sorted(w for w in e["width"].dropna().unique() if 0 < w < 0.2)
+    print(f"    {label}: median pred/obs lead (mm) by type x width {[round(w*1000) for w in widths]}")
+    for ty in sorted(t for t in e["tunnel_type"].dropna().unique() if "pointing" not in str(t)):
+        row = f"      {str(ty)[:8]:<8}"
+        for w in widths:
             g = e[(e["tunnel_type"] == ty) & (np.abs(e["width"] - w) < 1e-6)]
             row += f" | {np.median(g['h_pred'])*1000:4.0f}/{np.median(g['lead_onset'])*1000:4.0f}" if len(g) else " |    -/-  "
         print(row, flush=True)

@@ -1,0 +1,152 @@
+== p01: 387 events
+  width-only : D0=0.57 gamma=0.19                    log-loss 0.6615
+  additive   : D0=0.58 gamma=0.17 lam=0.098 beta=0.98  log-loss 0.6576
+    width-only: median pred/obs lead (mm) by type x width
+      straight |   12/   7 |    -/-   |    -/-   |    -/-   |   17/   5
+      corner   |   12/  17 |    -/-   |    -/-   |    -/-   |   17/  10
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   12/  10 |    -/-   |    -/-   |    -/-   |   17/  18
+      sharp_si |   12/  12 |    -/-   |    -/-   |    -/-   |   17/  17
+    additive: median pred/obs lead (mm) by type x width
+      straight |   13/   7 |    -/-   |    -/-   |    -/-   |   17/   5
+      corner   |   13/  17 |    -/-   |    -/-   |    -/-   |   17/  10
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   13/  10 |    -/-   |    -/-   |    -/-   |   17/  18
+      sharp_si |   12/  12 |    -/-   |    -/-   |    -/-   |   17/  17
+== p02: 229 events
+  width-only : D0=0.63 gamma=0.00                    log-loss 0.5753
+  additive   : D0=0.63 gamma=0.00 lam=0.000 beta=1.91  log-loss 0.5753
+    width-only: median pred/obs lead (mm) by type x width
+      straight |   11/   9 |    -/-   |    -/-   |    -/-   |   16/  27
+      corner   |   16/  23 |    -/-   |    -/-   |    -/-   |   16/  29
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   16/  19 |    -/-   |    -/-   |    -/-   |   16/  11
+      sharp_si |   16/  15 |    -/-   |    -/-   |    -/-   |   16/  12
+    additive: median pred/obs lead (mm) by type x width
+      straight |   11/   9 |    -/-   |    -/-   |    -/-   |   16/  27
+      corner   |   16/  23 |    -/-   |    -/-   |    -/-   |   16/  29
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   16/  19 |    -/-   |    -/-   |    -/-   |   16/  11
+      sharp_si |   16/  15 |    -/-   |    -/-   |    -/-   |   16/  12
+== p03: 294 events
+  width-only : D0=0.43 gamma=0.20                    log-loss 0.6902
+  additive   : D0=0.43 gamma=0.20 lam=0.000 beta=0.27  log-loss 0.6902
+    width-only: median pred/obs lead (mm) by type x width
+      straight |    9/  10 |    -/-   |    -/-   |    -/-   |   13/   5
+      corner   |    9/  10 |    -/-   |    -/-   |    -/-   |   13/  30
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |    7/   7 |    -/-   |    -/-   |    -/-   |   13/  20
+      sharp_si |    9/  13 |    -/-   |    -/-   |    -/-   |   13/   9
+    additive: median pred/obs lead (mm) by type x width
+      straight |    9/  10 |    -/-   |    -/-   |    -/-   |   13/   5
+      corner   |    9/  10 |    -/-   |    -/-   |    -/-   |   13/  30
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |    7/   7 |    -/-   |    -/-   |    -/-   |   13/  20
+      sharp_si |    9/  13 |    -/-   |    -/-   |    -/-   |   13/   9
+== p04: 783 events
+  width-only : D0=1.89 gamma=0.62                    log-loss 0.5861
+  additive   : D0=1.61 gamma=0.26 lam=0.078 beta=3.00  log-loss 0.5850
+    width-only: median pred/obs lead (mm) by type x width
+      straight |   27/  15 |    -/-   |    -/-   |    -/-   |   74/  31
+      corner   |   27/  22 |    -/-   |    -/-   |    -/-   |   74/  94
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   27/  29 |    -/-   |    -/-   |    -/-   |   74/  88
+      sharp_si |   27/  19 |    -/-   |    -/-   |    -/-   |   74/  80
+    additive: median pred/obs lead (mm) by type x width
+      straight |   33/  15 |    -/-   |    -/-   |    -/-   |   50/  31
+      corner   |   33/  22 |    -/-   |    -/-   |    -/-   |   50/  94
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   29/  29 |    -/-   |    -/-   |    -/-   |   49/  88
+      sharp_si |   29/  19 |    -/-   |    -/-   |    -/-   |   49/  80
+== p05: 289 events
+  width-only : D0=1.05 gamma=0.00                    log-loss 0.8507
+  additive   : D0=1.05 gamma=0.00 lam=0.000 beta=1.36  log-loss 0.8507
+    width-only: median pred/obs lead (mm) by type x width
+      straight |   16/  31 |    -/-   |    -/-   |    -/-   |    -/-  
+      corner   |   27/  31 |    -/-   |    -/-   |    -/-   |   27/  55
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   27/ 176 |    -/-   |    -/-   |    -/-   |   27/  25
+      sharp_si |   27/  63 |    -/-   |    -/-   |    -/-   |   27/  52
+    additive: median pred/obs lead (mm) by type x width
+      straight |   16/  31 |    -/-   |    -/-   |    -/-   |    -/-  
+      corner   |   27/  31 |    -/-   |    -/-   |    -/-   |   27/  55
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   27/ 176 |    -/-   |    -/-   |    -/-   |   27/  25
+      sharp_si |   27/  63 |    -/-   |    -/-   |    -/-   |   27/  52
+== p06: 297 events
+  width-only : D0=0.99 gamma=0.12                    log-loss 0.4424
+  additive   : D0=0.99 gamma=0.12 lam=0.000 beta=1.24  log-loss 0.4424
+    width-only: median pred/obs lead (mm) by type x width
+      straight |   23/  23 |    -/-   |    -/-   |    -/-   |   28/  34
+      corner   |   23/  16 |    -/-   |    -/-   |    -/-   |   28/  18
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   23/  14 |    -/-   |    -/-   |    -/-   |   28/  29
+      sharp_si |   23/  25 |    -/-   |    -/-   |    -/-   |   28/  25
+    additive: median pred/obs lead (mm) by type x width
+      straight |   23/  23 |    -/-   |    -/-   |    -/-   |   28/  34
+      corner   |   23/  16 |    -/-   |    -/-   |    -/-   |   28/  18
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   23/  14 |    -/-   |    -/-   |    -/-   |   28/  29
+      sharp_si |   23/  25 |    -/-   |    -/-   |    -/-   |   28/  25
+== p07: 250 events
+  width-only : D0=0.59 gamma=0.16                    log-loss 0.5150
+  additive   : D0=0.59 gamma=0.16 lam=0.000 beta=0.56  log-loss 0.5150
+    width-only: median pred/obs lead (mm) by type x width
+      straight |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      corner   |   13/  16 |    -/-   |    -/-   |    -/-   |   17/  18
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   13/  10 |    -/-   |    -/-   |    -/-   |   17/  11
+      sharp_si |   13/  24 |    -/-   |    -/-   |    -/-   |   17/  23
+    additive: median pred/obs lead (mm) by type x width
+      straight |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      corner   |   13/  16 |    -/-   |    -/-   |    -/-   |   17/  18
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   13/  10 |    -/-   |    -/-   |    -/-   |   17/  11
+      sharp_si |   13/  24 |    -/-   |    -/-   |    -/-   |   17/  23
+== p08: 161 events
+  width-only : D0=0.47 gamma=0.00                    log-loss 0.6973
+  additive   : D0=0.47 gamma=0.00 lam=0.000 beta=0.09  log-loss 0.6973
+    width-only: median pred/obs lead (mm) by type x width
+      straight |   12/   4 |    -/-   |    -/-   |    -/-   |    -/-  
+      corner   |   12/   5 |    -/-   |    -/-   |    -/-   |   12/  11
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   12/  13 |    -/-   |    -/-   |    -/-   |    -/-  
+      sharp_si |   12/  10 |    -/-   |    -/-   |    -/-   |   12/  20
+    additive: median pred/obs lead (mm) by type x width
+      straight |   12/   4 |    -/-   |    -/-   |    -/-   |    -/-  
+      corner   |   12/   5 |    -/-   |    -/-   |    -/-   |   12/  11
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   12/  13 |    -/-   |    -/-   |    -/-   |    -/-  
+      sharp_si |   12/  10 |    -/-   |    -/-   |    -/-   |   12/  20
+== p09: 394 events
+  width-only : D0=1.03 gamma=0.00                    log-loss 0.6071
+  additive   : D0=1.03 gamma=0.00 lam=0.000 beta=0.33  log-loss 0.6071
+    width-only: median pred/obs lead (mm) by type x width
+      straight |   27/  22 |    -/-   |    -/-   |    -/-   |   27/  41
+      corner   |   27/  36 |    -/-   |    -/-   |    -/-   |   27/  22
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   27/  31 |    -/-   |    -/-   |    -/-   |   27/  18
+      sharp_si |   27/  36 |    -/-   |    -/-   |    -/-   |   27/  28
+    additive: median pred/obs lead (mm) by type x width
+      straight |   27/  22 |    -/-   |    -/-   |    -/-   |   27/  41
+      corner   |   27/  36 |    -/-   |    -/-   |    -/-   |   27/  22
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   27/  31 |    -/-   |    -/-   |    -/-   |   27/  18
+      sharp_si |   27/  36 |    -/-   |    -/-   |    -/-   |   27/  28
+== p10: 593 events
+  width-only : D0=1.33 gamma=0.29                    log-loss 0.5463
+  additive   : D0=1.33 gamma=0.29 lam=0.003 beta=3.00  log-loss 0.5462
+    width-only: median pred/obs lead (mm) by type x width
+      straight |   26/  24 |    -/-   |    -/-   |    -/-   |   42/  13
+      corner   |   26/  24 |    -/-   |    -/-   |    -/-   |   42/  45
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   26/  30 |    -/-   |    -/-   |    -/-   |   42/  44
+      sharp_si |   26/  21 |    -/-   |    -/-   |    -/-   |   42/  56
+    additive: median pred/obs lead (mm) by type x width
+      straight |   26/  24 |    -/-   |    -/-   |    -/-   |   42/  13
+      corner   |   26/  24 |    -/-   |    -/-   |    -/-   |   42/  45
+      mid_sinu |    -/-   |    -/-   |    -/-   |    -/-   |    -/-  
+      gentle_s |   26/  30 |    -/-   |    -/-   |    -/-   |   42/  44
+      sharp_si |   26/  21 |    -/-   |    -/-   |    -/-   |   42/  56
+saved results/budget_additive_fit_p01_10p.json
+DONE
