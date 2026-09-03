@@ -33,7 +33,7 @@
   },
   "add_noise": true,
   "plan_deadline_s": 0.19,
-  "plan_vmax": 0.6020310062823898,
+  "plan_vmax": 0.66,
   "arrival_mode": "distance",
   "anchor_lead_floor": true,
   "anchor_tail_pace": true,

@@ -3,9 +3,10 @@ for tunnels AND pointing). The plan deadline is the gaze-measured time-to-
 anchor and is held fixed; the gaze budget (D0, gamma, T_min) and replan
 latency come from the Stage G base config. Fitted: jerk, contour, constraint,
 goal, D0, plan_deadline_s (free-space T0 under the finalized design —
-tunnel deadlines come from the GAM traversal time), plan_vmax. free_velocity
-was dropped 2026-09-03 with the MPCC damping term; gamma is held at the
-gaze-derived constant (0.66, from the base config) rather than fitted.
+tunnel deadlines come from the GAM traversal time). free_velocity was
+dropped 2026-09-03 with the MPCC damping term; gamma is held at the
+gaze-derived constant (0.66) and plan_vmax at the Stage-0 pooled pace
+measurement (0.66 m/s, stage0_plan_vmax.py) — both from the base config.
 
 Loss = mean tunnel loss on the training widths (fit_speed_model.tunnel_loss,
 human-variability scaled) + mean pointing loss on the training radii
@@ -44,8 +45,11 @@ ANCHOR_SPEC = [
     # intended time-to-anchor (s), quantised to the 50 ms step; a 3-node
     # horizon (<0.15 s) destabilises solves, so the floor is 0.15
     {"name": "plan_deadline_s", "bounds": (0.08, 0.25), "discrete_step": 0.01},
-    # max hand speed (m/s): deadline >= lookahead / v_max (pointing only in practice)
-    {"name": "plan_vmax", "bounds": (0.25, 1.0)},
+    # plan_vmax is NOT fitted (2026-09-03 decision): it is a Stage-0
+    # measurement — the pooled p90 of per-round pointing pace D/MT_kin
+    # across all six 10p participants (eval/model_fitting/
+    # stage0_plan_vmax.py -> 0.66 m/s, baked into the base configs). Like
+    # gamma, it is data-derived and held constant; --vmax still overrides.
 ]
 RESULTS = HERE / "results"
 
