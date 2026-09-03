@@ -129,7 +129,13 @@ class CursorSimulator:
             # overshooting arrivals in free space.
             "carry_acceleration": True,
             # Consecutive time inside the target that ends a trajectory (s).
-            "dwell_s": 0.25,
+            # Terminal in-target dwell before a round ends. 0 (default since
+            # 2026-09-03): the round ends at FINAL TARGET ENTRY — the
+            # hard-coded 0.25 s hold that stood in for click latency is gone;
+            # MT alignment (MT_kin = onset -> final entry on both sides)
+            # handles click latency on the metric side, and the hold showed
+            # up as a fake inter-round delay in pointing.
+            "dwell_s": 0.0,
             "add_noise": True,
             "ddm_enabled": False,
             "random_seed": 1000,
@@ -221,7 +227,7 @@ class CursorSimulator:
         self.planner_weights = config['planner_weights']
         self.planner_margin = config['planner_margin']
         self.carry_acceleration = bool(config.get('carry_acceleration', True))
-        self.dwell_s = float(config.get('dwell_s', 0.25))
+        self.dwell_s = float(config.get('dwell_s', 0.0))
         self.add_noise = config['add_noise']
 
         self.horizon_mode = str(config.get('horizon_mode', 'budget'))
@@ -590,9 +596,10 @@ class CursorSimulator:
             anchor_tail_pace=self.anchor_tail_pace,
         )
 
-        # Termination: DWELL_S of consecutive samples inside the target
-        # (stands in for the human click latency; the pointing data show
-        # ~0.3 s median from final target entry to click).
+        # Termination: dwell_s of consecutive in-target samples; 0 = end at
+        # first (final) target entry. The old 0.25 s hold (click-latency
+        # stand-in) was removed 2026-09-03 — MT_kin alignment strips click
+        # latency on both sides, so the hold only added a fake flat segment.
         dwell_required = int(round(self.dwell_s / self.interval))
         dwell_steps = 0
         aborted_breach = False
