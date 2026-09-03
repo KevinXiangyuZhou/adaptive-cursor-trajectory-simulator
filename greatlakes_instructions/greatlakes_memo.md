@@ -18,6 +18,13 @@ sbatch fit_anchor_10p.sh
   full held-out probe and the save all finish inside the wall.
 - Data: `human_data/task_aligned_all` (short pXX ids are aliased to the
   embedded Prolific ids by `fit_speed_model.load_participant`).
+  **The pXX_task_aligned_analysis.csv files are NOT in git** (>100 MB,
+  GitHub limit; gitignored 2026-09-03) — copy them up once from the Mac:
+  ```bash
+  rsync -av --include='*_task_aligned_analysis.csv' --exclude='*' \
+      ~/Desktop/adaptive-cursor-trajectory-simulator/human_data/task_aligned_all/ \
+      xiangyz@greatlakes-xfer.arc-ts.umich.edu:<repo>/human_data/task_aligned_all/
+  ```
 - Base personas: `eval/model_fitting/base_configs_gaze/{pid}.json` —
   finalized-design configs (speed_model `gam_traversal` → the shipped pooled
   artifact `hcs_package/models/gam_traversal_10p.pkl`; budget priors D0=1.0,
