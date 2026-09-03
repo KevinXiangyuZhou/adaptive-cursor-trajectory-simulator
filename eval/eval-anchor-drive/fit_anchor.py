@@ -1,12 +1,14 @@
 """Joint CMA-ES fit of the anchor-drive persona (one stage, one set of weights
 for tunnels AND pointing). The plan deadline is the gaze-measured time-to-
 anchor and is held fixed; the gaze budget (D0, gamma, T_min) and replan
-latency come from the Stage G base config. Fitted: jerk, contour, constraint,
-goal, D0, plan_deadline_s (free-space T0 under the finalized design —
-tunnel deadlines come from the GAM traversal time). free_velocity was
-dropped 2026-09-03 with the MPCC damping term; gamma is held at the
-gaze-derived constant (0.66) and plan_vmax at the Stage-0 pooled pace
-measurement (0.66 m/s, stage0_plan_vmax.py) — both from the base config.
+latency come from the Stage G base config. CMA-ES fits the five motor/budget
+parameters: jerk, contour, constraint, goal, D0. Timing parameters are all
+set outside the search: gamma at the gaze-derived constant (0.66), plan_vmax
+at the Stage-0 pooled pace measurement (0.66 m/s, stage0_plan_vmax.py), and
+plan_deadline_s (the terminal free-space plan-time floor) by a post-fit 1-D
+calibration scan on the pointing loss with the fitted persona frozen — the
+free-space analog of the Stage-0 GAM. free_velocity was dropped 2026-09-03
+with the MPCC damping term.
 
 Loss = mean tunnel loss on the training widths (fit_speed_model.tunnel_loss,
 human-variability scaled) + mean pointing loss on the training radii
@@ -42,15 +44,21 @@ ANCHOR_SPEC = [
     # lead b=0.66, saccade amplitude b~0.55, local speed ~W^1) and letting
     # CMA-ES move it traded it off against D0 on cursor loss alone.
     {"name": "D0", "bounds": (0.2, 1.5)},
-    # intended time-to-anchor (s), quantised to the 50 ms step; a 3-node
-    # horizon (<0.15 s) destabilises solves, so the floor is 0.15
-    {"name": "plan_deadline_s", "bounds": (0.08, 0.25), "discrete_step": 0.01},
     # plan_vmax is NOT fitted (2026-09-03 decision): it is a Stage-0
     # measurement — the pooled p90 of per-round pointing pace D/MT_kin
     # across all six 10p participants (eval/model_fitting/
     # stage0_plan_vmax.py -> 0.66 m/s, baked into the base configs). Like
     # gamma, it is data-derived and held constant; --vmax still overrides.
+    # plan_deadline_s is NOT in the CMA search either (2026-09-03): it is
+    # inert on the whole steering half of the loss (corridor plan times come
+    # from the GAM), so the joint fit runs with the base prior (0.19 s) and
+    # the value is CALIBRATED afterwards by a 1-D scan on the pointing loss
+    # with the fitted persona frozen (T0_GRID below) — the free-space analog
+    # of the Stage-0 GAM: each timing regime is fitted at its own stage
+    # against the data regime it governs.
 ]
+# Post-fit T0 calibration grid (s): terminal free-space plan-time floor.
+T0_GRID = [round(0.08 + 0.01 * i, 2) for i in range(23)]   # 0.08 .. 0.30
 RESULTS = HERE / "results"
 
 
@@ -135,6 +143,34 @@ def _eval_joint(args):
     return lt + w_pt * lp + ls
 
 
+def _eval_t0(args):
+    """One T0 candidate of the post-fit calibration: pointing loss of the
+    frozen fitted persona with plan_deadline_s = t0 (noiseless, like the
+    CMA objective)."""
+    t0, base, pt_train, pscales = args
+    fsm.POINT_SCALES.update(pscales)
+    cfg = copy.deepcopy(base)
+    cfg["plan_deadline_s"] = float(t0)
+    cfg["add_noise"] = False
+    cfg["replan_latency_cv"] = 0.0
+    return float(_pointing_part(cfg, pt_train))
+
+
+def calibrate_t0(base, pt_train, pscales, workers):
+    """Stage T0: 1-D scan of the terminal free-space plan-time floor on the
+    pointing loss, everything else frozen. Simulation-based on purpose: T0's
+    behavioural imprint is filtered through the replan cycle and the plant,
+    so a raw data regression would bake in model error — the scan absorbs it.
+    Returns (best_t0, {grid, losses})."""
+    from multiprocessing import Pool
+    jobs = [(t0, base, pt_train, pscales) for t0 in T0_GRID]
+    with Pool(processes=max(1, min(workers, len(jobs)))) as pool:
+        losses = pool.map(_eval_t0, jobs)
+    i = int(np.argmin(losses))
+    return T0_GRID[i], {"grid": T0_GRID, "losses": [float(x) for x in losses],
+                        "best": T0_GRID[i]}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pid", required=True)
@@ -150,7 +186,7 @@ def main():
     ap.add_argument("--override", default=None, help="JSON applied to the base persona (top-level keys; planner_weights/budget merged)")
     ap.add_argument("--patience", type=int, default=None, help="stop when the best loss has not improved >1%% for this many generations")
     ap.add_argument("--fix-budget", action="store_true", help="keep D0 fixed at the base (gaze-calibrated) value; fit planner weights only (gamma is always fixed at the base constant)")
-    ap.add_argument("--fix-deadline", action="store_true", help="drop plan_deadline_s from the search (gaze-measured crossing time; in BUMP mode it sets the motor pace)")
+    ap.add_argument("--fix-deadline", action="store_true", help="skip the post-fit T0 calibration scan (keep the base persona's plan_deadline_s)")
     ap.add_argument("--quick", action="store_true", help="fit on the straight/sharp/corner subset + 2 pointing rounds per radius")
     a = ap.parse_args()
     RESULTS.mkdir(exist_ok=True, parents=True)
@@ -188,8 +224,7 @@ def main():
         if name in ("plan_deadline_s", "plan_vmax"): return base[name]
         if name in ("D0", "gamma", "T_min"): return base["budget"][name]
         return base["planner_weights"][name]
-    spec = [sp for sp in ANCHOR_SPEC if not (a.fix_budget and sp["name"] == "D0")
-            and not (a.fix_deadline and sp["name"] == "plan_deadline_s")]
+    spec = [sp for sp in ANCHOR_SPEC if not (a.fix_budget and sp["name"] == "D0")]
     init = {s["name"]: _init_val(s["name"]) for s in spec}
     # Noise-on stability trials: the widest corner/sinusoid TRAIN conditions,
     # capped at 3x the human completion time like the fit trials.
@@ -209,6 +244,17 @@ def main():
     fitted, best, hist = fsm.run_cmaes(f"anchor joint fit {a.pid}", spec, init, _eval_joint, shared,
                                        a.time_limit, a.seed, a.popsize, a.workers, sigma0=0.2, patience=a.patience)
     fsm.apply_params(base, fitted)
+    # Stage T0: calibrate the terminal free-space plan-time floor (skipped
+    # with --fix-deadline, or when there is no pointing training data). If
+    # the calibrated value lands at a grid edge, treat it as a diagnostic of
+    # the endgame model, not just a parameter.
+    t0_scan = None
+    if pt_train and not a.fix_deadline:
+        best_t0, t0_scan = calibrate_t0(base, pt_train, pscales, a.workers)
+        print(f"T0 calibration: {base['plan_deadline_s']}s -> {best_t0}s "
+              f"(pointing loss {min(t0_scan['losses']):.3f}; "
+              f"edge={'YES' if best_t0 in (T0_GRID[0], T0_GRID[-1]) else 'no'})", flush=True)
+        base["plan_deadline_s"] = best_t0
     stage_dir = RESULTS / "stages" / (a.tag.strip("_") or "base"); stage_dir.mkdir(parents=True, exist_ok=True)
     cfg_path = stage_dir / f"{a.pid}_anchor_config{a.tag}_s{a.seed}.json"
     # The fit ran noiseless/deterministic (load_persona forces add_noise off
@@ -230,6 +276,7 @@ def main():
     res = pa.run_probe(a.pid, "anchor", override=probe_ov,
                        quick=False, n_workers=a.workers)
     rec = {"pid": a.pid, "fitted": fitted, "best_loss": best, "history": hist, "deadline": base["plan_deadline_s"],
+           "t0_scan": t0_scan,
            "tunnel": res["tunnel"], "pointing": res.get("pointing"), "elapsed": time.time() - t0,
            "scales": scales, "pscales": pscales}
     with open(stage_dir / f"{a.pid}_anchor_fit{a.tag}_s{a.seed}.json", "w") as f:
