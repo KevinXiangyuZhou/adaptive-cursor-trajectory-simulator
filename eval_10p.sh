@@ -7,14 +7,14 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=1500M
 #SBATCH --time=01:30:00
-#SBATCH --array=1-6
+#SBATCH --array=1-8
 #SBATCH --output=logs/eval_10p_%A_%a.out
 #SBATCH --error=logs/eval_10p_%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=xiangyz@umich.edu
 
 # Per-participant evaluation of the 10p anchor-drive fits (after
-# fit_anchor_10p.sh): (1) eval-main with the fitted persona — all six
+# fit_anchor_10p.sh): (1) eval-main with the fitted persona — all eight
 # participants share ONE eval-main folder; (2) model gaze-lead PDFs (model
 # sawtooth vs human rounds, per trial). Then aggregate:
 #   EVAL_ID=$(sbatch --parsable eval_10p.sh)

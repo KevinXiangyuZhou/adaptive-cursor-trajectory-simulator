@@ -1,263 +1,43 @@
 {
   "_note": "Merged events (keep=True) are the canonical fixation dataset for model fitting; absorbed tracker-split fragments carry merged_into.",
-  "A": {
-    "bias_mm": [
-      -11.85,
-      -13.61
-    ],
-    "n_fixations": 830,
-    "kept": 694,
-    "kept_before_merge": 707,
-    "absorbed_fragments": 13,
-    "drift_blocks": 0,
-    "drift_median_mm": null,
-    "dropped": {
-      "blink": 83,
-      "off_path": 38,
-      "regressive": 15
-    },
-    "median_lead_raw_mm": 15.7,
-    "median_lead_clean_mm": 31.7,
-    "median_dwell_s": 0.365
-  },
-  "B": {
-    "bias_mm": [
-      -5.94,
-      0.73
-    ],
-    "n_fixations": 706,
-    "kept": 642,
-    "kept_before_merge": 642,
-    "absorbed_fragments": 0,
-    "drift_blocks": 0,
-    "drift_median_mm": null,
-    "dropped": {
-      "blink": 48,
-      "off_path": 6,
-      "regressive": 16
-    },
-    "median_lead_raw_mm": 15.7,
-    "median_lead_clean_mm": 25.5,
-    "median_dwell_s": 0.29
-  },
-  "C": {
-    "bias_mm": [
-      -18.24,
-      -1.18
-    ],
-    "n_fixations": 624,
-    "kept": 577,
-    "kept_before_merge": 577,
-    "absorbed_fragments": 0,
-    "drift_blocks": 0,
-    "drift_median_mm": null,
-    "dropped": {
-      "blink": 21,
-      "off_path": 16,
-      "regressive": 12
-    },
-    "median_lead_raw_mm": 15.7,
-    "median_lead_clean_mm": 37.7,
-    "median_dwell_s": 0.305
-  },
-  "p01": {
-    "bias_mm": [
-      -5.84,
-      3.29
-    ],
-    "n_fixations": 1375,
-    "kept": 1001,
-    "kept_before_merge": 1006,
-    "absorbed_fragments": 5,
-    "drift_blocks": 68,
-    "drift_median_mm": 42.2,
-    "dropped": {
-      "blink": 47,
-      "off_path": 220,
-      "regressive": 227
-    },
-    "median_lead_raw_mm": -6.2,
-    "median_lead_clean_mm": 14.4,
-    "median_dwell_s": 0.38
-  },
-  "p02": {
-    "bias_mm": [
-      -1.81,
-      6.15
-    ],
-    "n_fixations": 941,
-    "kept": 658,
-    "kept_before_merge": 659,
-    "absorbed_fragments": 1,
-    "drift_blocks": 95,
-    "drift_median_mm": 37.2,
-    "dropped": {
-      "blink": 46,
-      "off_path": 177,
-      "regressive": 133
-    },
-    "median_lead_raw_mm": -7.9,
-    "median_lead_clean_mm": 22.0,
-    "median_dwell_s": 0.505
-  },
-  "p03": {
-    "bias_mm": [
-      -8.25,
-      0.5
-    ],
-    "n_fixations": 1106,
-    "kept": 900,
-    "kept_before_merge": 911,
-    "absorbed_fragments": 11,
-    "drift_blocks": 28,
-    "drift_median_mm": 30.1,
-    "dropped": {
-      "blink": 75,
-      "off_path": 50,
-      "regressive": 90
-    },
-    "median_lead_raw_mm": -5.1,
-    "median_lead_clean_mm": 14.6,
-    "median_dwell_s": 0.348
-  },
-  "p04": {
-    "bias_mm": [
-      1.45,
-      -0.01
-    ],
-    "n_fixations": 955,
-    "kept": 800,
-    "kept_before_merge": 802,
-    "absorbed_fragments": 2,
-    "drift_blocks": 0,
-    "drift_median_mm": null,
-    "dropped": {
-      "blink": 0,
-      "off_path": 137,
-      "regressive": 32
-    },
-    "median_lead_raw_mm": 28.2,
-    "median_lead_clean_mm": 36.1,
-    "median_dwell_s": 0.328
-  },
-  "p05": {
-    "bias_mm": [
-      22.51,
-      -7.61
-    ],
-    "n_fixations": 813,
-    "kept": 337,
-    "kept_before_merge": 340,
-    "absorbed_fragments": 3,
-    "drift_blocks": 44,
-    "drift_median_mm": 27.4,
-    "dropped": {
-      "blink": 42,
-      "off_path": 352,
-      "regressive": 339
-    },
-    "median_lead_raw_mm": -5.8,
-    "median_lead_clean_mm": 14.1,
-    "median_dwell_s": 0.44
-  },
   "p06": {
     "bias_mm": [
-      -8.8,
-      -7.99
+      -8.48,
+      5.93
     ],
-    "n_fixations": 1140,
-    "kept": 570,
-    "kept_before_merge": 582,
-    "absorbed_fragments": 12,
-    "drift_blocks": 85,
-    "drift_median_mm": 60.6,
+    "n_fixations": 1178,
+    "kept": 898,
+    "kept_before_merge": 905,
+    "absorbed_fragments": 7,
+    "drift_blocks": 49,
+    "drift_median_mm": 20.6,
     "dropped": {
-      "blink": 137,
-      "off_path": 381,
-      "regressive": 306
+      "blink": 111,
+      "off_path": 144,
+      "regressive": 70
     },
-    "median_lead_raw_mm": -26.6,
-    "median_lead_clean_mm": 29.8,
-    "median_dwell_s": 0.45
-  },
-  "p07": {
-    "bias_mm": [
-      -7.74,
-      10.84
-    ],
-    "n_fixations": 913,
-    "kept": 508,
-    "kept_before_merge": 508,
-    "absorbed_fragments": 0,
-    "drift_blocks": 72,
-    "drift_median_mm": 25.3,
-    "dropped": {
-      "blink": 7,
-      "off_path": 301,
-      "regressive": 264
-    },
-    "median_lead_raw_mm": -13.5,
-    "median_lead_clean_mm": 21.3,
-    "median_dwell_s": 0.465
+    "median_lead_raw_mm": 23.2,
+    "median_lead_clean_mm": 35.7,
+    "median_dwell_s": 0.33
   },
   "p08": {
     "bias_mm": [
-      1.94,
-      -7.6
+      -4.28,
+      -1.18
     ],
-    "n_fixations": 542,
-    "kept": 392,
-    "kept_before_merge": 396,
-    "absorbed_fragments": 4,
-    "drift_blocks": 6,
-    "drift_median_mm": 28.2,
+    "n_fixations": 950,
+    "kept": 883,
+    "kept_before_merge": 885,
+    "absorbed_fragments": 2,
+    "drift_blocks": 8,
+    "drift_median_mm": 14.3,
     "dropped": {
-      "blink": 35,
-      "off_path": 77,
-      "regressive": 91
+      "blink": 21,
+      "off_path": 21,
+      "regressive": 29
     },
-    "median_lead_raw_mm": 0.0,
-    "median_lead_clean_mm": 0.0,
-    "median_dwell_s": 0.283
-  },
-  "p09": {
-    "bias_mm": [
-      -3.97,
-      -4.06
-    ],
-    "n_fixations": 1170,
-    "kept": 562,
-    "kept_before_merge": 570,
-    "absorbed_fragments": 8,
-    "drift_blocks": 69,
-    "drift_median_mm": 35.3,
-    "dropped": {
-      "blink": 254,
-      "off_path": 293,
-      "regressive": 242
-    },
-    "median_lead_raw_mm": -4.9,
+    "median_lead_raw_mm": 17.6,
     "median_lead_clean_mm": 24.7,
-    "median_dwell_s": 0.42
-  },
-  "p10": {
-    "bias_mm": [
-      -13.89,
-      2.02
-    ],
-    "n_fixations": 890,
-    "kept": 736,
-    "kept_before_merge": 737,
-    "absorbed_fragments": 1,
-    "drift_blocks": 0,
-    "drift_median_mm": null,
-    "dropped": {
-      "blink": 90,
-      "off_path": 52,
-      "regressive": 22
-    },
-    "median_lead_raw_mm": 22.3,
-    "median_lead_clean_mm": 45.2,
-    "median_dwell_s": 0.42
+    "median_dwell_s": 0.25
   }
 }

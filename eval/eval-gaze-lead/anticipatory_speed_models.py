@@ -30,7 +30,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from human_gaze_lead import dense_grid, project_dense, PROC, SUBSAMPLE, gd, ld
 from local_speed_law import kappa_profile, TYPES, V_MIN, TRIM_S
 
-LETTERS = ["p01", "p02", "p03", "p04", "p07", "p10"]
+LETTERS = ["p01", "p02", "p03", "p04", "p06", "p07", "p08", "p10"]  # p06/p08 recollected 2026-09-03
 BASE = SCRIPT_DIR / "human-gaze-lead-10p"
 OFFS_MM = [0, 12, 25, 50, 75, 100, 150]   # lookahead offsets (mm)
 DT = 0.005 * SUBSAMPLE                     # sample period after subsampling

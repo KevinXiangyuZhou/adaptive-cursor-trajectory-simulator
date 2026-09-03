@@ -12,8 +12,8 @@ current simulator until refit.
 sbatch fit_anchor_10p.sh
 ```
 
-- 6 array tasks (participants_10p.txt: p01 p02 p03 p04 p07 p10 — the kept
-  sessions; p05/p06/p08/p09 are deprecated), 12 CPUs, 1 GB/CPU, **8 h wall**,
+- 8 array tasks (participants_10p.txt: p01-p04, p06-p08, p10; p06/p08
+  recollected 2026-09-03; p05/p09 deprecated), 12 CPUs, 1 GB/CPU, **8 h wall**,
   CMA budget 6.5 h (`TIME_LIMIT=23400`) so the noise-on stability runs, the
   full held-out probe and the save all finish inside the wall.
 - Data: `human_data/task_aligned_all` (short pXX ids are aliased to the
@@ -30,10 +30,13 @@ sbatch fit_anchor_10p.sh
   artifact `hcs_package/models/gam_traversal_10p.pkl`; budget priors D0=1.0,
   gamma=0.66 from the 10p cohort analysis; pooled replan latency 0.19 s /
   CV 0.89).
-- Fitted per participant (eval/eval-anchor-drive/fit_anchor.py): jerk,
-  contour, constraint, goal, D0, gamma, plan_deadline_s (free-space T0),
-  plan_vmax. free_velocity and the turn-time/width-time deadline keys are
-  GONE — the simulator refuses configs that carry them.
+- CMA-ES fits FIVE params per participant (eval/eval-anchor-drive/
+  fit_anchor.py): jerk, contour, constraint, goal, D0. gamma (0.66, gaze
+  constant) and plan_vmax (0.66 m/s, stage0_plan_vmax.py pooled pace) are
+  pinned; plan_deadline_s is calibrated post-fit by a 1-D pointing-loss
+  scan (t0_scan in the fit record; grid-edge = endgame diagnostic).
+  free_velocity and the turn-time/width-time deadline keys are GONE — the
+  simulator refuses configs that carry them.
 - Outputs → `chi-27/results/anchor_fitting_10p[-RUN_TAG]/stages/base/`:
   `{pid}_anchor_config_s42.json`, `{pid}_anchor_fit_s42.json`, fit logs.
 - Rerun one participant: `sbatch --array=N fit_anchor_10p.sh` (N = line
@@ -49,17 +52,18 @@ EVAL_ID=$(sbatch --parsable eval_10p.sh)
 sbatch --dependency=afterok:$EVAL_ID eval_10p_aggregate.sh
 ```
 
-- `eval_10p.sh` (6 array tasks, 4 h wall): per participant it stages the
+- `eval_10p.sh` (8 array tasks, 1.5 h wall, 4 CPU/6 GB): per participant it stages the
   fitted persona as `personas_10p/{Prolific-id}.json`, runs eval-main
   (`--config-dir --fresh-sim`, all buckets) into ONE shared folder
   `chi-27/results/eval-main-10p[-RUN_TAG]/` (Steering / ID4SCS / Fitts /
-  sim_cache, all six participants together), then runs
+  sim_cache, all participants together), then runs
   `model_gaze_lead.py --config <fitted persona>` to render the model
   sawtooth vs human rounds per trial into
   `chi-27/results/gaze-lead-10p[-RUN_TAG]/{pXX}/` (one PDF per participant
-  + model_lead_events.csv).
+  + model_lead_events.csv) and gaze_lead_grids.py (individual/, lead_by_width/,
+  lead_by_curvature/ PNGs with the model overlaid).
 - `eval_10p_aggregate.sh` (1.5 h): pooled Fitts/Steering/ID4SCS summaries +
-  overview across all six, from the cached sims — no new simulation.
+  overview across all participants, from the cached sims — no new simulation.
 - Use the SAME `RUN_TAG` for fit, eval and aggregate of one generation.
 
 ## Legacy pipeline (pre-2026-09-03)

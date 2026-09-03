@@ -7,14 +7,14 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --mem-per-cpu=1G
 #SBATCH --time=08:00:00
-#SBATCH --array=1-6
+#SBATCH --array=1-8
 #SBATCH --output=logs/fit_10p_%A_%a.out
 #SBATCH --error=logs/fit_10p_%A_%a.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=xiangyz@umich.edu
 
-# Anchor-drive persona fit for the 6 kept 10-participant-batch sessions
-# (p01-p04, p07, p10; p05/p06/p08/p09 deprecated) under the FINALIZED cycle
+# Anchor-drive persona fit for the 8 kept 10-participant-batch sessions
+# (p01-p04, p06-p08, p10; p06/p08 recollected 2026-09-03; p05/p09 deprecated) under the FINALIZED cycle
 # design (2026-09-03): GAM traversal deadline (shipped pooled artifact,
 # hcs_package/models/gam_traversal_10p.pkl), no deadline rule stack, no
 # free_velocity damping. Base personas: eval/model_fitting/base_configs_gaze/
@@ -25,7 +25,7 @@
 # save all run after the budget, and the 8-25 fits taught us the wall must
 # clear the budget with real margin or Stage-3-equivalent results are lost.
 #
-#   sbatch fit_anchor_10p.sh                     # all six
+#   sbatch fit_anchor_10p.sh                     # all eight
 #   sbatch --array=3 fit_anchor_10p.sh           # rerun p03 only
 #   RUN_TAG=v2 sbatch fit_anchor_10p.sh          # tagged output dirs
 

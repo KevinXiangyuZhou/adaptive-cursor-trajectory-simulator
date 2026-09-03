@@ -54,8 +54,8 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from human_gaze_lead import (dense_grid, project_dense, PROC, SUBSAMPLE,
                              gd, gc, ld, ROUND_COLORS)
 
-# p05/p06/p08/p09 sessions are deprecated (no per-participant folder here)
-DEFAULT_LETTERS = ["p01", "p02", "p03", "p04", "p07", "p10"]
+# p05/p09 sessions are deprecated; p06/p08 were recollected 2026-09-03
+DEFAULT_LETTERS = ["p01", "p02", "p03", "p04", "p06", "p07", "p08", "p10"]  # p06/p08 recollected 2026-09-03
 TYPES = [("gentle_sinusoidal", "gentle"),
          ("sharp_sinusoidal", "sharp"),
          ("None", "normal")]  # tunnel_type "None" = the normal sinusoid

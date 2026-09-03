@@ -35,7 +35,7 @@ for p in (PROJECT_ROOT / "eval" / "eval-main", PROJECT_ROOT / "hcs_package" / "s
 import run_eval as em            # noqa: E402
 import fit_speed_model as fsm    # noqa: E402
 
-LETTERS = ["p01", "p02", "p03", "p04", "p07", "p10"]
+LETTERS = ["p01", "p02", "p03", "p04", "p06", "p07", "p08", "p10"]  # p06/p08 recollected 2026-09-03
 QUANTILE = 90       # fast-reach envelope
 MT_MIN_S = 0.1      # drop degenerate rounds
 BASE_CONFIG_DIR = SCRIPT_DIR / "base_configs_gaze"
