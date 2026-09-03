@@ -1,5 +1,0 @@
-P170114: cut depth mean/p90 (mm) and apex dip, by condition
-  corner 20mm | human cut  2.8/ 6.4 dip 0.17 | S15_z0 cut  2.5/ 4.0 dip 0.75 | S15_z1 cut  3.5/ 5.4 dip 0.70 | S15_z2 cut  2.6/ 4.0 dip 0.75 | S15_z3 cut  2.9/ 4.6 dip 0.67
-  corner 40mm | human cut  4.3/ 6.3 dip 0.65 | S15_z0 cut  5.3/ 6.5 dip 0.92 | S15_z1 cut  9.8/13.7 dip 0.83 | S15_z2 cut  nan/ nan dip nan | S15_z3 cut  4.0/ 4.9 dip 0.91
-  sharp_ 10mm | human cut  1.6/ 2.8 dip 0.22 | S15_z0 cut  1.6/ 2.3 dip 0.60 | S15_z1 cut  1.6/ 2.3 dip 0.59 | S15_z2 cut  1.6/ 2.4 dip 0.60 | S15_z3 cut  1.6/ 2.5 dip 0.60
-  straig 30mm | human cut  nan/ nan dip nan | S15_z0 cut  1.2/ 1.6 dip 0.98 | S15_z1 cut  1.2/ 1.6 dip 0.99 | S15_z2 cut  1.3/ 1.7 dip 0.99 | S15_z3 cut  1.3/ 1.6 dip 0.99

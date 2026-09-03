@@ -1,6 +1,0 @@
-{
-  "_description": "Human time-to-anchor (ttc_onset, s) vs turning angle inside the lead (D_K_act, rad), steering fixations with lead > 5 mm, LAD fit T = T0 + tau_turn * theta. Width-only lead fit: lead = D0 * W^gamma * W_ref^(1-gamma), W_ref 0.026.",
-  "A": {"pid": "P105835", "T0": 0.222, "tau_turn": 0.200, "median_T": 0.26, "n": 440, "lead_D0_gamma0.66": 0.94, "lead_by_width_mm": [15.6, 19.1, 27.0, 26.9, 40.3]},
-  "B": {"pid": "P170114", "T0": 0.132, "tau_turn": 0.180, "median_T": 0.17, "n": 441, "lead_D0_gamma0.66": 1.21, "lead_D0_gamma1.0": 1.21, "lead_by_width_mm": [12.6, 28.0, 37.4, 46.5, 50.5]},
-  "C": {"pid": "P115641", "T0": 0.165, "tau_turn": 0.109, "median_T": 0.19, "n": 400, "lead_D0_gamma0.66": 0.99, "lead_by_width_mm": [13.9, 19.8, 24.0, 38.6, 44.7]}
-}

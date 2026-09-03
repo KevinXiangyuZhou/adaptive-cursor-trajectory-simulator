@@ -1,5 +1,0 @@
-P170114: cut depth mean/p90 (mm) and apex dip, by condition
-  corner 20mm | human cut  2.8/ 6.4 dip 0.17 | S9f_am2 cut  3.9/ 8.3 dip 0.32 | S9f_am4 cut  1.5/ 3.2 dip 0.30 | S9f_am6 cut  1.4/ 2.6 dip 0.30
-  corner 40mm | human cut  4.3/ 6.3 dip 0.65 | S9f_am2 cut  3.8/ 6.7 dip 0.49 | S9f_am4 cut  3.2/ 5.6 dip 0.46 | S9f_am6 cut  3.7/ 6.5 dip 0.64
-  sinuso 50mm | human cut  8.1/12.4 dip 0.97 | S9f_am2 cut  5.6/ 7.7 dip 0.88 | S9f_am4 cut  7.3/ 8.5 dip 0.79 | S9f_am6 cut  7.7/ 8.6 dip 0.79
-  gentle 50mm | human cut 12.3/15.6 dip 0.87 | S9f_am2 cut  8.3/ 9.4 dip 0.94 | S9f_am4 cut  8.8/ 9.5 dip 0.79 | S9f_am6 cut  8.7/ 9.3 dip 0.76

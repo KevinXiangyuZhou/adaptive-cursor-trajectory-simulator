@@ -1,6 +1,0 @@
-P105835: cut depth mean/p90 (mm) and apex dip, by condition
-  corner 20mm | human cut  2.8/ 5.5 dip 0.15 | S9c cut  0.8/ 1.4 dip 0.37 | aug-26 GAM cut  2.3/ 4.7 dip 0.50
-  corner 40mm | human cut  3.3/ 6.4 dip 0.13 | S9c cut  2.5/ 3.7 dip 0.43 | aug-26 GAM cut  6.8/14.3 dip 0.69
-  sinuso 50mm | human cut  6.4/ 9.3 dip 0.83 | S9c cut  5.5/ 6.2 dip 0.74 | aug-26 GAM cut  5.3/ 7.5 dip 0.81
-  gentle 50mm | human cut  8.1/ 9.8 dip 0.91 | S9c cut  5.7/ 6.2 dip 0.77 | aug-26 GAM cut  5.7/ 7.7 dip 0.79
-ALLDONE

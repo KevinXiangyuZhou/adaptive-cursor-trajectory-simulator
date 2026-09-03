@@ -195,3 +195,7 @@ CLAUDE.md
 eval/eval-gaze-lead/model-gaze-lead-*/
 eval/eval-gaze-lead/gl-*/
 eval/eval-main/refpath-viz-*/
+
+# Raw task-aligned cursor CSVs (100+ MB each — exceed GitHub's limit).
+# Distribute to the cluster with rsync; loaders read them from disk.
+human_data/task_aligned_all/*_task_aligned_analysis.csv

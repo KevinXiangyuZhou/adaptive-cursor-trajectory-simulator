@@ -1,4 +1,0 @@
-P170114: cut depth mean/p90 (mm) and apex dip, by condition
-  corner 20mm | human cut  2.8/ 6.4 dip 0.17 | S9f_c500 cut  1.0/ 1.8 dip 0.28 | S9f_c1000 cut  1.1/ 1.8 dip 0.27
-  corner 40mm | human cut  4.3/ 6.3 dip 0.65 | S9f_c500 cut  2.8/ 4.7 dip 0.49 | S9f_c1000 cut  2.4/ 4.2 dip 0.49
-  sinuso 50mm | human cut  8.1/12.4 dip 0.97 | S9f_c500 cut  8.1/ 8.8 dip 0.84 | S9f_c1000 cut  8.3/ 8.8 dip 0.85
