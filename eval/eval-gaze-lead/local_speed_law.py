@@ -51,7 +51,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from human_gaze_lead import dense_grid, project_dense, PROC, SUBSAMPLE, gd, ld
 
-LETTERS = ["p01", "p02", "p03", "p04", "p07", "p10"]
+LETTERS = ["p01", "p02", "p03", "p04", "p06", "p07", "p08", "p10"]  # p06/p08 recollected 2026-09-03
 TYPES = {"gentle_sinusoidal": "gentle", "sharp_sinusoidal": "sharp",
          "None": "normal", "straight": "straight", "corner": "corner"}
 BASE = SCRIPT_DIR / "human-gaze-lead-10p"

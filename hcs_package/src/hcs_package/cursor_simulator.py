@@ -286,15 +286,26 @@ class CursorSimulator:
         self.plan_vmax = float(config.get('plan_vmax', 0.8))
         # Finalized deadline (constrained space): t_plan = GAM traversal time
         # of the lead. speed_model {"type": "gam_traversal", "path": ...};
-        # path None loads the shipped pooled 10p artifact. The old deadline
-        # rule stack (plan_width_time_exp, plan_turn_time_s,
-        # plan_turn_width_exp) is gone — _reject_pruned refuses active values.
+        # path None loads the shipped pooled 10p artifact; a per-participant
+        # persona names its own artifact (e.g. "gam_traversal_p01.pkl") — a
+        # relative path that does not exist as given is resolved against the
+        # package models/ directory, so persona JSONs stay portable between
+        # machines. The old deadline rule stack (plan_width_time_exp,
+        # plan_turn_time_s, plan_turn_width_exp) is gone — _reject_pruned
+        # refuses active values.
         sm_cfg = config.get('speed_model', {"type": "gam_traversal"})
         self.traversal_speed_model = None
         if isinstance(sm_cfg, dict) and sm_cfg.get('type') == 'gam_traversal':
             from .speed_model import GAMSpeedModel
-            sm_path = sm_cfg.get('path') or str(
-                Path(__file__).parent / 'models' / 'gam_traversal_10p.pkl')
+            models_dir = Path(__file__).parent / 'models'
+            sm_path = sm_cfg.get('path')
+            if sm_path:
+                cand = Path(sm_path)
+                if not cand.is_absolute() and not cand.exists():
+                    cand = models_dir / sm_path
+                sm_path = str(cand)
+            else:
+                sm_path = str(models_dir / 'gam_traversal_10p.pkl')
             self.traversal_speed_model = GAMSpeedModel.load(sm_path)
         elif sm_cfg not in (None, {}):
             raise ValueError(
