@@ -42,6 +42,26 @@ sbatch fit_anchor_10p.sh
   venv picks up the new `speed_model.py` + `models/` artifact (pygam is
   already in setup.sh).
 
+### Evaluation (after the fits finish)
+
+```bash
+EVAL_ID=$(sbatch --parsable eval_10p.sh)
+sbatch --dependency=afterok:$EVAL_ID eval_10p_aggregate.sh
+```
+
+- `eval_10p.sh` (6 array tasks, 4 h wall): per participant it stages the
+  fitted persona as `personas_10p/{Prolific-id}.json`, runs eval-main
+  (`--config-dir --fresh-sim`, all buckets) into ONE shared folder
+  `chi-27/results/eval-main-10p[-RUN_TAG]/` (Steering / ID4SCS / Fitts /
+  sim_cache, all six participants together), then runs
+  `model_gaze_lead.py --config <fitted persona>` to render the model
+  sawtooth vs human rounds per trial into
+  `chi-27/results/gaze-lead-10p[-RUN_TAG]/{pXX}/` (one PDF per participant
+  + model_lead_events.csv).
+- `eval_10p_aggregate.sh` (1.5 h): pooled Fitts/Steering/ID4SCS summaries +
+  overview across all six, from the cached sims — no new simulation.
+- Use the SAME `RUN_TAG` for fit, eval and aggregate of one generation.
+
 ## Legacy pipeline (pre-2026-09-03)
 
 Updated 2026-08-17 for the aug-26-prolific dataset (10 participants; steering +
