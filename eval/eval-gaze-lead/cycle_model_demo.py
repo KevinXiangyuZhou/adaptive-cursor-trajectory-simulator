@@ -38,7 +38,7 @@ import matplotlib.pyplot as plt
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from human_gaze_lead import dense_grid, PROC, gd, ld
-from local_speed_law import kappa_profile, TYPES
+from local_speed_law import kappa_profile, runway_profile, TYPES
 sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "hcs_package" / "src"))
 from hcs_package.speed_model import GAMSpeedModel
 
@@ -61,8 +61,9 @@ def train_speed_model():
     return GAMSpeedModel.load(str(ARTIFACT))
 
 
-def predict_speed(m, W, kappa, k_ahead):
-    return np.maximum(m.predict_speed_raw(W / 2, kappa, k_ahead), V_MIN_SIM)
+def predict_speed(m, W, kappa, k_ahead, runway):
+    return np.maximum(m.predict_speed_raw(W / 2, kappa, k_ahead, runway),
+                      V_MIN_SIM)
 
 
 def simulate(geom, speed_model):
@@ -72,8 +73,9 @@ def simulate(geom, speed_model):
     K_d = np.interp(s_d, geom.s, kappa_profile(geom))
     win = int(H_AHEAD / STEP) + 1
     Ka_d = maximum_filter1d(K_d, size=win, origin=-(win // 2), mode="nearest")
+    Dn_d = runway_profile(s_d, K_d)
     PHI_d = np.interp(s_d, geom.s, geom.PHI)
-    v_d = predict_speed(speed_model, W_d, K_d, Ka_d)
+    v_d = predict_speed(speed_model, W_d, K_d, Ka_d, Dn_d)
     # cumulative time along the path and cumulative budget
     T_d = np.concatenate([[0.0], np.cumsum(STEP / v_d[:-1])])
     dens = ((W_REF / W_d) ** GAMMA) / W_REF

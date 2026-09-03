@@ -98,13 +98,16 @@ class GazeModule:
         # Traversal-time table (finalized deadline): cumulative
         # T(s) = integral ds / v_gam(s) on the profile grid, v_gam from the
         # raw GAM (clearance = W/2 clipped to its trained range, |kappa|,
-        # anticipatory kappa = max |kappa| over the next KAPPA_AHEAD_M).
-        # None when no speed model or no profiles (pointing-only tasks) —
-        # then the bare T0 deadline applies everywhere.
+        # anticipatory kappa = max |kappa| over the next KAPPA_AHEAD_M, and
+        # runway = arc distance to the next steering demand — the nearest
+        # point ahead with |kappa| > K_DEMAND_RAD_M, or the path end when
+        # none remains). None when no speed model or no profiles
+        # (pointing-only tasks) — then the bare T0 deadline applies
+        # everywhere.
         self._cum_T = None
         if (traversal_speed_model is not None and clearance_profile is not None
                 and curvature_profile is not None):
-            from .speed_model import KAPPA_AHEAD_M
+            from .speed_model import KAPPA_AHEAD_M, K_DEMAND_RAD_M
             s_prof, w_prof = clearance_profile
             _, k_prof = curvature_profile
             s_prof = np.asarray(s_prof, float)
@@ -115,8 +118,17 @@ class GazeModule:
             from numpy.lib.stride_tricks import sliding_window_view
             pad = np.concatenate([kappa, np.full(win - 1, kappa[-1])])
             k_ahead = sliding_window_view(pad, win).max(axis=1)
+            # runway: distance to the next demand point via searchsorted
+            # (grid-spacing independent; the target end is a braking point)
+            demand_s = s_prof[kappa > K_DEMAND_RAD_M]
+            nxt = np.full(len(s_prof), s_prof[-1])
+            if len(demand_s):
+                j = np.searchsorted(demand_s, s_prof, side='left')
+                has = j < len(demand_s)
+                nxt[has] = demand_s[np.minimum(j, len(demand_s) - 1)][has]
+            runway = np.maximum(nxt - s_prof, 0.0)
             v = traversal_speed_model.predict_speed_raw(
-                np.asarray(w_prof, float) / 2.0, kappa, k_ahead)
+                np.asarray(w_prof, float) / 2.0, kappa, k_ahead, runway)
             v = np.clip(v, 0.02, None)  # numerical speed floor
             dgrid = np.diff(s_prof)
             self._traversal_s = s_prof
