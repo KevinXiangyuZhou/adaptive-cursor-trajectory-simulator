@@ -231,6 +231,12 @@ def make_sim(letter, noise_on=True):
     if not noise_on:
         cfg["add_noise"] = False
         cfg["replan_latency_cv"] = 0.0
+    else:
+        # --noise on means ON, even for a persona saved with the fitting
+        # harness's noiseless settings baked in.
+        cfg["add_noise"] = True
+        if not float(cfg.get("replan_latency_cv", 0.0) or 0.0):
+            cfg["replan_latency_cv"] = 0.89
     sm = cfg.get("speed_model", {})
     if sm.get("path") and not Path(sm["path"]).is_absolute():
         sm["path"] = str((cfg_path.parent if CONFIG_OVERRIDE else FIT_DIR) / sm["path"])

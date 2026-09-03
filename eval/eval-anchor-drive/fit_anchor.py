@@ -203,8 +203,19 @@ def main():
     fsm.apply_params(base, fitted)
     stage_dir = RESULTS / "stages" / (a.tag.strip("_") or "base"); stage_dir.mkdir(parents=True, exist_ok=True)
     cfg_path = stage_dir / f"{a.pid}_anchor_config{a.tag}_s{a.seed}.json"
+    # The fit ran noiseless/deterministic (load_persona forces add_noise off
+    # and latency cv 0 for the CMA objective) — the SAVED persona must get
+    # its stochasticity back or every downstream eval runs a single
+    # deterministic trajectory. Restore from the raw base persona.
+    save_cfg = copy.deepcopy(base)
+    try:
+        raw = json.load(open(pa.BASE_CONFIG_DIR / f"{a.pid}.json"))
+    except FileNotFoundError:
+        raw = {}
+    save_cfg["add_noise"] = bool(raw.get("add_noise", True))
+    save_cfg["replan_latency_cv"] = float(raw.get("replan_latency_cv", 0.89))
     with open(cfg_path, "w") as f:
-        json.dump(base, f, indent=2)
+        json.dump(save_cfg, f, indent=2)
     print(f"\nfitted: {json.dumps({k: float(v) for k, v in fitted.items()})}\nbest joint loss {best:.4f}; saved {cfg_path}")
     # held-out evaluation via the probe (train/test, by width/type, t_cross)
     probe_ov = {k: v for k, v in base.items() if k not in ("speed_model", "reference_path", "_description")}

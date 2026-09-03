@@ -44,8 +44,18 @@ TMP="${SESS#*_P}"; PID="P${TMP%%_*}"                                     # P1034
 CFG="$FIT_DIR/${SHORT}_anchor_config_s${SEED}.json"
 [ -f "$CFG" ] || { echo "missing fitted persona $CFG"; exit 1; }
 # Stage the persona under the P-id so run_eval's --config-dir resolution
-# ({pid}.json) finds it; idempotent across array tasks.
-cp -f "$CFG" "$PERSONA_DIR/${PID}.json"
+# ({pid}.json) finds it; idempotent across array tasks. Guard against
+# personas saved by pre-fix fit_anchor.py with the fitting harness's
+# noiseless settings baked in (add_noise false, latency cv 0).
+python3 - "$CFG" "$PERSONA_DIR/${PID}.json" <<'EOF'
+import json, sys
+c = json.load(open(sys.argv[1]))
+c["add_noise"] = True
+if not float(c.get("replan_latency_cv", 0) or 0):
+    c["replan_latency_cv"] = 0.89
+json.dump(c, open(sys.argv[2], "w"), indent=2)
+EOF
+MIN_RUNS="${MIN_RUNS:-0}"   # >0: extra noise realisations per condition
 
 echo "[$(date)] eval $SHORT ($PID) persona=$CFG -> $HCS_EVAL_RESULTS_DIR"
 
@@ -55,14 +65,16 @@ python -u eval/eval-main/run_eval.py \
     --config-dir "$PERSONA_DIR" \
     --seed "$SEED" \
     --fresh-sim \
+    --min-runs "$MIN_RUNS" \
     --data-dir "$DATA_DIR" \
     2>&1 | tee "$HCS_EVAL_RESULTS_DIR/eval_${SHORT}_s${SEED}.log"
 
-# 2) model gaze-lead PDFs: model sawtooth (fitted persona, its own budget)
-#    vs human rounds, one page per trial + summary page
+# 2) model gaze-lead PDFs: model sawtooth (fitted persona, its own budget,
+#    noise forced on) vs human rounds, one page per trial + summary page
 python -u eval/eval-gaze-lead/model_gaze_lead.py \
     --letters "$SHORT" \
-    --config "$CFG" \
+    --config "$PERSONA_DIR/${PID}.json" \
+    --noise on \
     --out-dir "$GAZE_LEAD_DIR/$SHORT" \
     2>&1 | tee "$GAZE_LEAD_DIR/model_gaze_lead_${SHORT}.log"
 
