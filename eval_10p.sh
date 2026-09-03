@@ -4,9 +4,9 @@
 #SBATCH --partition=standard
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
-#SBATCH --mem-per-cpu=1G
-#SBATCH --time=04:00:00
+#SBATCH --cpus-per-task=4
+#SBATCH --mem-per-cpu=1500M
+#SBATCH --time=01:30:00
 #SBATCH --array=1-6
 #SBATCH --output=logs/eval_10p_%A_%a.out
 #SBATCH --error=logs/eval_10p_%A_%a.err
@@ -77,5 +77,16 @@ python -u eval/eval-gaze-lead/model_gaze_lead.py \
     --noise on \
     --out-dir "$GAZE_LEAD_DIR/$SHORT" \
     2>&1 | tee "$GAZE_LEAD_DIR/model_gaze_lead_${SHORT}.log"
+
+# 3) human-gaze-lead-10p-style PNGs with the model overlaid: per-task plots
+#    (individual/) plus lead_by_width/ and lead_by_curvature/ grids, one
+#    noisy model run per round column (human series from the committed
+#    human-gaze-lead-10p/data CSVs — no gaze recomputation here)
+python -u eval/eval-gaze-lead/gaze_lead_grids.py \
+    --letters "$SHORT" \
+    --config "$PERSONA_DIR/${PID}.json" \
+    --noise on --runs 3 \
+    --out-dir "$GAZE_LEAD_DIR/$SHORT" \
+    2>&1 | tee "$GAZE_LEAD_DIR/gaze_lead_grids_${SHORT}.log"
 
 echo "[$(date)] done $SHORT"
