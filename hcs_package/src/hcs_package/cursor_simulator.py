@@ -154,7 +154,7 @@ class CursorSimulator:
             # the studied widths), absorbed by D0 — not a behavior knob.
             "horizon_mode": "budget",
             "budget": {"D0": 1.66, "T_min": 0.1,
-                       "gamma": 1.0, "W_ref": 0.026},
+                       "gamma": 0.66, "W_ref": 0.026},
             # replan_mode "every_step": re-solve each step (ablation baseline).
             # replan_mode "intermittent": execute the plan open-loop and
             # re-solve on arrival at the planned anchor + a post-arrival
@@ -238,7 +238,10 @@ class CursorSimulator:
         # for "unset": the pooled cross-validated refit).
         self.budget_D0 = float(budget_cfg.get('D0', 1.66))
         self.budget_T_min = float(budget_cfg.get('T_min', 0.1))
-        self.budget_gamma = float(budget_cfg.get('gamma', 1.0))
+        # gamma is a gaze-derived CONSTANT (0.66: onset-lead width exponent,
+        # corroborated by the saccade-amplitude law b~0.55), not a fitted
+        # parameter (2026-09-03 decision; fit_anchor no longer searches it).
+        self.budget_gamma = float(budget_cfg.get('gamma', 0.66))
         self.budget_W_ref = float(budget_cfg.get('W_ref', 0.026))
         # Per-fixation lognormal hop scatter (finalized cycle design item 3):
         # each anchor spends a budget with median D0 and this CV; 0 = off.

@@ -2,9 +2,10 @@
 for tunnels AND pointing). The plan deadline is the gaze-measured time-to-
 anchor and is held fixed; the gaze budget (D0, gamma, T_min) and replan
 latency come from the Stage G base config. Fitted: jerk, contour, constraint,
-goal, D0, gamma, plan_deadline_s (free-space T0 under the finalized design —
+goal, D0, plan_deadline_s (free-space T0 under the finalized design —
 tunnel deadlines come from the GAM traversal time), plan_vmax. free_velocity
-was dropped 2026-09-03 with the MPCC damping term.
+was dropped 2026-09-03 with the MPCC damping term; gamma is held at the
+gaze-derived constant (0.66, from the base config) rather than fitted.
 
 Loss = mean tunnel loss on the training widths (fit_speed_model.tunnel_loss,
 human-variability scaled) + mean pointing loss on the training radii
@@ -34,9 +35,12 @@ ANCHOR_SPEC = [
     # (minimum-jerk peak for a ~15 cm / 0.5 s reach; above every participant's
     # observed p99 cursor acceleration: A 1.6, B 2.8, C 3.4 m/s^2; B's fitted
     # value was 3.7). Set via --override planner_weights.acc_max.
-    # curvature-weighted gaze budget constants (re-estimated on cursor data)
+    # gaze budget quota, re-estimated on cursor data. gamma is NOT fitted
+    # (2026-09-03 decision): it stays at the gaze-derived constant 0.66 from
+    # the base config — the width exponent is independently measured (onset
+    # lead b=0.66, saccade amplitude b~0.55, local speed ~W^1) and letting
+    # CMA-ES move it traded it off against D0 on cursor loss alone.
     {"name": "D0", "bounds": (0.2, 1.5)},
-    {"name": "gamma", "bounds": (0.3, 1.5)},
     # intended time-to-anchor (s), quantised to the 50 ms step; a 3-node
     # horizon (<0.15 s) destabilises solves, so the floor is 0.15
     {"name": "plan_deadline_s", "bounds": (0.08, 0.25), "discrete_step": 0.01},
@@ -141,7 +145,7 @@ def main():
     ap.add_argument("--vmax", type=float, default=None)
     ap.add_argument("--override", default=None, help="JSON applied to the base persona (top-level keys; planner_weights/budget merged)")
     ap.add_argument("--patience", type=int, default=None, help="stop when the best loss has not improved >1%% for this many generations")
-    ap.add_argument("--fix-budget", action="store_true", help="keep D0/gamma fixed at the base (gaze-calibrated) values; fit planner weights only")
+    ap.add_argument("--fix-budget", action="store_true", help="keep D0 fixed at the base (gaze-calibrated) value; fit planner weights only (gamma is always fixed at the base constant)")
     ap.add_argument("--fix-deadline", action="store_true", help="drop plan_deadline_s from the search (gaze-measured crossing time; in BUMP mode it sets the motor pace)")
     ap.add_argument("--quick", action="store_true", help="fit on the straight/sharp/corner subset + 2 pointing rounds per radius")
     a = ap.parse_args()
@@ -180,7 +184,7 @@ def main():
         if name in ("plan_deadline_s", "plan_vmax"): return base[name]
         if name in ("D0", "gamma", "T_min"): return base["budget"][name]
         return base["planner_weights"][name]
-    spec = [sp for sp in ANCHOR_SPEC if not (a.fix_budget and sp["name"] in ("D0", "gamma"))
+    spec = [sp for sp in ANCHOR_SPEC if not (a.fix_budget and sp["name"] == "D0")
             and not (a.fix_deadline and sp["name"] == "plan_deadline_s")]
     init = {s["name"]: _init_val(s["name"]) for s in spec}
     # Noise-on stability trials: the widest corner/sinusoid TRAIN conditions,
