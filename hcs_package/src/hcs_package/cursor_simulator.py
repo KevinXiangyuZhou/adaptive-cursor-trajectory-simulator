@@ -49,7 +49,24 @@ def _reject_pruned(config: dict):
         _err("horizon_mode='fixed' (fixed-Th baseline)")
     sm = config.get("speed_model")
     if isinstance(sm, dict) and sm.get("type", "gam") == "gam":
-        _err("speed_model type='gam' (GAM speed-profile branch)")
+        _err("speed_model type='gam' (GAM speed-profile branch; the "
+             "finalized design uses type='gam_traversal' — the GAM sets the "
+             "plan DEADLINE, it is never a tracked speed profile)")
+    # Deadline rule stack dropped by the finalized cycle design (2026-09-03):
+    # the GAM traversal time subsumes them. Active values are refused so old
+    # fitted personas are not silently reinterpreted; 0/absent loads fine.
+    for key in ("plan_turn_time_s", "plan_turn_width_exp", "plan_width_time_exp"):
+        if float(config.get(key, 0.0) or 0.0) > 0.0:
+            raise ValueError(
+                f"Config key {key!r} was dropped by the finalized cycle "
+                f"design: the plan deadline is now the GAM traversal time "
+                f"(speed_model type='gam_traversal'). Re-fit the persona.")
+    # Velocity damping removed with the finalized design: the traversal
+    # deadline sets the pace; |v|^2 drag only fought the via-point drive.
+    if float((config.get("planner_weights") or {}).get("free_velocity", 0.0) or 0.0) > 0.0:
+        raise ValueError(
+            "planner_weights.free_velocity (velocity damping) was dropped by "
+            "the finalized cycle design. Re-fit the persona without it.")
     if (config.get("budget") or {}).get("curvature_weighted"):
         _err("budget.curvature_weighted")
     if float((config.get("planner_weights") or {}).get("goal_precision", 0.0) or 0.0) > 0.0:
@@ -217,9 +234,22 @@ class CursorSimulator:
         self.budget_T_min = float(budget_cfg.get('T_min', 0.1))
         self.budget_gamma = float(budget_cfg.get('gamma', 1.0))
         self.budget_W_ref = float(budget_cfg.get('W_ref', 0.026))
-        # Additive curvature toll in the lookahead budget (0 = width-only).
-        self.budget_lam = float(budget_cfg.get('lam', 0.0))
-        self.budget_beta = float(budget_cfg.get('beta', 1.0))
+        # Per-fixation lognormal hop scatter (finalized cycle design item 3):
+        # each anchor spends a budget with median D0 and this CV; 0 = off.
+        self.budget_D0_cv = float(budget_cfg.get('D0_cv', 0.0))
+        # The budget is width-only (S12 form): the additive curvature toll
+        # lam*|kappa|*(W_ref/W)^beta was removed — gaze leads do not shrink
+        # near corners (lam fit ~0 for most participants); curvature slows
+        # the movement via the turn-time deadline instead. Preserved at git
+        # tag s14-curvature-toll. Personas carrying lam > 0 were fitted
+        # under the toll and must not run silently without it.
+        if float(budget_cfg.get('lam', 0.0) or 0.0) > 0.0:
+            raise ValueError(
+                "budget.lam (additive curvature toll in the lookahead "
+                "budget) was pruned — the budget is width-only again. "
+                "Re-fit or use a width-only persona (e.g. the S12 line); "
+                "the toll implementation is preserved at git tag "
+                "'s14-curvature-toll'.")
         self.replan_mode = str(config.get('replan_mode', 'intermittent'))
         if self.replan_mode not in ('every_step', 'intermittent'):
             raise ValueError(f"replan_mode must be 'every_step' or 'intermittent', got {self.replan_mode!r}")
@@ -245,9 +275,21 @@ class CursorSimulator:
         # in pointing it stretches the deadline for far targets so the drive
         # asks for a physiological peak speed instead of an absurd one.
         self.plan_vmax = float(config.get('plan_vmax', 0.8))
-        # Turning-time deadline (s per radian of turning inside the lead); 0 = off.
-        self.plan_turn_time_s = float(config.get('plan_turn_time_s', 0.0))
-        self.plan_turn_width_exp = float(config.get('plan_turn_width_exp', 0.0))
+        # Finalized deadline (constrained space): t_plan = GAM traversal time
+        # of the lead. speed_model {"type": "gam_traversal", "path": ...};
+        # path None loads the shipped pooled 10p artifact. The old deadline
+        # rule stack (plan_width_time_exp, plan_turn_time_s,
+        # plan_turn_width_exp) is gone — _reject_pruned refuses active values.
+        sm_cfg = config.get('speed_model', {"type": "gam_traversal"})
+        self.traversal_speed_model = None
+        if isinstance(sm_cfg, dict) and sm_cfg.get('type') == 'gam_traversal':
+            from .speed_model import GAMSpeedModel
+            sm_path = sm_cfg.get('path') or str(
+                Path(__file__).parent / 'models' / 'gam_traversal_10p.pkl')
+            self.traversal_speed_model = GAMSpeedModel.load(sm_path)
+        elif sm_cfg not in (None, {}):
+            raise ValueError(
+                f"speed_model must be null or type 'gam_traversal', got {sm_cfg!r}")
         # Pace-holding tail: beyond the deadline node the progress schedule
         # continues at the fixation's pace, so a plan executed past its
         # deadline keeps moving instead of braking into the anchor.
@@ -495,7 +537,6 @@ class CursorSimulator:
             raise ValueError("the difficulty-budget horizon requires a reference path with profiles")
         s_prof, c_prof = clearance_profile
         _, w_task_prof = task_width_profile
-        _, k_prof = curvature_profile
         # Anchor-drive: the horizon is a fixed DURATION (the plan deadline),
         # so no reference speed is needed to convert the lookahead to steps.
         # Placeholder keeps the budget class API.
@@ -508,8 +549,7 @@ class CursorSimulator:
             s_prof, w_task_prof, v_ref_prof,
             D0=self.budget_D0, T_min=self.budget_T_min,
             gamma=self.budget_gamma, W_ref=self.budget_W_ref,
-            kappa_profile=k_prof,
-            lam=self.budget_lam, beta=self.budget_beta,
+            D0_cv=self.budget_D0_cv, rng=self._replan_rng,
         )
         tau_steps = max(0, int(round(self.replan_latency_s / self.interval)))
         scheduler = ReplanScheduler(
@@ -531,9 +571,7 @@ class CursorSimulator:
             deviation_frac=self.replan_deviation_frac,
             anchor_lead_floor=self.anchor_lead_floor,
             plan_deadline_s=self.plan_deadline_s, plan_vmax=self.plan_vmax,
-            plan_turn_time_s=self.plan_turn_time_s,
-            plan_turn_width_exp=self.plan_turn_width_exp,
-            budget_W_ref=self.budget_W_ref,
+            traversal_speed_model=self.traversal_speed_model,
             acc_max=float(self.planner_weights.get('acc_max', 0.0) or 0.0),
             horizon_min_steps=self.horizon_min_steps,
             horizon_max_steps=self.horizon_max_steps,
@@ -644,7 +682,10 @@ class CursorSimulator:
             'replan_mode': self.replan_mode,
             'anchor_drive': True,
             'plan_deadline_s': self.plan_deadline_s,
-            'plan_vmax': self.plan_vmax, 'plan_turn_time_s': self.plan_turn_time_s, 'plan_turn_width_exp': self.plan_turn_width_exp, 'arrival_mode': self.arrival_mode, 'anchor_lead_floor': self.anchor_lead_floor,
+            'plan_vmax': self.plan_vmax,
+            'traversal_speed_model': ('gam_traversal'
+                                      if self.traversal_speed_model else None),
+            'arrival_mode': self.arrival_mode, 'anchor_lead_floor': self.anchor_lead_floor,
             'budget_T_min': self.budget_T_min,
             'replan_latency_cv': self.replan_latency_cv,
             'replan_deviation_frac': self.replan_deviation_frac,

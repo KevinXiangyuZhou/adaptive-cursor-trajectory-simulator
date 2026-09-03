@@ -54,8 +54,13 @@ replaced.
 * `fit_anchor.py` — **one-stage** joint CMA-ES over the shared weights
   (`jerk, contour, constraint, goal, free_velocity`) + `plan_deadline_s`, on the
   training widths **and** training radii together (no tunnel/pointing stages).
-  Writes `results/{pid}_anchor_config_s{seed}.json` (runnable persona) and
-  `results/{pid}_anchor_fit_s{seed}.json` (fit record + held-out probe).
+  Writes `results/stages/{tag}/{pid}_anchor_config{tag}_s{seed}.json` (runnable
+  persona) and the matching `_anchor_fit_` record (+ held-out probe).
+
+Results are organized under `results/` by category (`pooled10/`, `stages/<tag>/`,
+`eval-main/`, `refpath/`, `probes/`, `archive/`) — see `results/README.md`.
+Notebook entries below dated before 2026-09-02 cite the old flat `results/…`
+paths; the files now live in the matching category folder.
 
 ## Human reference (gaze cohort, fixation onsets)
 

@@ -1,5 +1,5 @@
 {
-  "_description": "Young children — high noise, short arm (anchor-drive S14 base; persona nc/forearm carried over from the GAM-era fit, anchor-drive refit pending)",
+  "_description": "Young children \u2014 high noise, short arm (anchor-drive S14 base; persona nc/forearm carried over from the GAM-era fit, anchor-drive refit pending)",
   "Tp": 0.05,
   "Th": 0.25,
   "planner_weights": {
@@ -8,12 +8,11 @@
     "contour": 5.122455441436621,
     "desired_speed": 0.2,
     "goal": 1.000337616451122,
-    "free_velocity": 0.31585147585517287,
     "lag_anchor": 2000.0,
     "acc_max": 4.0
   },
   "speed_model": {
-    "type": "none"
+    "type": "gam_traversal"
   },
   "horizon_mode": "budget",
   "replan_mode": "intermittent",
@@ -21,9 +20,7 @@
     "D0": 1.657,
     "T_min": 0.1,
     "gamma": 0.657,
-    "W_ref": 0.026,
-    "lam": 0.2832,
-    "beta": 2.337
+    "W_ref": 0.026
   },
   "replan_latency_s": 0.1901,
   "replan_latency_cv": 0.7633,
@@ -40,8 +37,6 @@
   "arrival_mode": "distance",
   "anchor_lead_floor": true,
   "anchor_tail_pace": true,
-  "plan_turn_time_s": 0.2,
-  "plan_turn_width_exp": 1.0,
   "nc": [
     0.36,
     0.036

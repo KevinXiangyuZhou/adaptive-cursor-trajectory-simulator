@@ -110,7 +110,7 @@ def main():
     def eval_raw(vec, data):
         return fsm._eval_ref_path_spatial(vec, data, geometry)
 
-    base_path = HERE / "results" / f"{a.pid}_anchor_config_S9c_s42.json"
+    base_path = HERE / "results" / "stages" / "S9c" / f"{a.pid}_anchor_config_S9c_s42.json"
     if base_path.exists():
         base = json.load(open(base_path))
     else:   # participant without an anchor config yet: start from the aug-26 GAM config's route params
@@ -157,7 +157,7 @@ def main():
         hm = np.nanmean([ss.stats(h["trajectory"], h["speeds"], sp, thr) for h in rounds[tid]], axis=0)
         print(line + f"  | human {hm[0]:4.1f}/{hm[1]:4.1f}", flush=True)
 
-    out = HERE / "results" / f"{a.pid}_refpath_{a.tag}.json"
+    out = HERE / "results" / "refpath" / f"{a.pid}_refpath_{a.tag}.json"
     json.dump({"pid": a.pid, "fitted": {k: float(v) for k, v in fitted.items()},
                "norm_loss_train": best_loss, "seed": a.seed,
                "loss_kind": a.loss,

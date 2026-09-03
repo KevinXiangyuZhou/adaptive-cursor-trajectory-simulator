@@ -32,7 +32,7 @@ LETTER = {"P105835": "A", "P170114": "B", "P160254": "C"}
 
 
 def gaze_stats(pid, persona_path, tag, noise=True):
-    out = HERE / "results" / "ablation-gaze-lead" / tag
+    out = HERE / "results" / "probes" / "ablation-gaze-lead" / tag
     subprocess.run([sys.executable, str(ROOT / "eval/eval-gaze-lead/model_gaze_lead.py"), "--letters", LETTER[pid],
                     "--noise", "on" if noise else "off", "--config", str(persona_path), "--out-dir", str(out)],
                    check=True, capture_output=True)
@@ -68,13 +68,13 @@ def main():
                "types": {k[:5]: round(v["ct_ratio"], 2) for k, v in t["by_type"].items()},
                "pt_tr": (p.get("train") or {}).get("loss", np.nan), "pt_te": (p.get("test") or {}).get("loss", np.nan), "mtr": (p.get("train") or {}).get("mt_ratio", np.nan)}
         if not a.no_gaze:
-            pp = HERE / "results" / "ablation-gaze-lead" / f"{name}.json"; pp.parent.mkdir(parents=True, exist_ok=True)
+            pp = HERE / "results" / "probes" / "ablation-gaze-lead" / f"{name}.json"; pp.parent.mkdir(parents=True, exist_ok=True)
             json.dump(cfg, open(pp, "w"))
             row.update(gaze_stats(a.pid, pp, name))
         rows.append(row)
         print(f"{name:16s} tunnel {row['tun_tr']:6.2f}/{row['tun_te']:6.2f} CTr {row['ctr']:.2f} {row['types']} | pointing {row['pt_tr']:6.2f}/{row['pt_te']:6.2f} MTr {row['mtr']:.2f}"
               + (f" | gaze: cycle {row['cycle_s']:.2f}s arr/dev/exh {row['frac_arrival']:.2f}/{row['frac_dev']:.2f}/{row['frac_exh']:.2f} lead {row['lead_mm']} th {row['th_type']}" if not a.no_gaze else ""), flush=True)
-    json.dump(rows, open(HERE / "results" / "ablation_summary.json", "w"), default=float, indent=1)
+    json.dump(rows, open(HERE / "results" / "probes" / "ablation_summary.json", "w"), default=float, indent=1)
 
 
 if __name__ == "__main__":

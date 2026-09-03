@@ -1,8 +1,10 @@
 """Joint CMA-ES fit of the anchor-drive persona (one stage, one set of weights
 for tunnels AND pointing). The plan deadline is the gaze-measured time-to-
 anchor and is held fixed; the gaze budget (D0, gamma, T_min) and replan
-latency come from the Stage G base config. Fitted: jerk, contour, lag,
-constraint, goal, free_velocity, plan_deadline_s (lag is inert in anchor mode).
+latency come from the Stage G base config. Fitted: jerk, contour, constraint,
+goal, D0, gamma, plan_deadline_s (free-space T0 under the finalized design —
+tunnel deadlines come from the GAM traversal time), plan_vmax. free_velocity
+was dropped 2026-09-03 with the MPCC damping term.
 
 Loss = mean tunnel loss on the training widths (fit_speed_model.tunnel_loss,
 human-variability scaled) + mean pointing loss on the training radii
@@ -25,7 +27,7 @@ ANCHOR_SPEC = [
     {"name": "contour", "bounds": (0.0, 3.5), "log_scale": True},
     {"name": "constraint", "bounds": (1.0, 4.0), "log_scale": True},
     {"name": "goal", "bounds": (0.0, 4.0), "log_scale": True},
-    {"name": "free_velocity", "bounds": (-4.0, -0.5), "log_scale": True},
+    # free_velocity removed (2026-09-03): |v|^2 damping dropped from the MPCC.
     # coast-safety hinge removed from the fit (S12): with walls and the pace-holding
     # plan tail it was redundant (B: tunnel loss 8.77/5.59 -> 6.74/5.54 without it).
     # peak hand acceleration is NOT fitted: fixed at 4 m/s^2 in the base config
@@ -173,7 +175,6 @@ def main():
           f"({sum(len(v) for v in pt_train.values())} rounds); deadline {base['plan_deadline_s']}s", flush=True)
     fsm.compute_tunnel_scales(tun_train, tasks); fsm.compute_pointing_scales(pt_train)
     scales, pscales = dict(fsm.TUNNEL_SCALES), dict(fsm.POINT_SCALES)
-    base["planner_weights"].setdefault("safety", 5000.0)
     base.setdefault("plan_vmax", 0.8)
     def _init_val(name):
         if name in ("plan_deadline_s", "plan_vmax"): return base[name]
@@ -200,7 +201,8 @@ def main():
     fitted, best, hist = fsm.run_cmaes(f"anchor joint fit {a.pid}", spec, init, _eval_joint, shared,
                                        a.time_limit, a.seed, a.popsize, a.workers, sigma0=0.2, patience=a.patience)
     fsm.apply_params(base, fitted)
-    cfg_path = RESULTS / f"{a.pid}_anchor_config{a.tag}_s{a.seed}.json"
+    stage_dir = RESULTS / "stages" / (a.tag.strip("_") or "base"); stage_dir.mkdir(parents=True, exist_ok=True)
+    cfg_path = stage_dir / f"{a.pid}_anchor_config{a.tag}_s{a.seed}.json"
     with open(cfg_path, "w") as f:
         json.dump(base, f, indent=2)
     print(f"\nfitted: {json.dumps({k: float(v) for k, v in fitted.items()})}\nbest joint loss {best:.4f}; saved {cfg_path}")
@@ -211,7 +213,7 @@ def main():
     rec = {"pid": a.pid, "fitted": fitted, "best_loss": best, "history": hist, "deadline": base["plan_deadline_s"],
            "tunnel": res["tunnel"], "pointing": res.get("pointing"), "elapsed": time.time() - t0,
            "scales": scales, "pscales": pscales}
-    with open(RESULTS / f"{a.pid}_anchor_fit{a.tag}_s{a.seed}.json", "w") as f:
+    with open(stage_dir / f"{a.pid}_anchor_fit{a.tag}_s{a.seed}.json", "w") as f:
         json.dump(rec, f, indent=2, default=float)
 
 

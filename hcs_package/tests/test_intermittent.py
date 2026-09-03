@@ -49,10 +49,10 @@ def test_budget_anchor_narrower_is_shorter():
     assert h_narrow == pytest.approx(1.4 * 0.01, rel=1e-3)
 
 
-def test_budget_density_is_width_only_by_default():
-    # with lam=0 (the default) the density has no curvature term: the anchor
-    # on a uniform corridor depends only on width; the additive lam|kappa|
-    # toll is opt-in (fitted per participant in the S14 line)
+def test_budget_density_is_width_only():
+    # the density has no curvature term: the anchor on a uniform corridor
+    # depends only on width (the additive lam|kappa| toll was pruned —
+    # preserved at git tag s14-curvature-toll)
     n = 2001
     s = np.linspace(0.0, 2.0, n)
     kappa_free = DifficultyBudgetHorizon(
@@ -343,8 +343,8 @@ def test_sim_budget_every_step_matches_baseline_shape(sinusoidal_task):
 def test_sim_budget_solve_horizon_floored_in_time(sinusoidal_task):
     # With T_min > 0 the solve horizon never collapses below ceil(T_min/dt),
     # even when the anchor caps at the path end (the old stall/timeout mode).
-    # (lam here is the live additive curvature toll, not a legacy key.)
-    sim = _make_sim({"budget": {"D0": 1.66, "lam": 0.5, "T_min": 0.2}})
+    # (small D0 keeps the lead short so the floor actually binds)
+    sim = _make_sim({"budget": {"D0": 0.3, "T_min": 0.2}})
     sim.generate_trajectory_with_waypoints(
         task_file=sinusoidal_task, max_steps=300, target_radius=0.015)
     d = sim.last_diagnostics

@@ -98,7 +98,12 @@ FIT_DIR = Path(os.environ.get("HCS_GAZE_LEAD_FIT_DIR",
 # applied on top (until the next cluster fit regenerates the personas).
 GAZE_FLOOR_SUMMARY = PROJECT_ROOT / "eval" / "eval-gaze-cursor" / "results" / "lookahead_floor_summary.json"
 OUT_DIR = SCRIPT_DIR / "model-gaze-lead"
-PARTICIPANTS = {"A": "P105835", "B": "P170114", "C": "P160254"}
+PARTICIPANTS = {"A": "P105835", "B": "P170114", "C": "P160254",
+                # 10-participant batch (human_data/task_aligned_all)
+                "p01": "P103405", "p02": "P113109", "p03": "P123702",
+                "p04": "P130409", "p05": "P134305", "p06": "P163215",
+                "p07": "P170149", "p08": "P174303", "p09": "P190710",
+                "p10": "P132427"}
 DT = 0.05
 SCALE = 0.001          # task screen units (px @460x260) -> meters/task units
 MAX_STEPS = 600
@@ -239,10 +244,13 @@ def run_participant(letter, noise_on=True):
     pid = PARTICIPANTS[letter]
     sim = make_sim(letter, noise_on=noise_on)
 
-    tid_to_condition, tid_to_bucket = em.scan_conditions(GAZE_DATA_DIR)
+    # A/B/C live in gaze_cursor_data; the p-cohort in task_aligned_all.
+    data_dir = GAZE_DATA_DIR if not letter.startswith("p") \
+        else GAZE_DATA_DIR.parent / "task_aligned_all"
+    tid_to_condition, tid_to_bucket = em.scan_conditions(data_dir)
     tids = sorted(t for t, b in tid_to_bucket.items()
                   if b in ("steering", "id4scs_w2n", "id4scs_n2w", "fitts"))
-    rounds_all = em.load_trials_by_participant(tids, GAZE_DATA_DIR).get(pid, {})
+    rounds_all = em.load_trials_by_participant(tids, data_dir).get(pid, {})
     samples = gaze_data.load_samples(letter)
     hum_events = gaze_data.fixation_events(samples)
 

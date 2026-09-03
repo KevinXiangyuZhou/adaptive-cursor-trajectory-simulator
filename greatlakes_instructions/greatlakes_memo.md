@@ -1,7 +1,44 @@
 # Great Lakes Setup & Job Submission (adaptive-cursor-trajectory-simulator)
 
+Updated 2026-09-03: section 3b is the CURRENT fitting round — the 10p gaze
+batch under the finalized cycle design (GAM traversal deadline, no deadline
+rule stack, no free_velocity damping). Sections 3/4 describe the legacy
+aug-26-prolific GAM pipeline; personas it produced are REFUSED by the
+current simulator until refit.
+
+## 3b. CURRENT: 10p anchor-drive fit (finalized cycle design)
+
+```bash
+sbatch fit_anchor_10p.sh
+```
+
+- 6 array tasks (participants_10p.txt: p01 p02 p03 p04 p07 p10 — the kept
+  sessions; p05/p06/p08/p09 are deprecated), 12 CPUs, 1 GB/CPU, **8 h wall**,
+  CMA budget 6.5 h (`TIME_LIMIT=23400`) so the noise-on stability runs, the
+  full held-out probe and the save all finish inside the wall.
+- Data: `human_data/task_aligned_all` (short pXX ids are aliased to the
+  embedded Prolific ids by `fit_speed_model.load_participant`).
+- Base personas: `eval/model_fitting/base_configs_gaze/{pid}.json` —
+  finalized-design configs (speed_model `gam_traversal` → the shipped pooled
+  artifact `hcs_package/models/gam_traversal_10p.pkl`; budget priors D0=1.0,
+  gamma=0.66 from the 10p cohort analysis; pooled replan latency 0.19 s /
+  CV 0.89).
+- Fitted per participant (eval/eval-anchor-drive/fit_anchor.py): jerk,
+  contour, constraint, goal, D0, gamma, plan_deadline_s (free-space T0),
+  plan_vmax. free_velocity and the turn-time/width-time deadline keys are
+  GONE — the simulator refuses configs that carry them.
+- Outputs → `chi-27/results/anchor_fitting_10p[-RUN_TAG]/stages/base/`:
+  `{pid}_anchor_config_s42.json`, `{pid}_anchor_fit_s42.json`, fit logs.
+- Rerun one participant: `sbatch --array=N fit_anchor_10p.sh` (N = line
+  number in participants_10p.txt). Tagged generation: `RUN_TAG=v2 sbatch ...`.
+- Before the first submit after pulling: `pip install -e hcs_package/` in the
+  venv picks up the new `speed_model.py` + `models/` artifact (pygam is
+  already in setup.sh).
+
+## Legacy pipeline (pre-2026-09-03)
+
 Updated 2026-08-17 for the aug-26-prolific dataset (10 participants; steering +
-ID4SCS + unconstrained pointing) and the current model (fixed plant,
+ID4SCS + unconstrained pointing) and the then-current model (fixed plant,
 free-space LQR objective, `dwell_s`).
 
 ## 0. Where things live

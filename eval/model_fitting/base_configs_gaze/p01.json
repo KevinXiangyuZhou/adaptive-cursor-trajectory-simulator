@@ -1,0 +1,45 @@
+{
+  "_description": "Stage-G base persona for p01 (10p batch, finalized cycle design 2026-09-03): budget priors from the pooled 10p cohort (D0 1.0, gamma 0.66), GAM traversal deadline (shipped pooled artifact), pooled replan latency. D0/gamma/planner weights refined by eval/eval-anchor-drive/fit_anchor.py.",
+  "Tp": 0.05,
+  "Th": 0.3,
+  "planner_weights": {
+    "jerk": 3.5972845308941953e-07,
+    "constraint": 13.940680489040078,
+    "contour": 5.122455441436621,
+    "desired_speed": 0.2,
+    "goal": 1.000337616451122,
+    "lag_anchor": 2000.0,
+    "acc_max": 4.0
+  },
+  "speed_model": {
+    "type": "gam_traversal"
+  },
+  "horizon_mode": "budget",
+  "replan_mode": "intermittent",
+  "budget": {
+    "D0": 1.0,
+    "gamma": 0.66,
+    "T_min": 0.1,
+    "W_ref": 0.026
+  },
+  "replan_latency_s": 0.19,
+  "replan_latency_cv": 0.89,
+  "replan_deviation_frac": 0.3,
+  "reference_path": {
+    "w_cut": 0.3367214340332282,
+    "w_width_exp": 0.00039204398988715024,
+    "w_center": 0.01002787978319478,
+    "global_clearance_ref": 0.0152937958468396
+  },
+  "add_noise": true,
+  "plan_deadline_s": 0.19,
+  "plan_vmax": 0.6020310062823898,
+  "arrival_mode": "distance",
+  "anchor_lead_floor": true,
+  "anchor_tail_pace": true,
+  "nc": [
+    0.2,
+    0.02
+  ],
+  "forearm": 0.35
+}

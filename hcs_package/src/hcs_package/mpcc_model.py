@@ -139,8 +139,7 @@ def generate_mpcc(
     Generate an anchor-drive MPCC plan.
 
     The objective is the SAME everywhere: jerk effort, contour tracking,
-    boundary penalties, velocity damping free_velocity*|v|^2 at every node,
-    and one drive — a progress via-point
+    boundary penalties, and one drive — a progress via-point
 
         goal * ((anchor_s - s_{k_deadline}) / lead)^2
 
@@ -171,7 +170,7 @@ def generate_mpcc(
         num_steps: Prediction horizon (N).
         dt: Time step.
         weights: Dictionary of MPCC weights (jerk, goal, contour, lag_anchor,
-            free_velocity, constraint, acc_max, ...).
+            constraint, acc_max, ...).
         anchor_s: Arc length of the gaze anchor (the via-point target).
         k_deadline: 0-based horizon node index at which the plan must be at
             the anchor.
@@ -225,7 +224,6 @@ def generate_mpcc(
     # None = legacy full-distance tracking with 'contour'.
     w_lag_anchor = weights.get('lag_anchor', None)
     w_goal = weights.get('goal', 1.0)
-    w_free_velocity = weights.get('free_velocity', 0.08)
 
     anchor_s_target = float(np.clip(float(anchor_s), 0.0, ref_path.total_length))
     k_deadline = int(np.clip(int(k_deadline), 0, num_steps - 1))
@@ -304,12 +302,15 @@ def generate_mpcc(
         # 1. Jerk smoothness
         j_cost = np.sum(jx**2 + jy**2) * w_jerk
 
-        # 2. Velocity damping everywhere; no speed target.
+        # 2. Kinematic progress; no speed target and no velocity damping
+        # (the free_velocity |v|^2 term was removed with the finalized cycle
+        # design: the GAM traversal deadline sets the pace, and a quadratic
+        # drag on every node only fought the via-point drive).
         vx = vx_free + A_vel_mat @ jx
         vy = vy_free + A_vel_mat @ jy
         s_traj = kinematic_progress(vx, vy)
 
-        prog_cost = w_free_velocity * float(np.sum(vx**2 + vy**2))
+        prog_cost = 0.0
         if acc_max_w > 0.0:
             a_mag = np.hypot(ax_free + A_acc_mat @ jx, ay_free + A_acc_mat @ jy)
             prog_cost += w_acc * float(np.sum(np.maximum(a_mag - acc_max_w, 0.0) ** 2))

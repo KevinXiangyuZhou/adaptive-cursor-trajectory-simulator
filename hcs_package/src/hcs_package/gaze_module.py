@@ -7,6 +7,18 @@ triggers (arrival + latency, deviation interrupt, exhaustion backstop) that
 end the current fixation. Everything speed-shaped that the motor module is
 given — the via-point and its deadline — originates here.
 
+Finalized cycle design (2026-09-03): in constrained space the plan deadline
+is the GAM-predicted traversal time of the lead, t_plan = integral ds/v(s)
+with v from speed_model.GAMSpeedModel (clearance, |kappa|, anticipatory
+kappa over the next 50 mm; raw, no clamp). This replaced the hand-designed
+deadline rule stack (width-scaled base time plan_width_time_exp and the
+turning-time terms plan_turn_time_s / plan_turn_width_exp — dropped; last
+carried at the commit before this change). Free space keeps the bare base
+deadline T0 (pointing: the GAM is a corridor model). The lead/v_max and
+bounded-acceleration floors and the numerical >=3-node horizon floor
+remain. The MPCC stays anchor-driven — speed still emerges as
+lookahead / deadline; the GAM only decides how much time the plan gets.
+
 State is per trajectory: construct one GazeModule per generate_* call.
 """
 
@@ -27,9 +39,9 @@ class Fixation:
     theta0: float           # cursor arc-length progress at solve time
     anchor_s: float         # fixation anchor (arrival geometry; capped at path end)
     solve_anchor_s: float   # via-point target for the solve (differs from
-                            # anchor_s only when the turn-time horizon floor
-                            # stretches the plan: schedule position at the
-                            # horizon end, pace unchanged)
+                            # anchor_s only when the 3-node numerical horizon
+                            # floor stretches the plan: schedule position at
+                            # the horizon end, pace unchanged)
     n_base: int             # deadline node count (plan reaches the anchor here)
     n_solve: int            # solve horizon (deadline + open-loop padding, clamped)
     pace: float             # planned progress rate lead / t_plan (m/s)
@@ -58,9 +70,7 @@ class GazeModule:
         anchor_lead_floor: bool,
         plan_deadline_s: float,
         plan_vmax: float,
-        plan_turn_time_s: float,
-        plan_turn_width_exp: float,
-        budget_W_ref: float,
+        traversal_speed_model,
         acc_max: float,
         horizon_min_steps: int,
         horizon_max_steps: int,
@@ -79,15 +89,47 @@ class GazeModule:
         self.anchor_lead_floor = bool(anchor_lead_floor)
         self.plan_deadline_s = float(plan_deadline_s)
         self.plan_vmax = float(plan_vmax)
-        self.plan_turn_time_s = float(plan_turn_time_s)
-        self.plan_turn_width_exp = float(plan_turn_width_exp)
-        self.budget_W_ref = float(budget_W_ref)
         self.acc_max = float(acc_max)
         self.horizon_min_steps = int(horizon_min_steps)
         self.horizon_max_steps = int(horizon_max_steps)
         # Warm guess for the arc-length projection, shared across all
         # projections of this trajectory.
         self.theta_track = 0.0
+        # Traversal-time table (finalized deadline): cumulative
+        # T(s) = integral ds / v_gam(s) on the profile grid, v_gam from the
+        # raw GAM (clearance = W/2 clipped to its trained range, |kappa|,
+        # anticipatory kappa = max |kappa| over the next KAPPA_AHEAD_M).
+        # None when no speed model or no profiles (pointing-only tasks) —
+        # then the bare T0 deadline applies everywhere.
+        self._cum_T = None
+        if (traversal_speed_model is not None and clearance_profile is not None
+                and curvature_profile is not None):
+            from .speed_model import KAPPA_AHEAD_M
+            s_prof, w_prof = clearance_profile
+            _, k_prof = curvature_profile
+            s_prof = np.asarray(s_prof, float)
+            kappa = np.abs(np.asarray(k_prof, float))
+            ds = float(np.mean(np.diff(s_prof))) if len(s_prof) > 1 else 1.0
+            win = max(1, int(round(KAPPA_AHEAD_M / max(ds, 1e-9))) + 1)
+            # forward-window max via reversed sliding maximum
+            from numpy.lib.stride_tricks import sliding_window_view
+            pad = np.concatenate([kappa, np.full(win - 1, kappa[-1])])
+            k_ahead = sliding_window_view(pad, win).max(axis=1)
+            v = traversal_speed_model.predict_speed_raw(
+                np.asarray(w_prof, float) / 2.0, kappa, k_ahead)
+            v = np.clip(v, 0.02, None)  # numerical speed floor
+            dgrid = np.diff(s_prof)
+            self._traversal_s = s_prof
+            self._cum_T = np.concatenate(
+                [[0.0], np.cumsum(0.5 * (1.0 / v[1:] + 1.0 / v[:-1]) * dgrid)])
+
+    def _traversal_time(self, s0: float, s1: float) -> Optional[float]:
+        """GAM traversal time of [s0, s1]; None when no table is available."""
+        if self._cum_T is None:
+            return None
+        t0 = float(np.interp(s0, self._traversal_s, self._cum_T))
+        t1 = float(np.interp(s1, self._traversal_s, self._cum_T))
+        return max(0.0, t1 - t0)
 
     # ------------------------------------------------------------- triggers
 
@@ -166,32 +208,25 @@ class GazeModule:
         # Fixed plan duration: speed = lookahead / deadline.
         # Round half-up with a float guard (0.175/0.05 = 3.4999.. -> 4).
         lead_now = max(0.0, float(anchor_s) - theta0)
-        t_plan = max(self.plan_deadline_s, lead_now / max(self.plan_vmax, 1e-6))
-        # Turning-time mode: t_plan = max(T0, lead/v_max) + tau*theta*(W_ref/W)^beta,
-        # T0 = plan_deadline_s (gaze: straight-segment time-to-anchor, ~0.1-0.2 s).
-        # The numerical horizon floor (3 nodes) is separate, see below.
-        if self.plan_turn_time_s > 0.0 and self.curvature_profile is not None:
-            # Turning-time deadline (config-gated): the planned time-to-anchor
-            # grows with the turning angle inside the lead, tau_turn seconds
-            # per radian. Gaze data: the lead is width-only and crosses
-            # corners, while the time to reach the anchor lengthens in bends —
-            # one slower movement, not a shorter look-ahead.
-            s_kp, k_kp = self.curvature_profile
-            s_lo, s_hi = theta0, float(anchor_s)
-            if s_hi > s_lo + 1e-9:
-                s_grid = np.linspace(s_lo, s_hi, max(4, int((s_hi - s_lo) / 0.001) + 2))
-                theta_lead = float(np.trapz(np.interp(s_grid, s_kp, k_kp), s_grid))
-                w_fac = 1.0
-                if self.plan_turn_width_exp > 0.0 and self.clearance_profile is not None:
-                    # Tolerance-scaled turning time: seconds per radian grow
-                    # as the room shrinks, (W_ref/W)^beta (gaze data: B's
-                    # corner crossing 0.46 s at 20 mm vs 0.26 s at 40-50 mm;
-                    # beta = 1 fits best).
-                    s_cw, c_cw = self.clearance_profile
-                    w_loc = float(np.interp(theta0, s_cw, c_cw))
-                    if 0.0 < w_loc < FREE_SPACE_CLEARANCE_M:
-                        w_fac = (self.budget_W_ref / w_loc) ** self.plan_turn_width_exp
-                t_plan += self.plan_turn_time_s * theta_lead * w_fac
+        # Finalized deadline: in constrained space, the GAM-predicted
+        # traversal time of the lead — t_plan = integral ds / v_gam(s) over
+        # [theta0, anchor]. The fitted GAM subsumes the old rule stack (the
+        # width-scaled T0 and the turning-time terms): v_gam slows with
+        # narrowness (~W^1) and with curvature ahead, so narrow corridors
+        # and bends stretch the deadline without any hand-set exponents.
+        # Free space keeps the bare T0 (pointing; the GAM is a corridor
+        # model), and the lead/v_max floor guards far free-space targets.
+        t_gam = None
+        w_loc0 = None
+        if self.clearance_profile is not None:
+            s_cw0, c_cw0 = self.clearance_profile
+            w_loc0 = float(np.interp(theta0, s_cw0, c_cw0))
+        if (w_loc0 is not None and 0.0 < w_loc0 < FREE_SPACE_CLEARANCE_M):
+            t_gam = self._traversal_time(theta0, float(anchor_s))
+        if t_gam is not None:
+            t_plan = max(t_gam, lead_now / max(self.plan_vmax, 1e-6))
+        else:
+            t_plan = max(self.plan_deadline_s, lead_now / max(self.plan_vmax, 1e-6))
         if self.acc_max > 0.0:
             # ... nor faster than the bounded hand can cover the lead from
             # its current speed: 1/2 a t^2 + v t = h.
@@ -199,16 +234,15 @@ class GazeModule:
             t_acc = (-v_now + np.sqrt(v_now * v_now + 2.0 * self.acc_max * lead_now)) / self.acc_max
             t_plan = max(t_plan, float(t_acc))
         n_base = max(1, int(np.floor(t_plan / self.interval + 0.5 + 1e-9)))
-        if self.plan_turn_time_s > 0.0:
-            # Numerical floor: >= 3 nodes (shorter horizons destabilise the
-            # solve).
-            n_min = 3
-            if n_base < n_min:
-                # Horizon floor: demand the schedule position at the horizon
-                # end (pace unchanged), not the fixation point itself.
-                n_base = n_min
-                pace0 = lead_now / max(t_plan, 1e-6)
-                solve_anchor_s = min(theta0 + pace0 * n_base * self.interval, total)
+        # Numerical floor: >= 3 nodes (shorter horizons destabilise the
+        # solve).
+        n_min = 3
+        if n_base < n_min:
+            # Horizon floor: demand the schedule position at the horizon
+            # end (pace unchanged), not the fixation point itself.
+            n_base = n_min
+            pace0 = lead_now / max(t_plan, 1e-6)
+            solve_anchor_s = min(theta0 + pace0 * n_base * self.interval, total)
         pace = lead_now / max(t_plan, 1e-6)
         if os.environ.get('HCS_DEBUG_PLAN'):
             print(f"[plan] t={current_time:.2f} s0={theta0*1000:.0f}mm lead={lead_now*1000:.1f}mm "

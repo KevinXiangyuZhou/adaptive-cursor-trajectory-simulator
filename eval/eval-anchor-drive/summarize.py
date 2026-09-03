@@ -23,7 +23,7 @@ def row(name, t, p):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--gam-json", default=str(HERE / "results" / "gam_probe.json"))
+    ap.add_argument("--gam-json", default=str(HERE / "results" / "probes" / "gam_probe.json"))
     ap.add_argument("--seed", type=int, default=42)
     a = ap.parse_args()
     gam = {}
@@ -32,7 +32,7 @@ def main():
             gam[r["pid"]] = r
     print("train/test values; CTr = geometric-mean model/human completion-time ratio; MTr = kinematic movement-time ratio\n")
     for pid, L in LETTER.items():
-        fp = HERE / "results" / f"{pid}_anchor_fit_s{a.seed}.json"
+        fp = HERE / "results" / "stages" / "base" / f"{pid}_anchor_fit_s{a.seed}.json"
         if not fp.exists():
             print(f"{pid} ({L}): no anchor fit yet"); continue
         rec = json.load(open(fp))

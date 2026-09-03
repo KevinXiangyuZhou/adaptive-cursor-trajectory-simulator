@@ -3,12 +3,13 @@ stochastic persona -> eval-main (Fitts / steering law) -> gaze-lead run -> summa
 table next to the aug-26 GAM persona and any earlier tagged personas.
 
 Usage: python validate_persona.py --pid P170114 --tag S3 [--compare 8h2 S2]
-Reads results/{pid}_anchor_config_{tag}_s42.json and results/{pid}_anchor_fit_{tag}_s42.json.
+Reads results/stages/{tag}/{pid}_anchor_config_{tag}_s42.json and the matching _anchor_fit_ record.
 """
 import argparse, csv, json, subprocess, sys
 from pathlib import Path
 import numpy as np, pandas as pd
 HERE = Path(__file__).resolve().parent; ROOT = HERE.parents[1]; R = HERE / "results"
+STG = R / "stages"; EM = R / "eval-main"
 sys.path.insert(0, str(ROOT / "eval" / "eval-main"))
 import run_eval as em
 LETTER = {"P105835": "A", "P170114": "B", "P160254": "C"}
@@ -40,21 +41,22 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--pid", default="P170114"); ap.add_argument("--tag", required=True)
     ap.add_argument("--compare", nargs="*", default=[]); ap.add_argument("--skip-runs", action="store_true")
     a = ap.parse_args(); pid, L = a.pid, LETTER[a.pid]
-    persona = R / f"{pid}_anchor_persona_{a.tag}.json"
+    stage_dir = STG / a.tag; stage_dir.mkdir(parents=True, exist_ok=True); EM.mkdir(exist_ok=True)
+    persona = stage_dir / f"{pid}_anchor_persona_{a.tag}.json"
     if not a.skip_runs:
-        c = json.load(open(R / f"{pid}_anchor_config_{a.tag}_s42.json")); c["add_noise"] = True; c["replan_latency_cv"] = CV[pid]; c["random_seed"] = 1000
+        c = json.load(open(stage_dir / f"{pid}_anchor_config_{a.tag}_s42.json")); c["add_noise"] = True; c["replan_latency_cv"] = CV[pid]; c["random_seed"] = 1000
         c["_description"] = f"anchor persona {a.tag} for {pid}, noise on"; json.dump(c, open(persona, "w"), indent=2)
         subprocess.run([sys.executable, str(ROOT / "eval/eval-main/run_eval.py"), "--config", str(persona), "--pid", pid, "--data-dir", str(ROOT / "human_data/gaze_cursor_data"),
-                        "--results-dir", str(R / f"eval-main-{a.tag}-{L}"), "--fresh-sim"], check=True, capture_output=True)
-        misplaced = ROOT / "eval/eval-main" / "eval/eval-anchor-drive/results" / f"eval-main-{a.tag}-{L}"
+                        "--results-dir", str(EM / f"eval-main-{a.tag}-{L}"), "--fresh-sim"], check=True, capture_output=True)
+        misplaced = ROOT / "eval/eval-main" / "eval/eval-anchor-drive/results/eval-main" / f"eval-main-{a.tag}-{L}"
         if misplaced.exists():
-            import shutil; shutil.rmtree(R / f"eval-main-{a.tag}-{L}", ignore_errors=True); shutil.move(str(misplaced), str(R / f"eval-main-{a.tag}-{L}"))
+            import shutil; shutil.rmtree(EM / f"eval-main-{a.tag}-{L}", ignore_errors=True); shutil.move(str(misplaced), str(EM / f"eval-main-{a.tag}-{L}"))
         subprocess.run([sys.executable, str(ROOT / "eval/eval-gaze-lead/model_gaze_lead.py"), "--letters", L, "--noise", "on", "--config", str(persona),
                         "--out-dir", f"model-gaze-lead-{a.tag}-{L}"], check=True, capture_output=True)
     # table
-    entries = [("aug-26 GAM", {r["pid"]: r for r in json.load(open(R / "gam_full.json"))}[pid], R / f"eval-main-gam-{L}", None)]
+    entries = [("aug-26 GAM", {r["pid"]: r for r in json.load(open(R / "probes" / "gam_full.json"))}[pid], EM / f"eval-main-gam-{L}", None)]
     for t in list(a.compare) + [a.tag]:
-        rec = json.load(open(R / f"{pid}_anchor_fit_{t}_s42.json")); em_dir = R / f"eval-main-{t}-{L}"
+        rec = json.load(open(STG / t / f"{pid}_anchor_fit_{t}_s42.json")); em_dir = EM / f"eval-main-{t}-{L}"
         entries.append((f"anchor {t}", rec, em_dir if em_dir.exists() else None, ROOT / "eval/eval-gaze-lead" / f"model-gaze-lead-{t}-{L}"))
     print(f"\n{pid} ({L}) — full trial sets, corrected geometry, same build")
     for name, rec, em_dir, gz in entries:

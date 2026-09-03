@@ -79,7 +79,10 @@ for p in (PROJECT_ROOT, PROJECT_ROOT / "hcs_package" / "src", PROJECT_ROOT / "ev
 
 import run_eval as em  # eval/eval-main/run_eval.py: data loading, task builders, alignment  # noqa: E402
 from hcs_package.cursor_simulator import CursorSimulator  # noqa: E402
-from hcs_package.speed_model import GAMSpeedModel  # noqa: E402
+try:
+    from hcs_package.speed_model import GAMSpeedModel  # noqa: E402
+except ImportError:      # pruned in the S14 refactor (tag s14-variant-graveyard)
+    GAMSpeedModel = None  # GAM personas can no longer be simulated on this code line
 from hcs_package.reference_path import ReferencePath, generate_optimal_reference_path, densify_polyline  # noqa: E402
 from hcs_package.constraints import PathConstraint, RectangleConstraint, PolygonConstraint  # noqa: E402
 from hcs_package.constraint_utils import parse_constraints_from_json, convert_constraints_to_corridor_bounds  # noqa: E402
@@ -212,6 +215,14 @@ def load_participant(pid):
             all_data = em.load_trials_by_participant(tids, d)
         except Exception as e:
             last_err = e; continue
+        if pid not in all_data:
+            # p01..p10 batch: sessions are keyed by the embedded Prolific id
+            # (p01_steering_experiment_P103405_*.json -> P103405); resolve the
+            # short alias from the session filename.
+            hits = sorted(Path(d).glob(f"{pid}_*_P*_*.json"))
+            if hits:
+                pid = hits[0].name.split("_P")[1].split("_")[0]
+                pid = f"P{pid}"
         if pid in all_data:
             break
     else:

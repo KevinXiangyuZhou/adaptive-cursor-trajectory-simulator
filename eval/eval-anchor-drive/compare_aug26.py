@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import numpy as np
 
-HERE = Path(__file__).resolve().parent / "results"
+HERE = Path(__file__).resolve().parent / "results" / "probes"
 LETTER = {"P105835": "A", "P170114": "B", "P160254": "C"}
 HUMAN_TH = {"straight": 0.136, "corner": 0.178, "gentle_sinusoidal": 0.224, "mid_sinusoidal": 0.220, "sharp_sinusoidal": 0.254}
 FILES = [("aug-26 GAM", "gam_full.json"), ("anchor+bend", "anchor_full_bend.json"), ("anchor no-bend", "anchor_full_nobend.json")]

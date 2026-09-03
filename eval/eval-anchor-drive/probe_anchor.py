@@ -33,23 +33,41 @@ import run_eval as em                    # noqa: E402
 from hcs_package.cursor_simulator import CursorSimulator  # noqa: E402
 
 FITTED_DIR = ROOT / "model_fitting-8-26-26-1"
+# New-design base personas (finalized cycle, speed_model gam_traversal):
+# one JSON per participant, used when present — the legacy FITTED_DIR route
+# below only serves the pre-revision A/B/C personas and will be refused by
+# the simulator until those are refit.
+BASE_CONFIG_DIR = ROOT / "eval" / "model_fitting" / "base_configs_gaze"
 LETTER = {"P105835": "A", "P170114": "B", "P160254": "C"}
 # Gaze-measured intended time-to-anchor (fixation onset -> anchor crossing).
+# Under the finalized design this is the FREE-SPACE base deadline only
+# (tunnel deadlines come from the GAM traversal time).
 T_CROSS = {"P105835": 0.235, "P170114": 0.175, "P160254": 0.175}
-ANCHOR_DEFAULT = {"goal": 50.0, "free_velocity": 0.01}
+# free_velocity dropped 2026-09-03: the damping term was removed from the MPCC.
+ANCHOR_DEFAULT = {"goal": 50.0}
 
 
 def load_persona(pid, kind, override=None):
-    with open(FITTED_DIR / f"{pid}_gam_config_s42.json") as f:
-        cfg = json.load(f)
-    cfg.pop("_description", None)
-    cfg["speed_model"]["path"] = str(FITTED_DIR / cfg["speed_model"]["path"])
-    cfg["add_noise"] = False
-    cfg["replan_latency_cv"] = 0.0
-    if kind == "anchor":
-        cfg["speed_model"] = {"type": "none"}
-        cfg["plan_deadline_s"] = T_CROSS[pid]
-        cfg["planner_weights"].update(ANCHOR_DEFAULT)
+    base_path = BASE_CONFIG_DIR / f"{pid}.json"
+    if base_path.exists():
+        with open(base_path) as f:
+            cfg = json.load(f)
+        cfg.pop("_description", None)
+        cfg["add_noise"] = False
+        cfg["replan_latency_cv"] = 0.0
+        if kind == "anchor":
+            cfg.setdefault("planner_weights", {}).update(ANCHOR_DEFAULT)
+    else:
+        with open(FITTED_DIR / f"{pid}_gam_config_s42.json") as f:
+            cfg = json.load(f)
+        cfg.pop("_description", None)
+        cfg["speed_model"]["path"] = str(FITTED_DIR / cfg["speed_model"]["path"])
+        cfg["add_noise"] = False
+        cfg["replan_latency_cv"] = 0.0
+        if kind == "anchor":
+            cfg["speed_model"] = {"type": "none"}
+            cfg["plan_deadline_s"] = T_CROSS[pid]
+            cfg["planner_weights"].update(ANCHOR_DEFAULT)
     if override:
         for k, v in override.items():
             if k == "planner_weights":

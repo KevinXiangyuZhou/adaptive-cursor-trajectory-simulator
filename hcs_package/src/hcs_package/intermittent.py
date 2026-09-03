@@ -17,11 +17,14 @@ independently switchable so each can be ablated against the baseline
    -> 0, and h runs to the path end — capped). The integral is
    dimensionless, so D0 transfers between task units and meters unchanged.
 
-   The density is width-led with an optional additive curvature toll
-   lam*|kappa|*(W_ref/W)^beta (lam=0 gives the pure width-only budget; the
-   S14 line fits lam>0 per participant). A multiplicative
-   curvature-weighted density variant was pruned — see git tag
-   s14-variant-graveyard.
+   The density is width-only. Curvature does not enter the budget: fixation
+   leads do not shrink near corner vertices and gaze anchors routinely
+   cross them (verified per participant on the cleaned 13-participant
+   events; the additive toll lam*|kappa|*(W_ref/W)^beta fit lam=0 for 8/10
+   of the new cohort and noise-level lam for the rest). Curvature slows the
+   movement through the turn-time deadline instead (gaze_module). The
+   additive-toll variant is preserved at git tag s14-curvature-toll, the
+   multiplicative one at s14-variant-graveyard.
 
    The lookahead additionally has a visuomotor-delay floor h >= v * T_min
    (refit_floor.py): human leads at the narrowest widths do NOT shrink
@@ -57,6 +60,13 @@ _trapezoid = getattr(np, "trapezoid", getattr(np, "trapz", None))
 # and reference speed (m/s) for the time-to-traverse integral.
 _WIDTH_FLOOR = 1e-3
 _SPEED_FLOOR = 0.02
+# Width (m) above which the environment counts as unconstrained: the budget
+# density is EXACTLY zero there and the anchor runs to the path end. With
+# gamma > 0 this was implicit ((W_ref/inf)^gamma -> 0); with gamma = 0 (the
+# 2026-09-02 pooled redesign: width-ungraded corridor toll, verified on the
+# 10-participant batch) the width toll is a constant and free space must be
+# masked explicitly, or steering would never hand over to pointing.
+_FREE_SPACE_W = 0.15
 
 
 class DifficultyBudgetHorizon:
@@ -75,17 +85,25 @@ class DifficultyBudgetHorizon:
         T_min: float = 0.0,
         gamma: float = 1.0,
         W_ref: float = 0.026,
-        kappa_profile=None,
-        lam: float = 0.0,
-        beta: float = 1.0,
+        D0_cv: float = 0.0,
+        rng: Optional[np.random.Generator] = None,
     ):
         self.s = np.asarray(s_profile, dtype=float)
         self.D0 = float(D0)
         self.T_min = float(T_min)
         self.gamma = float(gamma)
         self.W_ref = float(W_ref)
+        # Per-fixation hop scatter (finalized cycle design, item 3): each
+        # anchor() call spends a lognormal budget with median D0 and this
+        # coefficient of variation. 0 = deterministic. The rng should be
+        # dedicated (decoupled from motor noise) so toggling add_noise does
+        # not change the anchor sequence.
+        self.D0_cv = float(D0_cv)
+        self.rng = rng
 
-        width = np.clip(np.asarray(width_profile, dtype=float), _WIDTH_FLOOR, None)
+        width_raw = np.asarray(width_profile, dtype=float)
+        free = ~np.isfinite(width_raw) | (width_raw > _FREE_SPACE_W)
+        width = np.clip(width_raw, _WIDTH_FLOOR, None)
         # Width-only density (W_ref/W)^gamma / W_ref: gamma=1 reduces exactly
         # to 1/W (W_ref cancels). gamma<1 makes the lead sublinear in width —
         # on a uniform corridor h = D0 * W^gamma * W_ref^(1-gamma) — matching
@@ -94,14 +112,7 @@ class DifficultyBudgetHorizon:
         # 1/length so D0 stays dimensionless; it is not a behavioural knob —
         # rescaling it is absorbed by D0.
         density = ((self.W_ref / width) ** self.gamma) / self.W_ref
-        if lam and float(lam) > 0.0:
-            # Additive curvature toll (config-gated): rho = width toll +
-            # lam*|kappa|*(W_ref/W)^beta. At fixed width a straight stretch is
-            # cheap and a curved one dear (straight-W10 easier than curved-W10);
-            # the turn toll shrinks with room, so wide corners stay crossable.
-            # lam (m/rad-ish) and beta are gaze-calibrated per participant.
-            kap_a = np.abs(np.asarray(kappa_profile, dtype=float)) if kappa_profile is not None else np.zeros_like(width)
-            density = density + float(lam) * kap_a * ((self.W_ref / width) ** float(beta))
+        density = np.where(free, 0.0, density)
 
         v_ref = np.clip(np.asarray(v_ref_profile, dtype=float), _SPEED_FLOOR, None)
 
@@ -118,7 +129,13 @@ class DifficultyBudgetHorizon:
         end."""
         s0 = float(np.clip(s0, self.s[0], self.s[-1]))
         d0 = float(np.interp(s0, self.s, self.cum_D))
-        d_target = d0 + self.D0
+        D0_eff = self.D0
+        if self.D0_cv > 0.0:
+            sigma = float(np.sqrt(np.log1p(self.D0_cv ** 2)))
+            z = (self.rng.standard_normal() if self.rng is not None
+                 else np.random.standard_normal())
+            D0_eff = self.D0 * float(np.exp(sigma * z))
+        d_target = d0 + D0_eff
         if d_target >= self.cum_D[-1]:
             s_budget = float(self.s[-1])
         else:
