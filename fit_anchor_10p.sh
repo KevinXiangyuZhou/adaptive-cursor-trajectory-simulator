@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
-#SBATCH --mem-per-cpu=1G
+#SBATCH --mem-per-cpu=256M
 #SBATCH --time=08:00:00
 #SBATCH --array=1-8
 #SBATCH --output=logs/fit_10p_%A_%a.out
