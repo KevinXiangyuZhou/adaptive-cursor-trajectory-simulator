@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=36
 #SBATCH --mem-per-cpu=512M
-#SBATCH --time=08:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=logs/fit_pooled8_%j.out
 #SBATCH --error=logs/fit_pooled8_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
@@ -20,9 +20,9 @@
 # (candidate x participant) units — popsize 12 x 8 pids = 96 sims-batches
 # per generation across 36 workers.
 #
-# Wall 8 h; CMA budget 5 h (default TIME_LIMIT=18000) — the pooled T0 scan
+# Wall 12 h; CMA budget 9 h (default TIME_LIMIT=32400) — the pooled T0 scan
 # (~10 min) and EIGHT per-participant held-out probes (~2 h total) run
-# after the budget and must fit inside the wall.
+# after the budget and must fit inside the wall with margin.
 #
 #   sbatch fit_pooled8.sh
 #   TIME_LIMIT=10800 sbatch fit_pooled8.sh        # shorter CMA budget
@@ -41,7 +41,7 @@ mkdir -p "$TMPDIR"; trap 'rm -rf "$TMPDIR"' EXIT   # node /tmp is small+shared
 export HCS_FIT_RESULTS_DIR="$RESULTS_ROOT/anchor_fitting_pooled8${RUN_TAG:+-$RUN_TAG}"
 export HCS_HUMAN_DATA_DIR="${SLURM_SUBMIT_DIR:-$(pwd)}/human_data/task_aligned_all"
 SEED="${SEED:-42}"
-TIME_LIMIT="${TIME_LIMIT:-18000}"      # CMA budget < wall: T0 scan + 8 probes follow
+TIME_LIMIT="${TIME_LIMIT:-32400}"      # 9 h CMA budget < 12 h wall: T0 scan + 8 probes follow
 mkdir -p "$HCS_FIT_RESULTS_DIR" logs
 
 echo "[$(date)] pooled-8 fit -> $HCS_FIT_RESULTS_DIR (budget ${TIME_LIMIT}s, seed $SEED)"
