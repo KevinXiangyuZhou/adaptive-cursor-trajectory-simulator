@@ -45,6 +45,22 @@ sbatch fit_anchor_10p.sh
   venv picks up the new `speed_model.py` + `models/` artifact (pygam is
   already in setup.sh).
 
+### Pooled single-model fit (optional)
+
+```bash
+sbatch fit_pooled8.sh
+```
+
+One persona fitted jointly on all eight participants
+(eval/eval-anchor-drive/fit_anchor_pooled8.py): pooled Stage-0 GAM + one
+CMA-fitted parameter set. Single wide task (36 CPUs), parallel over
+(candidate x participant) units; 5 h CMA budget, then pooled T0 scan and
+eight per-participant held-out probes. Output:
+`chi-27/results/anchor_fitting_pooled8/stages/pooled8/pooled8_anchor_config_s42.json`
+(+ fit record with per-pid probes). To evaluate it with eval-main, stage it
+as `personas_10p/default.json` — run_eval's --config-dir resolution falls
+back to default.json for every participant.
+
 ### Evaluation (after the fits finish)
 
 ```bash
