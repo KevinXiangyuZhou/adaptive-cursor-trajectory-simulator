@@ -243,7 +243,10 @@ def make_sim(letter, noise_on=True):
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
         json.dump(cfg, tf)
         cfg_file = tf.name
-    return CursorSimulator(cfg_file)
+    try:
+        return CursorSimulator(cfg_file)   # reads the config in the constructor
+    finally:
+        os.unlink(cfg_file)
 
 
 def run_participant(letter, noise_on=True):

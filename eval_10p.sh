@@ -25,10 +25,12 @@ set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-$(pwd)}"
 module load python3.11-anaconda/2024.02 2>/dev/null || true
 source venv/bin/activate 2>/dev/null || source .venv/bin/activate 2>/dev/null || true
-export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 MPLBACKEND=Agg TMPDIR=/tmp
+export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 MPLBACKEND=Agg
 
 RUN_TAG="${RUN_TAG:-}"
 RESULTS_ROOT="${RESULTS_ROOT:-/home/xiangyz/ondemand/data/sys/myjobs/projects/chi-27/results}"
+export TMPDIR="${RESULTS_ROOT}/tmp/job_${SLURM_JOB_ID:-local}_${SLURM_ARRAY_TASK_ID:-0}"
+mkdir -p "$TMPDIR"; trap 'rm -rf "$TMPDIR"' EXIT   # node /tmp is small+shared: 60064097_3 died ENOSPC
 FIT_DIR="$RESULTS_ROOT/anchor_fitting_10p${RUN_TAG:+-$RUN_TAG}/stages/base"
 export HCS_EVAL_RESULTS_DIR="$RESULTS_ROOT/eval-main-10p${RUN_TAG:+-$RUN_TAG}"
 PERSONA_DIR="$RESULTS_ROOT/personas_10p${RUN_TAG:+-$RUN_TAG}"
