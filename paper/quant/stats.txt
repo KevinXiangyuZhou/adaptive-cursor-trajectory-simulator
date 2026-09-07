@@ -1,0 +1,36 @@
+
+== 1. saccade distance vs width (power law amp = a * W^b) ==
+  human: b = 0.549 +- 0.077 (per-participant, n=8); pooled b = 0.512 (r=0.314, p=3.2e-137, n=5999)
+  model: b = 0.726 +- 0.024 (per-participant, n=8); pooled b = 0.724 (r=0.589, p=0.0e+00, n=7382)
+
+   straight vs sinusoidal saccade distance:
+  human: median saccade distance (mm) by width
+cls       sinusoid  straight  ratio
+width_mm                           
+10.0          22.0      30.0   1.36
+12.5          27.0      31.0   1.15
+16.5          29.0      40.0   1.38
+25.0          36.0      74.0   2.06
+50.0          67.0      89.0   1.33
+  model: median saccade distance (mm) by width
+cls       sinusoid  straight  ratio
+width_mm                           
+10.0         20.36     26.34   1.29
+12.5         23.80     38.37   1.61
+16.5         30.97     39.17   1.26
+25.0         41.18     61.50   1.49
+50.0         68.62     86.24   1.26
+
+== 2. catch-up duration vs width (power law dur = a * W^b) ==
+  human: b = -0.330 +- 0.112 (per-participant, n=8); pooled b = -0.294 (r=-0.178, p=4.3e-31, n=4166)
+  model: b = -0.273 +- 0.031 (per-participant, n=8); pooled b = -0.275 (r=-0.264, p=6.1e-109, n=6782)
+
+   duration vs accumulated curvature (partial, | log W, dist):
+  human: pooled partial rho = 0.390 (p=1.4e-116, n=3193); per-participant 0.427 +- 0.084
+  model: pooled partial rho = 0.413 (p=1.1e-277, n=6781); per-participant 0.416 +- 0.059
+
+== 3. overrun below zero before the next saccade ==
+  human: crossed in 72.6% of 3042 cycles (per-participant 75.7 +- 15.0%); median depth = 0.95 of the post-saccade lead
+  model: crossed in 91.2% of 6782 cycles (per-participant 90.9 +- 2.9%); median depth = 0.85 of the post-saccade lead
+
+(cycle counts: human 4166 model 6782 | curvature intervals: human 3193 model 6781 )
