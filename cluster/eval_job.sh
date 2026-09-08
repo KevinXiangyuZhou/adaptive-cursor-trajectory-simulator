@@ -57,24 +57,36 @@ python -u eval/eval-main/run_eval.py \
     --data-dir "$DATA_DIR" \
     2>&1 | tee "$HCS_EVAL_RESULTS_DIR/eval_${SHORT}_s${SEED}.log"
 
-if [ "$MODEL" = "mpcc" ] && [ "${GAZE_LEAD:-1}" = 1 ]; then
-    # Gaze-lead figures are diagnostics on top of the eval, not part of it:
-    # a failure here (e.g. the task-aligned gaze CSVs not rsynced into the
-    # checkout) is logged and marked, but must not fail the eval task and
-    # thereby cancel the aggregate (2026-09-08: it did, for every mpcc run).
+# Gaze-lead outputs after the eval. GAZE_LEAD level (default by variant):
+#   full   model_gaze_lead.py (planning-event CSV + per-trial PDF) AND
+#          gaze_lead_grids.py (PNG grids; 3 extra noisy runs per steering
+#          trial) — the full model only, whose figures the paper shows
+#   events model_gaze_lead.py only — the ablations: the event CSV is what
+#          the cycle measures of the ablation table are computed from; the
+#          figures are not needed and every-step variants make them slow
+#   0      nothing — the baseline has no anchors
+# These are diagnostics on top of the eval, not part of it: a failure is
+# logged and marked, but must not fail the eval task and thereby cancel the
+# aggregate (2026-09-08: it did, for every mpcc run).
+if [ -z "${GAZE_LEAD:-}" ] || [ "${GAZE_LEAD}" = 1 ]; then
+    if [ "$MODEL" != "mpcc" ]; then GAZE_LEAD=0
+    elif [ "${VARIANT:-full}" = "full" ]; then GAZE_LEAD=full
+    else GAZE_LEAD=events; fi
+fi
+if [ "$MODEL" = "mpcc" ] && [ "$GAZE_LEAD" != 0 ]; then
     set +e
-    # model gaze-lead PDFs: model sawtooth vs human rounds, one page per trial
     python -u eval/eval-gaze-lead/model_gaze_lead.py \
         --letters "$SHORT" --config "$PERSONA_DIR/${PID}.json" --noise on \
         --out-dir "$GAZE_LEAD_DIR/$SHORT" \
         > "$GAZE_LEAD_DIR/model_gaze_lead_${SHORT}.log" 2>&1 \
         || { echo "model_gaze_lead FAILED for $SHORT (see $GAZE_LEAD_DIR/model_gaze_lead_${SHORT}.log)"; touch "$GAZE_LEAD_DIR/FAILED_model_gaze_lead_${SHORT}"; }
-    # human-gaze-lead-10p-style PNG grids with the model overlaid
-    python -u eval/eval-gaze-lead/gaze_lead_grids.py \
-        --letters "$SHORT" --config "$PERSONA_DIR/${PID}.json" --noise on --runs 3 \
-        --out-dir "$GAZE_LEAD_DIR/$SHORT" \
-        > "$GAZE_LEAD_DIR/gaze_lead_grids_${SHORT}.log" 2>&1 \
-        || { echo "gaze_lead_grids FAILED for $SHORT (see $GAZE_LEAD_DIR/gaze_lead_grids_${SHORT}.log)"; touch "$GAZE_LEAD_DIR/FAILED_gaze_lead_grids_${SHORT}"; }
+    if [ "$GAZE_LEAD" = full ]; then
+        python -u eval/eval-gaze-lead/gaze_lead_grids.py \
+            --letters "$SHORT" --config "$PERSONA_DIR/${PID}.json" --noise on --runs 3 \
+            --out-dir "$GAZE_LEAD_DIR/$SHORT" \
+            > "$GAZE_LEAD_DIR/gaze_lead_grids_${SHORT}.log" 2>&1 \
+            || { echo "gaze_lead_grids FAILED for $SHORT (see $GAZE_LEAD_DIR/gaze_lead_grids_${SHORT}.log)"; touch "$GAZE_LEAD_DIR/FAILED_gaze_lead_grids_${SHORT}"; }
+    fi
     set -e
 fi
 echo "[$(date)] done $SHORT"

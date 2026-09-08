@@ -6,7 +6,8 @@
 #
 # --wall           SLURM time limit for the eval array (default 01:30:00 from
 #                  cluster/eval_job.sh; every-step variants such as no_gaze need more)
-# --no-gaze-lead   skip the gaze-lead figure step (GAZE_LEAD=0)
+# --no-gaze-lead   skip the gaze-lead step entirely (GAZE_LEAD=0; default by
+#                  variant: full model = events + figures, ablations = events only)
 # --aggregate-only submit only the aggregate on the eval outputs already in
 #                  <RUN_DIR>/eval (e.g. after the eval tasks were killed by the
 #                  wall during the figure step); nothing is deleted or refreshed
@@ -23,7 +24,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 RUN_DIR="${1:?usage: resubmit_eval.sh <RUN_DIR> [--min-runs N]}"; shift
-MIN_RUNS=0; WALL=""; GAZE_LEAD=1; AGG_ONLY=0
+MIN_RUNS=0; WALL=""; GAZE_LEAD=""; AGG_ONLY=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --min-runs) MIN_RUNS="$2"; shift 2;;
