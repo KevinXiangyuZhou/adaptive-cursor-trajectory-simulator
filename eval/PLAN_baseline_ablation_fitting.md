@@ -289,6 +289,14 @@ paths in the paper scripts resolve on both machines.
 
 ## 7. Status (2026-09-08)
 
+Evaluation parallelism: the CMA work unit is now (candidate x trial) —
+`fit_anchor.run_cmaes_units` / `fit_anchor_pooled8.pooled_cmaes` map ~300
+(per-participant) / ~2400 (pooled) trial simulations per generation over the
+whole node, so a generation ends after the longest trial, not the slowest
+candidate; `cluster/fit_job.sh` asks for 36 cores. Per-trial caps are 2x the
+human completion time (floor 3 s) for tunnels and 5 s for pointing, for every
+model (`fit_anchor.TUNNEL_CAP_MULT`, `POINT_CAP_STEPS`).
+
 Implemented and smoke-tested locally: ablation switches + bit-identity
 test (`hcs_package/tests/test_ablation_switches.py`), `fit_anchor.py`
 `--model/--ablation` (per-participant), `fit_anchor_pooled8.py`

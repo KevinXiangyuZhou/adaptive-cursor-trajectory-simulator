@@ -3,7 +3,7 @@
 #SBATCH --partition=standard
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
+#SBATCH --cpus-per-task=36
 #SBATCH --mem-per-cpu=256M
 #SBATCH --time=08:00:00
 #SBATCH --mail-type=END,FAIL
@@ -14,6 +14,11 @@
 # the code, and exports RUN_DIR / MODEL / VARIANT / KIND / SEED / TIME_LIMIT /
 # POPSIZE / PARTICIPANTS_FILE / VENV_DIR. Every path below derives from
 # RUN_DIR, so concurrent runs never touch each other's files.
+#
+# One full node (36 cores): the work unit is (candidate x trial), ~300
+# units per generation, so every core stays busy and a generation ends
+# after the longest single trial (2026-09-08; was 12 cores = one candidate
+# per core).
 #
 # Wall 8 h; CMA budget 6.5 h — start-up, the generation in flight when the
 # budget expires, the noise-on stability runs and the held-out probe + save

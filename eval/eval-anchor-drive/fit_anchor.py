@@ -22,17 +22,26 @@ human-variability scaled) + w_pt * mean pointing loss on the training radii
 test widths / radii. Fits run noiseless; the saved persona has noise (and
 latency variability) restored.
 
+Parallelism (2026-09-08): the work unit is one TRIAL of one candidate —
+(candidate x tunnel condition | pointing round | stability trial) — not one
+candidate, so a generation of 12 candidates is ~300 independent simulations
+that spread over every core of a node and the generation ends after the
+longest single trial, not the slowest candidate. Training data reach the
+workers once (pool initializer); jobs carry only (vector, kind, key).
+Per-trial step caps: 2x the human completion time (floor 3 s) for tunnels,
+5 s for pointing — the same for every model.
+
 Results go to $HCS_FIT_RESULTS_DIR (default: ./results next to this file):
     stages/<tag>/{pid}_{anchor|baseline}_config_s{seed}.json
     stages/<tag>/{pid}_{anchor|baseline}_fit_s{seed}.json
 <tag> defaults to the ablation name ('base' for the full model / baseline).
 
 Usage:
-  python fit_anchor.py --pid p01 --time-limit 900 --popsize 12
+  python fit_anchor.py --pid p01 --time-limit 900 --popsize 12 --workers 36
   python fit_anchor.py --pid p01 --ablation no_pace --quick --time-limit 120
   python fit_anchor.py --pid p01 --model baseline --quick --time-limit 120
 """
-import argparse, copy, json, math, os, sys, time
+import argparse, copy, json, math, multiprocessing, os, sys, time
 from pathlib import Path
 import numpy as np
 
@@ -118,6 +127,11 @@ BASELINE_SPEC = [
 # Post-fit T0 calibration grid (s): terminal free-space plan-time floor.
 T0_GRID = [round(0.08 + 0.01 * i, 2) for i in range(23)]   # 0.08 .. 0.30
 RESULTS = Path(os.environ.get("HCS_FIT_RESULTS_DIR", HERE / "results"))
+# Per-trial step caps (identical for every model). A candidate that crawls is
+# a failure either way; the cap stops it from burning the 30 s hard cap.
+TUNNEL_CAP_MULT = 2.0       # x human completion time (2026-09-08: 3 -> 2)
+TUNNEL_CAP_MIN_STEPS = 60   # 3 s floor
+POINT_CAP_STEPS = 100       # 5 s (human pointing MT <= ~1.3 s)
 
 # Simulator adapters per model: (make_sim(cfg) -> sim, run_sim(sim, tc, target_radius=None)).
 SIM_FNS = {
@@ -130,93 +144,208 @@ def _sim_fns(model):
     return SIM_FNS[model]
 
 
-# ---------------------------------------------------------------- loss parts
+def _cap_tunnel_task(tc, rounds):
+    ct_h = float(np.mean([(h["timestamps"][-1] - h["timestamps"][0]) / 1000.0 for h in rounds]))
+    tc = dict(tc)
+    tc["max_steps"] = int(min(fsm.MAX_SIM_STEPS, max(TUNNEL_CAP_MIN_STEPS, TUNNEL_CAP_MULT * ct_h / 0.05)))
+    return tc
+
+
+# ------------------------------------------------------------- trial units
+
+def _tunnel_trial(cfg, rounds, tc, cl, hw, model, sim=None):
+    """Loss of one tunnel condition (mean over the human rounds)."""
+    make_sim, run_sim = _sim_fns(model)
+    sim = sim or make_sim(cfg)
+    tc = _cap_tunnel_task(tc, rounds)
+    try:
+        traj, spd, dt = run_sim(sim, tc)
+    except Exception:
+        return 1e6
+    if len(traj) < 5:   # aborted within 5 steps (breach at start-up): a failed trial, not a crash
+        return fsm.INCOMPLETE_PENALTY
+    comp = fsm._completion(traj, cl)
+    if comp < 0.95:     # timed out or aborted (wall breach): trial failure
+        return fsm.INCOMPLETE_PENALTY * (1.0 - comp)
+    return float(np.mean([fsm.tunnel_loss(fsm.tunnel_metrics(traj, spd, h, cl, dt, hw)) for h in rounds]))
+
+
+def _pointing_trial(cfg, hp, model, sim=None):
+    """Loss of one pointing round."""
+    make_sim, run_sim = _sim_fns(model)
+    sim = sim or make_sim(cfg)
+    try:
+        pt_cap = min(fsm.MAX_SIM_STEPS, POINT_CAP_STEPS)
+        tc, _, _ = em.build_fitts_bypass_config(hp["round"], hp["R"], max_steps=pt_cap)
+        traj, spd, dt = run_sim(sim, tc, target_radius=hp["R"])
+    except Exception:
+        return 1e6
+    if len(traj) < 5 or len(traj) >= pt_cap:
+        return fsm.INCOMPLETE_PENALTY
+    mp = fsm._pointing_profile(traj, spd, [i * dt for i in range(len(traj))], hp["center"], hp["R"])
+    return float(fsm.pointing_loss(fsm.pointing_metrics(mp, hp, hp["canonical"])))
+
+
+def _stability_trial(cfg, tc, cl, model, sim=None):
+    """Noise-on wall-breach check for one trial: a persona must survive its
+    own motor noise (latency cv 0, fixed seed); an aborted or incomplete run
+    scores the failure penalty. Keeps noise-off-only optima (soft lateral
+    weights that breach walls under noise) out of the fit."""
+    make_sim, run_sim = _sim_fns(model)
+    if sim is None:
+        cfg_n = copy.deepcopy(cfg); cfg_n["add_noise"] = True
+        cfg_n["replan_latency_cv"] = 0.0; cfg_n["random_seed"] = 777
+        sim = make_sim(cfg_n)
+    try:
+        traj, spd, dt = run_sim(sim, tc)
+    except Exception:
+        return fsm.INCOMPLETE_PENALTY
+    comp = fsm._completion(traj, cl) if len(traj) >= 5 else 0.0
+    return fsm.INCOMPLETE_PENALTY * (1.0 - min(comp, 1.0)) if comp < 0.95 else 0.0
+
+
+# ---------------------------------------------------- sequential loss parts
+# (post-fit use: T0 scan, small probes; the CMA loop uses the unit pool)
 
 def _tunnel_part(cfg, train_data, tasks, model="mpcc"):
-    make_sim, run_sim = _sim_fns(model)
-    sim = make_sim(cfg)
-    total, n = 0.0, 0
-    for tid in sorted(train_data):
-        rounds = train_data[tid]; tc, cl, hw = tasks[tid]; n += 1
-        # Per-trial step cap: 3x the human completion time (floor 3 s). A
-        # candidate that crawls is a failure either way; this stops it from
-        # burning the 30 s cap on every trial (fit gen 1 took 25 min).
-        ct_h = float(np.mean([(h["timestamps"][-1] - h["timestamps"][0]) / 1000.0 for h in rounds]))
-        tc = dict(tc); tc["max_steps"] = int(min(fsm.MAX_SIM_STEPS, max(60, 3.0 * ct_h / 0.05)))
-        try:
-            traj, spd, dt = run_sim(sim, tc)
-        except Exception:
-            total += 1e6; continue
-        if len(traj) < 5:   # aborted within 5 steps (breach at start-up): a failed trial, not a crash
-            total += fsm.INCOMPLETE_PENALTY; continue
-        comp = fsm._completion(traj, cl)
-        if comp < 0.95:   # timed out or aborted (wall breach): trial failure
-            total += fsm.INCOMPLETE_PENALTY * (1.0 - comp); continue
-        total += float(np.mean([fsm.tunnel_loss(fsm.tunnel_metrics(traj, spd, h, cl, dt, hw)) for h in rounds]))
-    return total / max(n, 1)
+    sim = _sim_fns(model)[0](cfg)
+    vals = [_tunnel_trial(cfg, train_data[t], *tasks[t], model, sim=sim) for t in sorted(train_data)]
+    return float(np.mean(vals)) if vals else 0.0
 
 
 def _pointing_part(cfg, train_data, model="mpcc"):
-    make_sim, run_sim = _sim_fns(model)
-    sim = make_sim(cfg)
-    total, n = 0.0, 0
-    for tid in sorted(train_data):
-        for hp in fsm._human_pointing_profiles(train_data[tid]):
-            n += 1
-            try:
-                # Per-trial cap: 5 s (human pointing MT <= ~1.3 s); a timed-out
-                # trial is a failure either way. (Raised from 3 s on 2026-09-08
-                # so a slow-but-moving baseline candidate is scored on its
-                # profile rather than flat-penalised; the same cap applies to
-                # every model.)
-                pt_cap = min(fsm.MAX_SIM_STEPS, 100)
-                tc, _, _ = em.build_fitts_bypass_config(hp["round"], hp["R"], max_steps=pt_cap)
-                traj, spd, dt = run_sim(sim, tc, target_radius=hp["R"])
-            except Exception:
-                total += 1e6; continue
-            if len(traj) < 5:
-                total += fsm.INCOMPLETE_PENALTY; continue
-            if len(traj) >= pt_cap:
-                total += fsm.INCOMPLETE_PENALTY; continue
-            mp = fsm._pointing_profile(traj, spd, [i * dt for i in range(len(traj))], hp["center"], hp["R"])
-            total += fsm.pointing_loss(fsm.pointing_metrics(mp, hp, hp["canonical"]))
-    return total / max(n, 1)
+    sim = _sim_fns(model)[0](cfg)
+    vals = [_pointing_trial(cfg, hp, model, sim=sim)
+            for t in sorted(train_data) for hp in fsm._human_pointing_profiles(train_data[t])]
+    return float(np.mean(vals)) if vals else 0.0
 
 
 def _noise_stability(cfg, stab, model="mpcc"):
-    """Noise-on wall-breach check: a persona must survive its own motor noise.
-    Runs each stability trial once with noise on (latency cv 0); an aborted or
-    incomplete run scores the failure penalty. Keeps noise-off-only optima
-    (soft lateral weights that breach walls under noise) out of the fit."""
-    make_sim, run_sim = _sim_fns(model)
     cfg_n = copy.deepcopy(cfg); cfg_n["add_noise"] = True
     cfg_n["replan_latency_cv"] = 0.0; cfg_n["random_seed"] = 777
-    sim = make_sim(cfg_n)
-    pen = 0.0
-    for tc, cl in stab:
-        try:
-            traj, spd, dt = run_sim(sim, tc)
-        except Exception:
-            pen += fsm.INCOMPLETE_PENALTY; continue
-        comp = fsm._completion(traj, cl) if len(traj) >= 5 else 0.0
-        if comp < 0.95:
-            pen += fsm.INCOMPLETE_PENALTY * (1.0 - min(comp, 1.0))
-    return pen
+    sim = _sim_fns(model)[0](cfg_n)
+    return float(sum(_stability_trial(cfg, tc, cl, model, sim=sim) for tc, cl in stab))
 
 
-def _eval_joint(args):
-    vec, spec, base, tun_train, tasks, scales, pt_train, pscales, w_pt, stab, model = args
-    fsm.TUNNEL_SCALES.update(scales); fsm.POINT_SCALES.update(pscales)
-    cfg = copy.deepcopy(base); fsm.apply_params(cfg, fsm.decode(vec, spec))
+# ------------------------------------------------------- unit pool machinery
+
+_CTX = {}
+
+
+def _init_worker(ctx):
+    """Pool initializer: training data reach each worker once."""
+    global _CTX
+    _CTX = ctx
+    fsm.TUNNEL_SCALES.update(ctx["scales"]); fsm.POINT_SCALES.update(ctx["pscales"])
+
+
+def _cfg_for(vec):
+    if vec is None:
+        return _CTX["fixed_cfg"]
+    cfg = copy.deepcopy(_CTX["base"]); fsm.apply_params(cfg, fsm.decode(np.asarray(vec), _CTX["spec"]))
     cfg["add_noise"] = False; cfg["replan_latency_cv"] = 0.0
-    t0 = time.time()
-    lt = _tunnel_part(cfg, tun_train, tasks, model)
-    lp = _pointing_part(cfg, pt_train, model) if pt_train else 0.0
-    ls = _noise_stability(cfg, stab, model) if stab else 0.0
-    el = time.time() - t0
-    if el > 240:
-        print(f"    [slow candidate {el:.0f}s] tunnel {lt:.2f} pointing {lp:.2f} params {json.dumps({k: round(float(v), 4) for k, v in fsm.decode(vec, spec).items()})}", file=sys.stderr, flush=True)
-    return lt + w_pt * lp + ls
+    return cfg
+
+
+def _eval_unit(job):
+    """One (candidate, trial) unit. job = (vec | None, kind, key)."""
+    vec, kind, key = job
+    cfg = _cfg_for(vec)
+    model = _CTX["model"]
+    if kind == "tunnel":
+        rounds, tc, cl, hw = _CTX["tun"][key]
+        return _tunnel_trial(cfg, rounds, tc, cl, hw, model)
+    if kind == "pointing":
+        return _pointing_trial(cfg, _CTX["pt"][key], model)
+    tc, cl = _CTX["stab"][key]
+    return _stability_trial(cfg, tc, cl, model)
+
+
+def make_ctx(base, spec, data, model, fixed_cfg=None):
+    """Worker context: every tunnel condition (train + test), every pointing
+    round (train + test) and the stability trials, keyed for the job lists."""
+    tun = {}
+    for split in ("tun_train", "tun_test"):
+        for t, rounds in data[split].items():
+            tc, cl, hw = data["tasks"][t]
+            tun[t] = (rounds, tc, cl, hw)
+    pt = {}
+    for split in ("pt_train", "pt_test"):
+        for t, rounds in data[split].items():
+            for i, hp in enumerate(fsm._human_pointing_profiles(rounds)):
+                pt[(t, i)] = hp
+    return {"base": base, "spec": spec, "model": model, "fixed_cfg": fixed_cfg,
+            "tun": tun, "pt": pt, "stab": list(data["stab"]),
+            "scales": data["scales"], "pscales": data["pscales"]}
+
+
+def unit_jobs(vec, data, split="train"):
+    """Job list of one candidate on one split (+ stability on train)."""
+    jobs = [(vec, "tunnel", t) for t in sorted(data[f"tun_{split}"])]
+    jobs += [(vec, "pointing", (t, i)) for t in sorted(data[f"pt_{split}"])
+             for i in range(len(fsm._human_pointing_profiles(data[f"pt_{split}"][t])))]
+    if split == "train":
+        jobs += [(vec, "stab", i) for i in range(len(data["stab"]))]
+    return jobs
+
+
+def reduce_units(jobs, vals, w_pt):
+    """(tunnel mean over conditions) + w_pt * (pointing mean over rounds) + (stability sum)."""
+    tun = [v for (_, k, _), v in zip(jobs, vals) if k == "tunnel"]
+    pt = [v for (_, k, _), v in zip(jobs, vals) if k == "pointing"]
+    st = [v for (_, k, _), v in zip(jobs, vals) if k == "stab"]
+    lt = float(np.mean(tun)) if tun else 0.0
+    lp = float(np.mean(pt)) if pt else 0.0
+    return lt + w_pt * lp + float(sum(st)), lt, lp, float(sum(st))
+
+
+def run_cmaes_units(label, spec, init, base, data, model, w_pt, time_limit, seed,
+                    popsize, workers, sigma0=0.2, patience=None, min_rel_improve=0.01):
+    """CMA-ES with (candidate x trial) work units over one process pool."""
+    import cma
+    x0 = fsm.encode(init, spec)
+    ctx = make_ctx(base, spec, data, model)
+    n_units = len(unit_jobs(None, data))
+    print(f"\n--- {label}: CMA-ES over {[s['name'] for s in spec]} ---", flush=True)
+    print(f"  {n_units} trial units per candidate x popsize {popsize} = {n_units * popsize} units/gen "
+          f"on {workers} workers; budget {time_limit:.0f}s", flush=True)
+    es = cma.CMAEvolutionStrategy(x0.tolist(), sigma0, {"bounds": [[0.0] * len(x0), [1.0] * len(x0)],
+                                                        "popsize": popsize, "seed": seed, "verb_disp": 0,
+                                                        "verb_log": 0, "verb_filenameprefix": "", "verbose": -9})
+    t0 = time.time(); gen = 0
+    with multiprocessing.Pool(processes=workers, initializer=_init_worker, initargs=(ctx,)) as pool:
+        j0 = unit_jobs(list(x0), data)
+        initial_loss, lt, lp, ls = reduce_units(j0, pool.map(_eval_unit, j0), w_pt)
+        print(f"  initial loss {initial_loss:.4f} (tunnel {lt:.3f} pointing {lp:.3f} stability {ls:.1f}; {time.time() - t0:.0f}s)", flush=True)
+        best_x, best_loss = x0.copy(), initial_loss
+        hist = [{"generation": 0, "best_loss": float(best_loss), "elapsed_sec": round(time.time() - t0, 1)}]
+        last_improve_gen, ref_best = 0, best_loss
+        while not es.stop() and time.time() - t0 < time_limit:
+            if patience and gen - last_improve_gen >= patience:
+                print(f"  early stop: no >{min_rel_improve*100:.0f}% improvement in {patience} generations", flush=True); break
+            tg = time.time()
+            sols = es.ask()
+            per_cand = [unit_jobs(list(x), data) for x in sols]
+            flat = [j for jobs in per_cand for j in jobs]
+            vals = pool.map(_eval_unit, flat, chunksize=1)
+            fit, pos = [], 0
+            for jobs in per_cand:
+                f, _, _, _ = reduce_units(jobs, vals[pos:pos + len(jobs)], w_pt); pos += len(jobs)
+                fit.append(f)
+            es.tell(sols, fit); gen += 1
+            i = int(np.argmin(fit))
+            if fit[i] < best_loss:
+                best_loss, best_x = fit[i], np.array(sols[i]).copy()
+            if best_loss < ref_best * (1.0 - min_rel_improve):
+                ref_best, last_improve_gen = best_loss, gen
+            hist.append({"generation": gen, "best_loss": float(best_loss), "mean_loss": float(np.mean(fit)),
+                         "gen_sec": round(time.time() - tg, 1), "elapsed_sec": round(time.time() - t0, 1)})
+            print(f"  gen {gen:3d} best {best_loss:.4f} mean {np.mean(fit):.4f} ({time.time() - tg:.0f}s gen, {time.time() - t0:.0f}s)", flush=True)
+    fitted = fsm.decode(best_x, spec)
+    print(f"  {label} done: {gen} generations, {time.time() - t0:.0f}s")
+    for k, v in fitted.items():
+        print(f"    {k:16s}: {init[k]:.6g} -> {v:.6g}")
+    return fitted, float(best_loss), hist
 
 
 def _eval_t0(args):
@@ -249,31 +378,22 @@ def calibrate_t0(base, pt_train, pscales, workers):
 
 # ---------------------------------------------------------- held-out losses
 
-def _eval_split(args):
-    kind, cfg, data, tasks, scales, pscales, model = args
-    fsm.TUNNEL_SCALES.update(scales); fsm.POINT_SCALES.update(pscales)
+def heldout_losses(cfg, data, model, workers=4, w_pt=1.0):
+    """Train/test loss of a frozen persona, noiseless, with the same units as
+    the CMA objective (stability excluded), parallel over trials. Works for
+    every model (the eval pipeline produces the detailed metrics; this is the
+    fit record's quick summary)."""
     cfg = copy.deepcopy(cfg); cfg["add_noise"] = False; cfg["replan_latency_cv"] = 0.0
-    if not data:
-        return None
-    if kind == "tunnel":
-        return float(_tunnel_part(cfg, data, tasks, model))
-    return float(_pointing_part(cfg, data, model))
-
-
-def heldout_losses(cfg, tun_train, tun_test, pt_train, pt_test, tasks, model, workers=4):
-    """Train/test loss of a frozen persona, noiseless, with the same parts as
-    the CMA objective. Works for every model (the eval pipeline produces the
-    detailed metrics; this is the fit record's quick summary)."""
-    from multiprocessing import Pool
-    scales, pscales = dict(fsm.TUNNEL_SCALES), dict(fsm.POINT_SCALES)
-    jobs = [("tunnel", cfg, tun_train, tasks, scales, pscales, model),
-            ("tunnel", cfg, tun_test, tasks, scales, pscales, model),
-            ("pointing", cfg, pt_train, None, scales, pscales, model),
-            ("pointing", cfg, pt_test, None, scales, pscales, model)]
-    with Pool(processes=max(1, min(workers, 4))) as pool:
-        r = pool.map(_eval_split, jobs)
-    return {"tunnel": {"train": r[0], "test": r[1]},
-            "pointing": {"train": r[2], "test": r[3]}}
+    ctx = make_ctx(cfg, [], data, model, fixed_cfg=cfg)
+    out = {"tunnel": {}, "pointing": {}}
+    with multiprocessing.Pool(processes=max(1, workers), initializer=_init_worker, initargs=(ctx,)) as pool:
+        for split in ("train", "test"):
+            jobs = [j for j in unit_jobs(None, data, split) if j[1] != "stab"]
+            vals = pool.map(_eval_unit, jobs, chunksize=1) if jobs else []
+            _, lt, lp, _ = reduce_units(jobs, vals, w_pt)
+            out["tunnel"][split] = lt if any(j[1] == "tunnel" for j in jobs) else None
+            out["pointing"][split] = lp if any(j[1] == "pointing" for j in jobs) else None
+    return out
 
 
 # --------------------------------------------------------------- model setup
@@ -359,7 +479,7 @@ def load_training(pid, quick=False):
         pt_test = {t: r[:2] for t, r in pt_test.items()}
     fsm.compute_tunnel_scales(tun_train, tasks); fsm.compute_pointing_scales(pt_train)
     # Noise-on stability trials: the widest corner/sinusoid TRAIN conditions,
-    # capped at 3x the human completion time like the fit trials.
+    # capped like the fit trials.
     stab = []
     for ty, w in (("corner", 0.05), ("corner", 0.03), ("sinusoidal", 0.05)):
         tid = next((t for t in tun_train if abs(t2c[t]["tunnelWidth"] - w) < 1e-6
@@ -367,9 +487,7 @@ def load_training(pid, quick=False):
         if tid is None:
             continue
         tc, cl, hw = tasks[tid]
-        ct_h = float(np.mean([(h["timestamps"][-1] - h["timestamps"][0]) / 1000.0 for h in tun_train[tid]]))
-        tc = dict(tc); tc["max_steps"] = int(min(fsm.MAX_SIM_STEPS, max(60, 3.0 * ct_h / 0.05)))
-        stab.append((tc, cl))
+        stab.append((_cap_tunnel_task(tc, tun_train[tid]), cl))
     return dict(tun_train=tun_train, tun_test=tun_test, tasks=tasks,
                 pt_train=pt_train, pt_test=pt_test, stab=stab,
                 scales=dict(fsm.TUNNEL_SCALES), pscales=dict(fsm.POINT_SCALES),
@@ -409,15 +527,12 @@ def main():
     d = load_training(a.pid, a.quick)
     print(f"{a.pid} [{model} / {su['ablation']}] -> stages/{tag}: tunnel train {len(d['tun_train'])} tids, "
           f"test {len(d['tun_test'])}; pointing train {len(d['pt_train'])} tids "
-          f"({sum(len(v) for v in d['pt_train'].values())} rounds); "
+          f"({sum(len(v) for v in d['pt_train'].values())} rounds); stability {len(d['stab'])}; "
           f"search {[s['name'] for s in spec]}; deadline {base.get('plan_deadline_s')}", flush=True)
-    print(f"  noise-on stability trials: {len(d['stab'])}")
-    shared = (spec, base, d["tun_train"], d["tasks"], d["scales"], d["pt_train"], d["pscales"],
-              a.w_point, d["stab"], model)
     t0 = time.time()
-    fitted, best, hist = fsm.run_cmaes(f"{model}/{su['ablation']} joint fit {a.pid}", spec, init, _eval_joint,
-                                       shared, a.time_limit, a.seed, a.popsize, a.workers,
-                                       sigma0=0.2, patience=a.patience)
+    fitted, best, hist = run_cmaes_units(f"{model}/{su['ablation']} joint fit {a.pid}", spec, init, base, d, model,
+                                         a.w_point, a.time_limit, a.seed, a.popsize, a.workers,
+                                         sigma0=0.2, patience=a.patience)
     fsm.apply_params(base, fitted)
     # Stage T0: calibrate the terminal free-space plan-time floor (skipped
     # with --fix-deadline, for the baseline, for ablations that fit T0
@@ -442,12 +557,12 @@ def main():
     rec = {"pid": a.pid, "model": model, "ablation": su["ablation"], "tag": tag, "seed": a.seed,
            "search": [s["name"] for s in spec], "fitted": fitted, "best_loss": best, "history": hist,
            "deadline": base.get("plan_deadline_s"), "t0_scan": t0_scan,
+           "caps": {"tunnel_mult": TUNNEL_CAP_MULT, "tunnel_min_steps": TUNNEL_CAP_MIN_STEPS, "point_steps": POINT_CAP_STEPS},
            "scales": d["scales"], "pscales": d["pscales"]}
     if not a.skip_probe:
         # held-out evaluation: train/test loss of the frozen persona (all
         # models) plus the detailed anchor probe (mpcc: by width/type, t_cross)
-        rec["heldout"] = heldout_losses(base, d["tun_train"], d["tun_test"], d["pt_train"], d["pt_test"],
-                                        d["tasks"], model, workers=a.workers)
+        rec["heldout"] = heldout_losses(base, d, model, workers=a.workers, w_pt=a.w_point)
         print(f"held-out: {json.dumps(rec['heldout'])}", flush=True)
         if model == "mpcc":
             probe_ov = {k: v for k, v in base.items() if k not in ("speed_model", "reference_path", "_description")}

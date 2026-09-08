@@ -20,11 +20,12 @@ sides) gives cohort b = 0.72 +/- 0.08 vs the gamma=0.66 model's emergent
                [ tunnel train loss + w_pt * pointing train loss
                  + noise-on stability penalty ]
 
-Parallelism: the work unit is (candidate x participant) — popsize 12 x 8
-participants = 96 jobs per generation — so a wide node stays saturated even
-though one candidate's full evaluation spans eight datasets. Each
-participant's training data is loaded once in the parent and reaches the
-workers by fork (copy-on-write), so jobs carry only (vec, pid).
+Parallelism: the work unit is one TRIAL of one candidate on one participant
+— (candidate x participant x {tunnel condition | pointing round | stability
+trial}) — ~2400 units per generation of 12 candidates, so a generation ends
+after the longest single trial, not the slowest candidate. Each
+participant's data are loaded once in the parent and reach the workers by
+fork (copy-on-write); jobs carry only (vector, pid, kind, key).
 
 Post-fit: pooled T0 calibration (mean pointing loss over participants per
 grid point; mpcc without a jointly-fitted T0 only), then a held-out
@@ -56,15 +57,16 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import probe_anchor as pa                 # sets sys.path / HCS_HUMAN_DATA_DIR
-import fit_anchor as fa                   # loss parts + specs + setup + T0 grid
+import fit_anchor as fa                   # trial units + specs + setup + T0 grid
 import fit_speed_model as fsm
 
 LETTERS = ["p01", "p02", "p03", "p04", "p06", "p07", "p08", "p10"]
 RESULTS = Path(os.environ.get("HCS_FIT_RESULTS_DIR", HERE / "results"))
 
-# Per-participant training data, loaded once in the parent and inherited by
-# forked workers (copy-on-write): pid -> fit_anchor.load_training(...) dict.
+# Per-participant training data (fit_anchor.load_training dicts) and worker
+# contexts, built once in the parent and inherited by forked workers.
 _DATA = {}
+_CTXS = {}
 
 
 def _load_all(letters, quick):
@@ -75,20 +77,13 @@ def _load_all(letters, quick):
               f"{len(d['pt_train'])} tids, stability {len(d['stab'])}", flush=True)
 
 
-def _eval_unit(args):
-    """One (candidate, participant) unit of the pooled loss."""
-    vec, spec, base, pid, w_pt, model = args
-    d = _DATA[pid]
-    fsm.TUNNEL_SCALES.update(d["scales"])
-    fsm.POINT_SCALES.update(d["pscales"])
-    cfg = copy.deepcopy(base)
-    fsm.apply_params(cfg, fsm.decode(np.asarray(vec), spec))
-    cfg["add_noise"] = False
-    cfg["replan_latency_cv"] = 0.0
-    lt = fa._tunnel_part(cfg, d["tun_train"], d["tasks"], model)
-    lp = fa._pointing_part(cfg, d["pt_train"], model) if d["pt_train"] else 0.0
-    ls = fa._noise_stability(cfg, d["stab"], model) if d["stab"] else 0.0
-    return lt + w_pt * lp + ls
+def _eval_pid_unit(job):
+    """One (candidate, participant, trial) unit of the pooled loss."""
+    vec, pid, kind, key = job
+    ctx = _CTXS[pid]
+    fa._CTX = ctx
+    fsm.TUNNEL_SCALES.update(ctx["scales"]); fsm.POINT_SCALES.update(ctx["pscales"])
+    return fa._eval_unit((vec, kind, key))
 
 
 def _eval_t0_unit(args):
@@ -103,51 +98,59 @@ def _eval_t0_unit(args):
     return float(fa._pointing_part(cfg, d["pt_train"], "mpcc"))
 
 
-def _eval_heldout_unit(args):
-    """One (participant, split) unit of the pooled held-out summary."""
-    kind, split, base, pid, model = args
-    d = _DATA[pid]
-    fsm.TUNNEL_SCALES.update(d["scales"]); fsm.POINT_SCALES.update(d["pscales"])
-    cfg = copy.deepcopy(base); cfg["add_noise"] = False; cfg["replan_latency_cv"] = 0.0
-    data = d[f"{'tun' if kind == 'tunnel' else 'pt'}_{split}"]
-    if not data:
-        return None
-    if kind == "tunnel":
-        return float(fa._tunnel_part(cfg, data, d["tasks"], model))
-    return float(fa._pointing_part(cfg, data, model))
-
-
 def pooled_cmaes(spec, init, base, letters, w_pt, time_limit, seed, popsize,
                  workers, model, sigma0=0.2):
-    """CMA-ES over the pooled loss; map over (candidate x participant)."""
+    """CMA-ES over the pooled loss; map over (candidate x participant x trial)."""
     import cma
+    global _CTXS
+    _CTXS = {L: fa.make_ctx(base, spec, _DATA[L], model) for L in letters}
     x0 = fsm.encode(init, spec)
     es = cma.CMAEvolutionStrategy(
         x0, sigma0, {"bounds": [0, 1], "seed": seed, "popsize": popsize,
                      "verbose": -9})
-    ctx = mp.get_context("fork")   # workers inherit _DATA copy-on-write
+    ctx = mp.get_context("fork")   # workers inherit _DATA / _CTXS copy-on-write
+    n_units = sum(len(fa.unit_jobs(None, _DATA[L])) for L in letters)
+    print(f"  {n_units} trial units per candidate x popsize {popsize} = {n_units * popsize} units/gen "
+          f"on {workers} workers", flush=True)
+
+    def _jobs(x):
+        return [(list(x), L, k, key) for L in letters for (_, k, key) in fa.unit_jobs(None, _DATA[L])]
+
+    def _reduce(jobs, vals):
+        per_pid = []
+        for L in letters:
+            sel = [(j, v) for j, v in zip(jobs, vals) if j[1] == L]
+            f, _, _, _ = fa.reduce_units([(None, j[2], j[3]) for j, _ in sel], [v for _, v in sel], w_pt)
+            per_pid.append(f)
+        return float(np.mean(per_pid))
+
     best, best_vec, hist = np.inf, x0, []
     t_start = time.time()
     gen = 0
     with ctx.Pool(processes=workers) as pool:
+        j0 = _jobs(x0)
+        best = _reduce(j0, pool.map(_eval_pid_unit, j0, chunksize=1))
+        print(f"  initial pooled loss {best:.4f} ({time.time() - t_start:.0f}s)", flush=True)
+        hist.append({"gen": 0, "best": float(best), "elapsed": round(time.time() - t_start, 1)})
         while time.time() - t_start < time_limit:
+            tg = time.time()
             sols = es.ask()
-            jobs = [(list(x), spec, base, pid, w_pt, model)
-                    for x in sols for pid in letters]
-            unit = pool.map(_eval_unit, jobs)
-            # reduce: mean over participants per candidate
-            fit = [float(np.mean(unit[i * len(letters):(i + 1) * len(letters)]))
-                   for i in range(len(sols))]
+            per_cand = [_jobs(x) for x in sols]
+            flat = [j for jobs in per_cand for j in jobs]
+            vals = pool.map(_eval_pid_unit, flat, chunksize=1)
+            fit, pos = [], 0
+            for jobs in per_cand:
+                fit.append(_reduce(jobs, vals[pos:pos + len(jobs)])); pos += len(jobs)
             es.tell(sols, fit)
             gen += 1
             i = int(np.argmin(fit))
             if fit[i] < best:
                 best, best_vec = fit[i], sols[i]
-            hist.append({"gen": gen, "best": float(best),
-                         "gen_best": float(fit[i]),
+            hist.append({"gen": gen, "best": float(best), "gen_best": float(fit[i]),
+                         "gen_sec": round(time.time() - tg, 1),
                          "elapsed": round(time.time() - t_start, 1)})
             print(f"  gen {gen}: best {best:.4f} (this gen {fit[i]:.4f}), "
-                  f"{time.time() - t_start:.0f}s", flush=True)
+                  f"{time.time() - tg:.0f}s gen, {time.time() - t_start:.0f}s", flush=True)
     return fsm.decode(np.asarray(best_vec), spec), best, hist
 
 
@@ -190,9 +193,7 @@ def main():
     tag = a.tag.strip("_") or ("pooled8" if su["ablation"] == "none" else f"pooled8-{su['ablation']}")
 
     print(f"pooled fit [{model} / {su['ablation']}] over {a.letters} | budget {a.time_limit}s | "
-          f"popsize {a.popsize} x {len(a.letters)} pids = "
-          f"{a.popsize * len(a.letters)} units/gen on {a.workers} workers | "
-          f"search {[s['name'] for s in spec]}", flush=True)
+          f"popsize {a.popsize} on {a.workers} workers | search {[s['name'] for s in spec]}", flush=True)
     _load_all(a.letters, a.quick)
 
     t_all = time.time()
@@ -234,13 +235,8 @@ def main():
     # Held-out: the SAME pooled persona against each participant.
     heldout, probes = {}, {}
     if not a.skip_probe:
-        ctx = mp.get_context("fork")
-        jobs = [(kind, split, base, L, model) for L in a.letters
-                for kind in ("tunnel", "pointing") for split in ("train", "test")]
-        with ctx.Pool(processes=min(a.workers, len(jobs))) as pool:
-            unit = pool.map(_eval_heldout_unit, jobs)
-        for j, (kind, split, _, L, _) in enumerate(jobs):
-            heldout.setdefault(L, {}).setdefault(kind, {})[split] = unit[j]
+        for L in a.letters:
+            heldout[L] = fa.heldout_losses(base, _DATA[L], model, workers=a.workers, w_pt=a.w_point)
         print(f"held-out: {json.dumps(heldout)}", flush=True)
         if model == "mpcc":
             probe_ov = {k: v for k, v in base.items()
@@ -256,6 +252,8 @@ def main():
            "fitted": fitted, "best_loss": best,
            "gamma_pinned": (base.get("budget") or {}).get("gamma"),
            "history": hist, "t0_scan": t0_scan,
+           "caps": {"tunnel_mult": fa.TUNNEL_CAP_MULT, "tunnel_min_steps": fa.TUNNEL_CAP_MIN_STEPS,
+                    "point_steps": fa.POINT_CAP_STEPS},
            "deadline": base.get("plan_deadline_s"), "heldout": heldout, "probes": probes,
            "elapsed": time.time() - t_all}
     with open(stage_dir / f"pooled8_{su['tag_model']}_fit_s{a.seed}.json", "w") as f:

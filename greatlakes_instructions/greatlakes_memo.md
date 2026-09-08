@@ -191,3 +191,12 @@ console table: steering slope/R2, Fitts slope, time ratio, lateral RMSE per
 run, with status done/fit_done/pending/failed).
 Mirror locally: `rsync -av --exclude sim_cache --exclude code --exclude tmp
 --exclude 'participant_*' greatlakes:.../results/runs/<RUN_ID> results-cluster-10p/runs/`.
+
+Fit jobs use one full node (36 cores) since 2026-09-08: the CMA work unit is
+(candidate x trial), so a generation of 12 candidates is ~300 simulations
+spread over the node. The baseline replans every step and is ~3x slower per
+trial than the current model; give it a longer budget:
+  ./submit_run.sh --model baseline --variant full --kind perpid  --time-limit 37800 --wall 12:00:00
+  ./submit_run.sh --model baseline --variant full --kind pooled8 --time-limit 75600 --wall 24:00:00
+Check the pace after the first hour: `grep "gen " <RUN_DIR>/fit/fit_p01_s42.log | tail`
+(the "(NNNs gen" field is the generation time).
