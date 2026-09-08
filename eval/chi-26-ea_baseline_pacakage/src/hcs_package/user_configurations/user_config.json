@@ -1,0 +1,15 @@
+{
+  "_description": "Office worker — balanced speed and precision, everyday desktop use",
+  "Tp": 0.05,
+  "Th": 0.30,
+  "nc": [0.20, 0.020],
+  "forearm": 0.35,
+  "planner_weights": {
+    "jerk": 1.2270221915240491e-06,
+    "progress": 0.105984082449737e-06,
+    "wall": 200.36747657311221,
+    "contour": 20.8691506348653517,
+    "lag": 0.0580890071498787,
+    "desired_speed": 0.20841771264538897
+  }
+}

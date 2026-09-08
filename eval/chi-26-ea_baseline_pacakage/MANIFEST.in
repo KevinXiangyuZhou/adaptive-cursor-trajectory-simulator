@@ -1,0 +1,3 @@
+include README.md
+include LICENSE
+recursive-include point_and_click_modules/materials *.txt *.csv *.png
