@@ -57,7 +57,7 @@ python -u eval/eval-main/run_eval.py \
     --data-dir "$DATA_DIR" \
     2>&1 | tee "$HCS_EVAL_RESULTS_DIR/eval_${SHORT}_s${SEED}.log"
 
-if [ "$MODEL" = "mpcc" ]; then
+if [ "$MODEL" = "mpcc" ] && [ "${GAZE_LEAD:-1}" = 1 ]; then
     # Gaze-lead figures are diagnostics on top of the eval, not part of it:
     # a failure here (e.g. the task-aligned gaze CSVs not rsynced into the
     # checkout) is logged and marked, but must not fail the eval task and
