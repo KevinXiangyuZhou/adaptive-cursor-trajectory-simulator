@@ -127,7 +127,11 @@ def _fit_summary(run_dir, kind):
             "heldout_point_train": mean(ho["pointing"]["train"]), "heldout_point_test": mean(ho["pointing"]["test"])}
 
 
-def _status(run_dir, kind):
+def _status(run_dir, kind, superseded=""):
+    if superseded:
+        # a run marked superseded (cancelled, preflight, refit ...) is
+        # reported as such regardless of what its tree contains
+        return f"superseded:{superseded}"
     if (run_dir / "DONE").exists():
         return "done"
     for err in sorted((run_dir / "logs").glob("*.err")):
@@ -152,7 +156,8 @@ def collect(root):
         row = {"run_id": info.get("run_id", run_dir.name), "model": info.get("model"), "variant": info.get("variant"),
                "kind": kind, "seed": info.get("seed"), "commit": (info.get("commit") or "")[:7],
                "dirty": info.get("dirty"), "submitted": info.get("submitted"),
-               "status": _status(run_dir, kind), "superseded_by": info.get("superseded_by", ""),
+               "status": _status(run_dir, kind, info.get("superseded_by", "")),
+               "superseded_by": info.get("superseded_by", ""),
                "path": str(run_dir)}
         row.update(_fit_summary(run_dir, kind))
         row.update(_steering(run_dir))
