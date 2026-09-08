@@ -47,6 +47,39 @@ DEFAULT_BASELINE_CONFIG = {
     "random_seed": 1000,
 }
 
+# Task types the baseline's reference velocity is fitted for: the five
+# steering corridor types of the battery (the raw condition's tunnelType,
+# None = plain sinusoidal) and free-space pointing. The CHI-26-EA model
+# tracks ONE reference velocity per path ("planned for each path and tuned
+# to it"); fitting it per task type is that design under the same protocol
+# as the current model (2026-09-08).
+TASK_TYPES = ("straight", "corner", "sinusoidal", "gentle_sinusoidal",
+              "sharp_sinusoidal", "pointing")
+POINTING_TYPE = "pointing"
+
+
+def task_type_of(cond, bucket=None):
+    """Task type of a raw condition dict (steering tunnelType, None ->
+    sinusoidal) or 'pointing' for the fitts bucket."""
+    if bucket == "fitts" or (cond is not None and "targetRadius" in cond and "tunnelWidth" not in cond):
+        return POINTING_TYPE
+    return (cond or {}).get("tunnelType") or "sinusoidal"
+
+
+def resolve_desired_speed(cfg, task_type=None):
+    """Return a config whose planner_weights.desired_speed is the per-type
+    value for task_type (when the persona carries desired_speed_by_type);
+    unknown types fall back to the plain sinusoidal value, then the scalar."""
+    by_type = cfg.get("desired_speed_by_type")
+    if not by_type:
+        return cfg
+    import copy
+    out = copy.deepcopy(cfg)
+    v = by_type.get(task_type, by_type.get("sinusoidal", out["planner_weights"].get("desired_speed", 0.2)))
+    out["planner_weights"]["desired_speed"] = float(v)
+    return out
+
+
 _CLS = None
 
 
@@ -83,11 +116,15 @@ def baseline_base_config(pid=None):
             for k in ("nc", "forearm", "Interval", "Tp"):
                 if k in persona:
                     cfg[k] = persona[k]
+    # one reference velocity per task type, all starting at the EA default
+    cfg["desired_speed_by_type"] = {t: cfg["planner_weights"]["desired_speed"] for t in TASK_TYPES}
     return cfg
 
 
-def make_baseline_sim(cfg):
+def make_baseline_sim(cfg, task_type=None):
+    """EA simulator for one task type (its per-type reference velocity)."""
     Cls = load_baseline_simulator_class()
+    cfg = resolve_desired_speed(cfg, task_type)
     fd, path = tempfile.mkstemp(suffix=".json", prefix="bl_cfg_")
     os.close(fd)
     with open(path, "w") as f:

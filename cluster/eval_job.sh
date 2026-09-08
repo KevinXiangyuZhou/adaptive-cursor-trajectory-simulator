@@ -58,15 +58,23 @@ python -u eval/eval-main/run_eval.py \
     2>&1 | tee "$HCS_EVAL_RESULTS_DIR/eval_${SHORT}_s${SEED}.log"
 
 if [ "$MODEL" = "mpcc" ]; then
+    # Gaze-lead figures are diagnostics on top of the eval, not part of it:
+    # a failure here (e.g. the task-aligned gaze CSVs not rsynced into the
+    # checkout) is logged and marked, but must not fail the eval task and
+    # thereby cancel the aggregate (2026-09-08: it did, for every mpcc run).
+    set +e
     # model gaze-lead PDFs: model sawtooth vs human rounds, one page per trial
     python -u eval/eval-gaze-lead/model_gaze_lead.py \
         --letters "$SHORT" --config "$PERSONA_DIR/${PID}.json" --noise on \
         --out-dir "$GAZE_LEAD_DIR/$SHORT" \
-        2>&1 | tee "$GAZE_LEAD_DIR/model_gaze_lead_${SHORT}.log"
+        > "$GAZE_LEAD_DIR/model_gaze_lead_${SHORT}.log" 2>&1 \
+        || { echo "model_gaze_lead FAILED for $SHORT (see $GAZE_LEAD_DIR/model_gaze_lead_${SHORT}.log)"; touch "$GAZE_LEAD_DIR/FAILED_model_gaze_lead_${SHORT}"; }
     # human-gaze-lead-10p-style PNG grids with the model overlaid
     python -u eval/eval-gaze-lead/gaze_lead_grids.py \
         --letters "$SHORT" --config "$PERSONA_DIR/${PID}.json" --noise on --runs 3 \
         --out-dir "$GAZE_LEAD_DIR/$SHORT" \
-        2>&1 | tee "$GAZE_LEAD_DIR/gaze_lead_grids_${SHORT}.log"
+        > "$GAZE_LEAD_DIR/gaze_lead_grids_${SHORT}.log" 2>&1 \
+        || { echo "gaze_lead_grids FAILED for $SHORT (see $GAZE_LEAD_DIR/gaze_lead_grids_${SHORT}.log)"; touch "$GAZE_LEAD_DIR/FAILED_gaze_lead_grids_${SHORT}"; }
+    set -e
 fi
 echo "[$(date)] done $SHORT"

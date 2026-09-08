@@ -192,6 +192,9 @@ def apply_params(cfg, params):
             cfg[k] = v          # top-level simulator keys, not planner weights
         elif k in ("D0", "gamma", "T_min"):
             cfg.setdefault("budget", {})[k] = v   # gaze-budget constants
+        elif k.startswith("desired_speed:"):
+            # baseline: reference velocity fitted per task type
+            cfg.setdefault("desired_speed_by_type", {})[k.split(":", 1)[1]] = v
         elif k in REF_PATH_KEYS:
             cfg.setdefault("reference_path", {})[k] = v
         else:
@@ -322,17 +325,41 @@ def _make_sim(cfg, gam_path=None):
     return sim
 
 
-def _completion(traj, centerline):
-    cl = np.asarray(centerline, float); last = np.asarray(traj[-1], float)
+def _completion(traj, centerline, max_dist=None):
+    """Fraction of the centerline arc reached.
+
+    max_dist None (legacy): arc position of the LAST point's projection —
+    fooled by a trajectory that leaves the corridor and ends anywhere near
+    the goal's projection. max_dist given: the furthest arc position among
+    trajectory points that lie within max_dist of the centerline, so a
+    fly-away (a diverged solve, a wall breach into open space) does not
+    count as having traversed the path."""
+    cl = np.asarray(centerline, float)
     lens = np.linalg.norm(np.diff(cl, axis=0), axis=1); cum = np.concatenate([[0.0], np.cumsum(lens)])
     if cum[-1] <= 0:
         return 0.0
-    best = 0.0
-    for i in range(len(cl) - 1):
-        seg = cl[i + 1] - cl[i]; l2 = float(seg @ seg)
-        t = 0.0 if l2 < 1e-18 else float(np.clip((last - cl[i]) @ seg / l2, 0.0, 1.0))
-        best = max(best, cum[i] + t * lens[i])
-    return best / cum[-1]
+    if max_dist is None:
+        last = np.asarray(traj[-1], float)
+        best = 0.0
+        for i in range(len(cl) - 1):
+            seg = cl[i + 1] - cl[i]; l2 = float(seg @ seg)
+            t = 0.0 if l2 < 1e-18 else float(np.clip((last - cl[i]) @ seg / l2, 0.0, 1.0))
+            best = max(best, cum[i] + t * lens[i])
+        return best / cum[-1]
+    P = np.asarray(traj, float)                       # (n, 2)
+    A = cl[:-1]; seg = cl[1:] - A                     # (m, 2)
+    l2 = np.maximum(np.einsum("ij,ij->i", seg, seg), 1e-18)
+    # projection parameter of every point on every segment: (n, m)
+    t = np.clip(((P[:, None, :] - A[None, :, :]) * seg[None, :, :]).sum(-1) / l2[None, :], 0.0, 1.0)
+    foot = A[None, :, :] + t[:, :, None] * seg[None, :, :]
+    dist = np.linalg.norm(P[:, None, :] - foot, axis=-1)          # (n, m)
+    arc = cum[None, :-1] + t * lens[None, :]                       # (n, m)
+    j = np.argmin(dist, axis=1)                                    # nearest segment per point
+    d_near = dist[np.arange(len(P)), j]; s_near = arc[np.arange(len(P)), j]
+    on_path = d_near <= float(max_dist)
+    if not np.any(on_path):
+        return 0.0
+    return float(np.max(s_near[on_path]) / cum[-1])
 
 
 # ---------------------------------------------------------------------------

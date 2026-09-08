@@ -114,12 +114,16 @@ ABLATIONS = {
 }
 
 BASELINE_SPEC = [
-    {"name": "jerk", "log_scale": True, "bounds": (-10.0, -4.0)},        # 1e-10 .. 1e-4
+    {"name": "jerk", "log_scale": True, "bounds": (-8.0, -4.0)},         # 1e-8 .. 1e-4 (2026-09-08: was 1e-10; unregularised solves diverge under noise)
     {"name": "progress", "log_scale": True, "bounds": (-8.0, -4.0)},     # 1e-8 .. 1e-4
     {"name": "wall", "log_scale": True, "bounds": (1.0, 3.5)},           # 10 .. ~3162
     {"name": "contour", "log_scale": True, "bounds": (0.5, 3.5)},        # ~3 .. ~3162
-    {"name": "lag", "log_scale": True, "bounds": (-3.0, 1.0)},           # 0.001 .. 10
-    {"name": "desired_speed", "log_scale": True, "bounds": (-1.5, 0.1)}, # 0.03 .. 1.26 m/s
+    {"name": "lag", "log_scale": True, "bounds": (-2.0, 1.0)},           # 0.01 .. 10 (2026-09-08: was 0.001)
+    # reference velocity per task type (2026-09-08; was one desired_speed):
+    # the EA model tracks a reference velocity "planned for each path and
+    # tuned to it" — one per corridor type of the battery plus pointing.
+    *[{"name": f"desired_speed:{t}", "log_scale": True, "bounds": (-1.5, 0.1)}   # 0.03 .. 1.26 m/s
+      for t in bl.TASK_TYPES],
     {"name": "Th", "log_scale": False, "bounds": (0.20, 0.60), "discrete_step": 0.05},
     {"name": "curvature_scale", "log_scale": True, "bounds": (0.0, 2.0)},  # 1 .. 100
 ]
@@ -132,6 +136,7 @@ RESULTS = Path(os.environ.get("HCS_FIT_RESULTS_DIR", HERE / "results"))
 TUNNEL_CAP_MULT = 2.0       # x human completion time (2026-09-08: 3 -> 2)
 TUNNEL_CAP_MIN_STEPS = 60   # 3 s floor
 POINT_CAP_STEPS = 100       # 5 s (human pointing MT <= ~1.3 s)
+
 
 # Simulator adapters per model: (make_sim(cfg) -> sim, run_sim(sim, tc, target_radius=None)).
 SIM_FNS = {
@@ -153,10 +158,15 @@ def _cap_tunnel_task(tc, rounds):
 
 # ------------------------------------------------------------- trial units
 
-def _tunnel_trial(cfg, rounds, tc, cl, hw, model, sim=None):
+def _make_sim_for(cfg, model, task_type=None):
+    make_sim = _sim_fns(model)[0]
+    return make_sim(cfg, task_type) if model == "baseline" else make_sim(cfg)
+
+
+def _tunnel_trial(cfg, rounds, tc, cl, hw, model, sim=None, task_type=None):
     """Loss of one tunnel condition (mean over the human rounds)."""
-    make_sim, run_sim = _sim_fns(model)
-    sim = sim or make_sim(cfg)
+    _, run_sim = _sim_fns(model)
+    sim = sim or _make_sim_for(cfg, model, task_type)
     tc = _cap_tunnel_task(tc, rounds)
     try:
         traj, spd, dt = run_sim(sim, tc)
@@ -172,8 +182,8 @@ def _tunnel_trial(cfg, rounds, tc, cl, hw, model, sim=None):
 
 def _pointing_trial(cfg, hp, model, sim=None):
     """Loss of one pointing round."""
-    make_sim, run_sim = _sim_fns(model)
-    sim = sim or make_sim(cfg)
+    _, run_sim = _sim_fns(model)
+    sim = sim or _make_sim_for(cfg, model, bl.POINTING_TYPE)
     try:
         pt_cap = min(fsm.MAX_SIM_STEPS, POINT_CAP_STEPS)
         tc, _, _ = em.build_fitts_bypass_config(hp["round"], hp["R"], max_steps=pt_cap)
@@ -186,16 +196,16 @@ def _pointing_trial(cfg, hp, model, sim=None):
     return float(fsm.pointing_loss(fsm.pointing_metrics(mp, hp, hp["canonical"])))
 
 
-def _stability_trial(cfg, tc, cl, model, sim=None):
+def _stability_trial(cfg, tc, cl, hw, model, sim=None, task_type=None):
     """Noise-on wall-breach check for one trial: a persona must survive its
     own motor noise (latency cv 0, fixed seed); an aborted or incomplete run
     scores the failure penalty. Keeps noise-off-only optima (soft lateral
     weights that breach walls under noise) out of the fit."""
-    make_sim, run_sim = _sim_fns(model)
+    _, run_sim = _sim_fns(model)
     if sim is None:
         cfg_n = copy.deepcopy(cfg); cfg_n["add_noise"] = True
         cfg_n["replan_latency_cv"] = 0.0; cfg_n["random_seed"] = 777
-        sim = make_sim(cfg_n)
+        sim = _make_sim_for(cfg_n, model, task_type)
     try:
         traj, spd, dt = run_sim(sim, tc)
     except Exception:
@@ -207,14 +217,15 @@ def _stability_trial(cfg, tc, cl, model, sim=None):
 # ---------------------------------------------------- sequential loss parts
 # (post-fit use: T0 scan, small probes; the CMA loop uses the unit pool)
 
-def _tunnel_part(cfg, train_data, tasks, model="mpcc"):
-    sim = _sim_fns(model)[0](cfg)
-    vals = [_tunnel_trial(cfg, train_data[t], *tasks[t], model, sim=sim) for t in sorted(train_data)]
+def _tunnel_part(cfg, train_data, tasks, model="mpcc", types=None):
+    shared = None if model == "baseline" else _make_sim_for(cfg, model)
+    vals = [_tunnel_trial(cfg, train_data[t], *tasks[t], model, sim=shared,
+                          task_type=(types or {}).get(t)) for t in sorted(train_data)]
     return float(np.mean(vals)) if vals else 0.0
 
 
 def _pointing_part(cfg, train_data, model="mpcc"):
-    sim = _sim_fns(model)[0](cfg)
+    sim = _make_sim_for(cfg, model, bl.POINTING_TYPE)
     vals = [_pointing_trial(cfg, hp, model, sim=sim)
             for t in sorted(train_data) for hp in fsm._human_pointing_profiles(train_data[t])]
     return float(np.mean(vals)) if vals else 0.0
@@ -223,8 +234,9 @@ def _pointing_part(cfg, train_data, model="mpcc"):
 def _noise_stability(cfg, stab, model="mpcc"):
     cfg_n = copy.deepcopy(cfg); cfg_n["add_noise"] = True
     cfg_n["replan_latency_cv"] = 0.0; cfg_n["random_seed"] = 777
-    sim = _sim_fns(model)[0](cfg_n)
-    return float(sum(_stability_trial(cfg, tc, cl, model, sim=sim) for tc, cl in stab))
+    shared = None if model == "baseline" else _make_sim_for(cfg_n, model)
+    return float(sum(_stability_trial(cfg, tc, cl, hw, model, sim=shared, task_type=ty)
+                     for tc, cl, hw, ty in stab))
 
 
 # ------------------------------------------------------- unit pool machinery
@@ -253,12 +265,12 @@ def _eval_unit(job):
     cfg = _cfg_for(vec)
     model = _CTX["model"]
     if kind == "tunnel":
-        rounds, tc, cl, hw = _CTX["tun"][key]
-        return _tunnel_trial(cfg, rounds, tc, cl, hw, model)
+        rounds, tc, cl, hw, ty = _CTX["tun"][key]
+        return _tunnel_trial(cfg, rounds, tc, cl, hw, model, task_type=ty)
     if kind == "pointing":
         return _pointing_trial(cfg, _CTX["pt"][key], model)
-    tc, cl = _CTX["stab"][key]
-    return _stability_trial(cfg, tc, cl, model)
+    tc, cl, hw, ty = _CTX["stab"][key]
+    return _stability_trial(cfg, tc, cl, hw, model, task_type=ty)
 
 
 def make_ctx(base, spec, data, model, fixed_cfg=None):
@@ -268,7 +280,7 @@ def make_ctx(base, spec, data, model, fixed_cfg=None):
     for split in ("tun_train", "tun_test"):
         for t, rounds in data[split].items():
             tc, cl, hw = data["tasks"][t]
-            tun[t] = (rounds, tc, cl, hw)
+            tun[t] = (rounds, tc, cl, hw, data["types"][t])
     pt = {}
     for split in ("pt_train", "pt_test"):
         for t, rounds in data[split].items():
@@ -399,6 +411,8 @@ def heldout_losses(cfg, data, model, workers=4, w_pt=1.0):
 # --------------------------------------------------------------- model setup
 
 def _init_val(base, name):
+    if name.startswith("desired_speed:"):
+        return base["desired_speed_by_type"][name.split(":", 1)[1]]
     if name in base:
         return base[name]
     if name in (base.get("budget") or {}):
@@ -479,17 +493,21 @@ def load_training(pid, quick=False):
         pt_test = {t: r[:2] for t, r in pt_test.items()}
     fsm.compute_tunnel_scales(tun_train, tasks); fsm.compute_pointing_scales(pt_train)
     # Noise-on stability trials: the widest corner/sinusoid TRAIN conditions,
-    # capped like the fit trials.
+    # capped like the fit trials. (The protocol every fitted row shares —
+    # kept as is on 2026-09-08 so the finished mpcc fits stay valid; the
+    # baseline's noise instability is addressed by its per-type reference
+    # velocity and tighter weight bounds instead.)
     stab = []
+    def _ty(t): return t2c[t].get("tunnelType") or "sinusoidal"
     for ty, w in (("corner", 0.05), ("corner", 0.03), ("sinusoidal", 0.05)):
-        tid = next((t for t in tun_train if abs(t2c[t]["tunnelWidth"] - w) < 1e-6
-                    and (t2c[t].get("tunnelType") or "sinusoidal") == ty), None)
+        tid = next((t for t in tun_train if abs(t2c[t]["tunnelWidth"] - w) < 1e-6 and _ty(t) == ty), None)
         if tid is None:
             continue
         tc, cl, hw = tasks[tid]
-        stab.append((_cap_tunnel_task(tc, tun_train[tid]), cl))
+        stab.append((_cap_tunnel_task(tc, tun_train[tid]), cl, hw, _ty(tid)))
+    types = {t: bl.task_type_of(t2c[t], t2b.get(t)) for t in t2c}
     return dict(tun_train=tun_train, tun_test=tun_test, tasks=tasks,
-                pt_train=pt_train, pt_test=pt_test, stab=stab,
+                pt_train=pt_train, pt_test=pt_test, stab=stab, types=types,
                 scales=dict(fsm.TUNNEL_SCALES), pscales=dict(fsm.POINT_SCALES),
                 t2c=t2c, t2b=t2b)
 
@@ -557,7 +575,8 @@ def main():
     rec = {"pid": a.pid, "model": model, "ablation": su["ablation"], "tag": tag, "seed": a.seed,
            "search": [s["name"] for s in spec], "fitted": fitted, "best_loss": best, "history": hist,
            "deadline": base.get("plan_deadline_s"), "t0_scan": t0_scan,
-           "caps": {"tunnel_mult": TUNNEL_CAP_MULT, "tunnel_min_steps": TUNNEL_CAP_MIN_STEPS, "point_steps": POINT_CAP_STEPS},
+           "caps": {"tunnel_mult": TUNNEL_CAP_MULT, "tunnel_min_steps": TUNNEL_CAP_MIN_STEPS, "point_steps": POINT_CAP_STEPS,
+                    "n_stability": len(d["stab"])},
            "scales": d["scales"], "pscales": d["pscales"]}
     if not a.skip_probe:
         # held-out evaluation: train/test loss of the frozen persona (all

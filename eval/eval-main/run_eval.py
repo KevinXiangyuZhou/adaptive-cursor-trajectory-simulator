@@ -114,6 +114,7 @@ C2U_DIR = RESULTS_DIR / "ConstrainedToUnconstrained"   # only populated in --hum
 OVERVIEW_DIR = RESULTS_DIR / "overview"
 
 MAX_ROUND_DURATION_S = 60
+DIVERGE_SPEED_MPS = 3.0   # human peak cursor speed is < 1.5 m/s
 EXCLUDED_TUNNEL_TYPE = "constrained_to_unconstrained"
 
 BUCKET_LAW_DIR = {
@@ -567,7 +568,14 @@ def _build_record(traj_raw, interval, target_radius, max_steps):
     # target (never reached the dwell-based termination condition), rather
     # than genuinely completing the movement — i.e. it "timed out."
     timed_out = n_pts >= max_steps
+    # A diverged solve (the simulator's cursor exceeds any physiological
+    # speed and the run ends far off the path) is a failed run, not a fast
+    # one: flag it like a timeout so it is counted and excluded from the
+    # law regressions instead of averaged into them (2026-09-08).
+    diverged = bool(speeds) and max(speeds) > DIVERGE_SPEED_MPS
+    timed_out = timed_out or diverged
     return {
+        "diverged": diverged,
         "trajectory": traj,
         "speeds": speeds,
         "completion_time": ct,
@@ -700,11 +708,25 @@ POOL_TIMEOUT_S = 3600
 MODEL_KIND = "mpcc"
 
 
-def _make_simulator(config_path, model=None):
+def _make_simulator(config_path, model=None, cond=None, bucket=None):
+    """Simulator for one condition: this repo's MPCC, or the CHI-26-EA
+    baseline with its per-task-type reference velocity resolved (the persona
+    carries desired_speed_by_type; the condition's tunnelType / the fitts
+    bucket selects the value, exactly as in fitting)."""
     model = model or MODEL_KIND
     if model == "baseline":
-        from utils.baseline_loader import load_baseline_simulator_class
-        return load_baseline_simulator_class()(config_path)
+        from utils.baseline_loader import (load_baseline_simulator_class,
+                                           resolve_desired_speed, task_type_of)
+        cfg = json.load(open(config_path))
+        cfg = resolve_desired_speed(cfg, task_type_of(cond, bucket))
+        fd, path = tempfile.mkstemp(suffix=".json", prefix="bl_eval_")
+        os.close(fd)
+        with open(path, "w") as f:
+            json.dump(cfg, f)
+        try:
+            return load_baseline_simulator_class()(path)
+        finally:
+            os.unlink(path)
     if model != "mpcc":
         raise ValueError(f"unknown model kind {model!r}")
     return CursorSimulator(config_path)
@@ -799,14 +821,14 @@ def _run_condition_job(job):
         task_config, centerline = job["task_config"], job["centerline"]
         target_radius = task_config["target_radius"]
         if n_needed > 0:
-            sim = _make_simulator(job["config_path"], job.get("model"))
+            sim = _make_simulator(job["config_path"], job.get("model"), cond, bucket)
             new_records = run_tunnel_simulator(sim, task_config, target_radius, n_needed)
         tunnel_path = centerline
         tunnel_width = job["tunnel_width"]
     elif bucket == "fitts":
         target_radius = cond["targetRadius"]
         if n_needed > 0:
-            sim = _make_simulator(job["config_path"], job.get("model"))
+            sim = _make_simulator(job["config_path"], job.get("model"), cond, bucket)
             for i in range(n_needed):
                 round_idx = (len(cached) + i) % len(human_rounds)
                 task_config, _centerline, _width = build_fitts_bypass_config(
@@ -818,7 +840,7 @@ def _run_condition_job(job):
     elif bucket == "c2u":
         target_radius = float(cond.get("targetRadius", 0.01))
         if n_needed > 0:
-            sim = _make_simulator(job["config_path"], job.get("model"))
+            sim = _make_simulator(job["config_path"], job.get("model"), cond, bucket)
             new_records = run_tunnel_simulator(sim, job["task_config"], target_radius, n_needed)
         tunnel_path = job["centerline"]
         tunnel_width = job["tunnel_width"]
