@@ -693,6 +693,22 @@ def process_condition(law_dir, pid, tid, folder_name, human_rounds, model_record
 PER_CONDITION_TIMEOUT_S = 180
 POOL_TIMEOUT_S = 3600
 
+# Which simulator the persona configs drive: "mpcc" (this repo's
+# hcs_package) or "baseline" (the CHI-26-EA package, imported in isolation
+# by utils.baseline_loader). Set from --model in main(); carried in every
+# job dict so worker processes construct the right class.
+MODEL_KIND = "mpcc"
+
+
+def _make_simulator(config_path, model=None):
+    model = model or MODEL_KIND
+    if model == "baseline":
+        from utils.baseline_loader import load_baseline_simulator_class
+        return load_baseline_simulator_class()(config_path)
+    if model != "mpcc":
+        raise ValueError(f"unknown model kind {model!r}")
+    return CursorSimulator(config_path)
+
 
 def build_condition_job(pid, tid, bucket, cond, human_rounds, cached_records,
                          config_path_str, tid_geometry, simulate, human_only=False,
@@ -716,6 +732,7 @@ def build_condition_job(pid, tid, bucket, cond, human_rounds, cached_records,
         "human_rounds": human_rounds, "cached_records": cached_records,
         "n_needed": n_needed, "config_path": config_path_str,
         "law_dir": str(law_dir), "human_only": human_only,
+        "model": MODEL_KIND,
     }
 
     if bucket == "steering":
@@ -782,14 +799,14 @@ def _run_condition_job(job):
         task_config, centerline = job["task_config"], job["centerline"]
         target_radius = task_config["target_radius"]
         if n_needed > 0:
-            sim = CursorSimulator(job["config_path"])
+            sim = _make_simulator(job["config_path"], job.get("model"))
             new_records = run_tunnel_simulator(sim, task_config, target_radius, n_needed)
         tunnel_path = centerline
         tunnel_width = job["tunnel_width"]
     elif bucket == "fitts":
         target_radius = cond["targetRadius"]
         if n_needed > 0:
-            sim = CursorSimulator(job["config_path"])
+            sim = _make_simulator(job["config_path"], job.get("model"))
             for i in range(n_needed):
                 round_idx = (len(cached) + i) % len(human_rounds)
                 task_config, _centerline, _width = build_fitts_bypass_config(
@@ -801,7 +818,7 @@ def _run_condition_job(job):
     elif bucket == "c2u":
         target_radius = float(cond.get("targetRadius", 0.01))
         if n_needed > 0:
-            sim = CursorSimulator(job["config_path"])
+            sim = _make_simulator(job["config_path"], job.get("model"))
             new_records = run_tunnel_simulator(sim, job["task_config"], target_radius, n_needed)
         tunnel_path = job["centerline"]
         tunnel_width = job["tunnel_width"]
@@ -1459,7 +1476,8 @@ def main():
                         help="Directory of per-participant human data JSON files")
     parser.add_argument("--buckets", type=str, nargs="+", default=None,
                         choices=["steering", "id4scs_w2n", "id4scs_n2w", "fitts", "c2u"],
-                        help="Restrict processing to these task buckets (default: all)")
+                        help="Restrict processing to these task buckets (default: steering fitts; "
+                             "ID4SCS and c2u are out of the paper's scope and opt-in only)")
     parser.add_argument("--per-participant", action="store_true", default=False,
                         help="Use each participant's fitted persona from "
                              "eval/model_fitting/results/{pid}_gam_config_s{seed}.json "
@@ -1487,8 +1505,21 @@ def main():
                              "from scratch. The simulator applies stochastic per-step motor/"
                              "device noise, so this produces a different random draw than "
                              "whatever is currently cached, not just a repeat of it.")
+    parser.add_argument("--model", choices=["mpcc", "baseline"], default="mpcc",
+                        help="Simulator the persona configs drive: this repo's anchor-drive "
+                             "MPCC (default) or the CHI-26-EA baseline package "
+                             "(eval/chi-26-ea_baseline_pacakage; fixed horizon, per-step "
+                             "replanning, tracked reference velocity). Everything downstream "
+                             "(alignment, metrics, plots) is identical.")
     args = parser.parse_args()
 
+    global MODEL_KIND
+    MODEL_KIND = args.model
+    if args.buckets is None:
+        # ID4SCS (variable-width) and constrained-to-unconstrained tasks are
+        # out of the paper's scope (2026-09-08): the default evaluation is
+        # steering + pointing only. Opt back in with --buckets.
+        args.buckets = ["steering", "fitts"]
     config_path = Path(args.config)
     human_only = args.human_only
     if args.results_dir:

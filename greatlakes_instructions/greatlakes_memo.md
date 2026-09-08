@@ -160,3 +160,34 @@ grep -h "Stage 2 done\|Stage 3 done\|test loss" /home/xiangyz/ondemand/data/sys/
 - Cancel: `scancel <job_id>` or `scancel -u xiangyz`.
 - Old CHI-26 baseline fitting (`fit_baseline_all_participants.sh`) needs the
   `eval/chi-26-ea_baseline_pacakage/` package, which is not in this repo.
+
+## Isolated runs (2026-09-08): submit_run.sh
+
+Every fit/eval generation is now ONE isolated run: its own code snapshot
+(`git archive HEAD`), its own results tree, a chained fit -> eval ->
+aggregate submission, and a line in `results/runs/INDEX.tsv`. The old
+`fit_anchor_10p.sh` / `fit_pooled8.sh` / `eval_10p.sh` / `eval_10p_aggregate.sh`
+are retired stubs (they shared a symlink and the live working tree).
+
+```
+cd <repo>; git pull; git status          # commit first: submit refuses a dirty tree
+./submit_run.sh --model mpcc     --variant full            --kind perpid
+./submit_run.sh --model mpcc     --variant full            --kind pooled8
+./submit_run.sh --model baseline --variant full            --kind perpid
+./submit_run.sh --model baseline --variant full            --kind pooled8
+./submit_run.sh --model mpcc     --variant no_gaze         --kind perpid   # ablations: no_gaze,
+./submit_run.sh --model mpcc     --variant no_pace         --kind perpid   # no_lookahead, no_pace,
+./submit_run.sh --model mpcc     --variant no_lookahead    --kind pooled8  # no_intermittent
+./submit_run.sh --model mpcc     --variant no_intermittent --kind pooled8
+```
+Options: `--seed`, `--time-limit` (CMA seconds), `--popsize`, `--min-runs`,
+`--gamma`, `--participants FILE`, `--results-root DIR`, `--allow-dirty`,
+`--dry-run`. Each call prints RUN_ID and the three job ids.
+
+Layout: `results/runs/<RUN_ID>/{RUN_INFO.json,COMMIT,code/,fit/stages/{base|pooled8}/,personas/,eval/{Steering,Fitts}/,gaze-lead/,logs/,DONE}`.
+Monitor: `squeue -u $USER`, `tail -f results/runs/<RUN_ID>/logs/fit_*_1.out`.
+Collect: `python eval/collect_runs.py` -> `results/runs/SUMMARY.csv` (+ a
+console table: steering slope/R2, Fitts slope, time ratio, lateral RMSE per
+run, with status done/fit_done/pending/failed).
+Mirror locally: `rsync -av --exclude sim_cache --exclude code --exclude tmp
+--exclude 'participant_*' greatlakes:.../results/runs/<RUN_ID> results-cluster-10p/runs/`.

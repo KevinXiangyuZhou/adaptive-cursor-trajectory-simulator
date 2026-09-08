@@ -74,7 +74,16 @@ class GazeModule:
         acc_max: float,
         horizon_min_steps: int,
         horizon_max_steps: int,
+        horizon_mode: str = 'budget',
+        fixed_lead_m: float = 0.03,
+        catchup_mode: str = 'pace_law',
     ):
+        # Ablation switches (paper evaluation). Defaults reproduce the
+        # finalized design exactly: 'budget' anchor placement and the
+        # pace-law traversal deadline.
+        self.horizon_mode = str(horizon_mode)
+        self.fixed_lead_m = float(fixed_lead_m)
+        self.catchup_mode = str(catchup_mode)
         self.reference_path = reference_path
         self.budget_horizon = budget_horizon
         self.scheduler = scheduler
@@ -207,8 +216,15 @@ class GazeModule:
 
         solve_anchor_s = None
         s_from = min(theta0, total)
-        anchor_s = self.budget_horizon.anchor(
-            s_from, v_now=float(np.hypot(cursor_vel[0], cursor_vel[1])))
+        v_now0 = float(np.hypot(cursor_vel[0], cursor_vel[1]))
+        if self.horizon_mode == 'fixed_lead':
+            # Ablation "no adaptive lookahead": a constant arc-length lead,
+            # with the same reaction-time floor (v * T_min) and path-end cap
+            # the budget applies, so only the width dependence is removed.
+            s_floor = s_from + max(0.0, v_now0) * self.budget_horizon.T_min
+            anchor_s = min(max(s_from + self.fixed_lead_m, s_floor), total)
+        else:
+            anchor_s = self.budget_horizon.anchor(s_from, v_now=v_now0)
         if self.anchor_lead_floor and self.clearance_profile is not None:
             # Lead floor BEFORE the deadline: if the floor extends the anchor,
             # the deadline must stretch with it (review finding: floor applied
@@ -233,7 +249,10 @@ class GazeModule:
         if self.clearance_profile is not None:
             s_cw0, c_cw0 = self.clearance_profile
             w_loc0 = float(np.interp(theta0, s_cw0, c_cw0))
-        if (w_loc0 is not None and 0.0 < w_loc0 < FREE_SPACE_CLEARANCE_M):
+        # Ablation "no pace law" (catchup_mode 'constant'): the free-space
+        # rule below applies in corridors too; the traversal table is unused.
+        if (self.catchup_mode == 'pace_law'
+                and w_loc0 is not None and 0.0 < w_loc0 < FREE_SPACE_CLEARANCE_M):
             t_gam = self._traversal_time(theta0, float(anchor_s))
         if t_gam is not None:
             t_plan = max(t_gam, lead_now / max(self.plan_vmax, 1e-6))

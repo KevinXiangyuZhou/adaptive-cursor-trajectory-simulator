@@ -1,10 +1,20 @@
-"""ONE pooled anchor-drive model fitted jointly on all eight participants.
+"""ONE pooled persona fitted jointly on all eight participants — for the
+current model, its ablations (--ablation), or the CHI-26-EA baseline
+(--model baseline). Same protocol as the per-participant fit (fit_anchor.py).
 
-Output is a single persona: the pooled Stage-0 GAM (speed_model
+Output is a single persona: for mpcc the pooled Stage-0 GAM (speed_model
 gam_traversal, the shipped artifact trained on all 8 participants' samples)
-plus ONE set of fitted parameters. CMA-ES searches the same five parameters
-as the per-participant fit (jerk, contour, constraint, goal, D0; gamma and
-plan_vmax stay pinned, T0 calibrated post-fit) against the POOLED loss
+plus ONE set of fitted parameters. CMA-ES searches the same parameters as
+the per-participant fit (mpcc: jerk, contour, constraint, goal, D0; gamma and
+plan_vmax stay pinned, T0 calibrated post-fit; baseline: the eight EA
+parameters) against the POOLED loss.
+gamma defaults to the base-config value (0.66, legacy A/B/C onset-lead
+exponent); --gamma overrides it before the fit. A 0.55 pin was considered
+and rejected 2026-09-07: the cohort's per-saccade exponent 0.55 is biased
+flat by detection-floor censoring, and the same-estimator comparison
+(eval-gaze-lead/saccade_exponent_pooled.py, per-condition medians on both
+sides) gives cohort b = 0.72 +/- 0.08 vs the gamma=0.66 model's emergent
+0.81 +/- 0.13 — so 0.66 stays.
 
     L(theta) = mean over participants of
                [ tunnel train loss + w_pt * pointing train loss
@@ -17,22 +27,26 @@ participant's training data is loaded once in the parent and reaches the
 workers by fork (copy-on-write), so jobs carry only (vec, pid).
 
 Post-fit: pooled T0 calibration (mean pointing loss over participants per
-grid point), then a held-out probe per participant with the SAME pooled
-persona (per-pid train/test summaries in the fit record).
+grid point; mpcc without a jointly-fitted T0 only), then a held-out
+train/test loss per participant with the SAME pooled persona, plus the
+detailed anchor probe for mpcc.
 
-Outputs (results/stages/pooled8/):
-    pooled8_anchor_config_s{seed}.json   the one persona (noise restored)
-    pooled8_anchor_fit_s{seed}.json      params, history, T0 scan, per-pid probes
+Outputs ($HCS_FIT_RESULTS_DIR/stages/<tag>/, default tag pooled8 or
+pooled8-<ablation>):
+    pooled8_{anchor|baseline}_config_s{seed}.json   the one persona (noise restored)
+    pooled8_{anchor|baseline}_fit_s{seed}.json      params, history, T0 scan, per-pid held-out
 
 Usage:
   python fit_anchor_pooled8.py --time-limit 18000 --workers 36
-  python fit_anchor_pooled8.py --quick --time-limit 120 --workers 8 \
+  python fit_anchor_pooled8.py --model baseline --time-limit 18000 --workers 36
+  python fit_anchor_pooled8.py --ablation no_pace --quick --time-limit 120 --workers 8 \
       --letters p01 p02 --skip-probe          # local smoke
 """
 import argparse
 import copy
 import json
 import multiprocessing as mp
+import os
 import sys
 import time
 from pathlib import Path
@@ -42,58 +56,28 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import probe_anchor as pa                 # sets sys.path / HCS_HUMAN_DATA_DIR
-import fit_anchor as fa                   # per-participant loss parts + spec + T0 grid
+import fit_anchor as fa                   # loss parts + specs + setup + T0 grid
 import fit_speed_model as fsm
 
 LETTERS = ["p01", "p02", "p03", "p04", "p06", "p07", "p08", "p10"]
-RESULTS = HERE / "results"
+RESULTS = Path(os.environ.get("HCS_FIT_RESULTS_DIR", HERE / "results"))
 
 # Per-participant training data, loaded once in the parent and inherited by
-# forked workers (copy-on-write): pid -> dict(tun_train, tasks, scales,
-# pt_train, pscales, stab).
+# forked workers (copy-on-write): pid -> fit_anchor.load_training(...) dict.
 _DATA = {}
 
 
 def _load_all(letters, quick):
     for L in letters:
-        rounds_by_tid, t2c, t2b = fsm.load_participant(L)
-        tasks = fsm.build_tunnel_tasks(t2c, t2b)
-        tun_train, tun_test = fsm.split_tunnel(rounds_by_tid, t2c, t2b)
-        tun_train = {t: r for t, r in tun_train.items() if t2b[t] == "steering"}
-        pt_train, pt_test = fsm.split_pointing(rounds_by_tid, t2c, t2b)
-        if quick:
-            keep = {}
-            for t in sorted(tun_train):
-                key = (t2c[t]["tunnelWidth"], t2c[t].get("tunnelType"))
-                if key not in keep.values() and t2c[t].get("tunnelType") in (
-                        "straight", "sharp_sinusoidal", "corner"):
-                    keep[t] = key
-            tun_train = {t: tun_train[t] for t in keep}
-            pt_train = {t: r[:2] for t, r in pt_train.items()}
-        fsm.compute_tunnel_scales(tun_train, tasks)
-        fsm.compute_pointing_scales(pt_train)
-        stab = []
-        for ty, w in (("corner", 0.05), ("sinusoidal", 0.05)):
-            tid = next((t for t in tun_train if abs(t2c[t]["tunnelWidth"] - w) < 1e-6
-                        and (t2c[t].get("tunnelType") or "sinusoidal") == ty), None)
-            if tid is None:
-                continue
-            tc, cl, hw = tasks[tid]
-            ct_h = float(np.mean([(h["timestamps"][-1] - h["timestamps"][0]) / 1000.0
-                                  for h in tun_train[tid]]))
-            tc = dict(tc)
-            tc["max_steps"] = int(min(fsm.MAX_SIM_STEPS, max(60, 3.0 * ct_h / 0.05)))
-            stab.append((tc, cl))
-        _DATA[L] = dict(tun_train=tun_train, tasks=tasks,
-                        scales=dict(fsm.TUNNEL_SCALES), pt_train=pt_train,
-                        pscales=dict(fsm.POINT_SCALES), stab=stab)
-        print(f"  {L}: tunnel train {len(tun_train)} tids, pointing train "
-              f"{len(pt_train)} tids, stability {len(stab)}", flush=True)
+        _DATA[L] = fa.load_training(L, quick)
+        d = _DATA[L]
+        print(f"  {L}: tunnel train {len(d['tun_train'])} tids, pointing train "
+              f"{len(d['pt_train'])} tids, stability {len(d['stab'])}", flush=True)
 
 
 def _eval_unit(args):
     """One (candidate, participant) unit of the pooled loss."""
-    vec, spec, base, pid, w_pt = args
+    vec, spec, base, pid, w_pt, model = args
     d = _DATA[pid]
     fsm.TUNNEL_SCALES.update(d["scales"])
     fsm.POINT_SCALES.update(d["pscales"])
@@ -101,9 +85,9 @@ def _eval_unit(args):
     fsm.apply_params(cfg, fsm.decode(np.asarray(vec), spec))
     cfg["add_noise"] = False
     cfg["replan_latency_cv"] = 0.0
-    lt = fa._tunnel_part(cfg, d["tun_train"], d["tasks"])
-    lp = fa._pointing_part(cfg, d["pt_train"]) if d["pt_train"] else 0.0
-    ls = fa._noise_stability(cfg, d["stab"]) if d["stab"] else 0.0
+    lt = fa._tunnel_part(cfg, d["tun_train"], d["tasks"], model)
+    lp = fa._pointing_part(cfg, d["pt_train"], model) if d["pt_train"] else 0.0
+    ls = fa._noise_stability(cfg, d["stab"], model) if d["stab"] else 0.0
     return lt + w_pt * lp + ls
 
 
@@ -116,11 +100,25 @@ def _eval_t0_unit(args):
     cfg["plan_deadline_s"] = float(t0)
     cfg["add_noise"] = False
     cfg["replan_latency_cv"] = 0.0
-    return float(fa._pointing_part(cfg, d["pt_train"]))
+    return float(fa._pointing_part(cfg, d["pt_train"], "mpcc"))
+
+
+def _eval_heldout_unit(args):
+    """One (participant, split) unit of the pooled held-out summary."""
+    kind, split, base, pid, model = args
+    d = _DATA[pid]
+    fsm.TUNNEL_SCALES.update(d["scales"]); fsm.POINT_SCALES.update(d["pscales"])
+    cfg = copy.deepcopy(base); cfg["add_noise"] = False; cfg["replan_latency_cv"] = 0.0
+    data = d[f"{'tun' if kind == 'tunnel' else 'pt'}_{split}"]
+    if not data:
+        return None
+    if kind == "tunnel":
+        return float(fa._tunnel_part(cfg, data, d["tasks"], model))
+    return float(fa._pointing_part(cfg, data, model))
 
 
 def pooled_cmaes(spec, init, base, letters, w_pt, time_limit, seed, popsize,
-                 workers, sigma0=0.2):
+                 workers, model, sigma0=0.2):
     """CMA-ES over the pooled loss; map over (candidate x participant)."""
     import cma
     x0 = fsm.encode(init, spec)
@@ -134,7 +132,7 @@ def pooled_cmaes(spec, init, base, letters, w_pt, time_limit, seed, popsize,
     with ctx.Pool(processes=workers) as pool:
         while time.time() - t_start < time_limit:
             sols = es.ask()
-            jobs = [(list(x), spec, base, pid, w_pt)
+            jobs = [(list(x), spec, base, pid, w_pt, model)
                     for x in sols for pid in letters]
             unit = pool.map(_eval_unit, jobs)
             # reduce: mean over participants per candidate
@@ -155,6 +153,9 @@ def pooled_cmaes(spec, init, base, letters, w_pt, time_limit, seed, popsize,
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--model", choices=fa.MODELS, default="mpcc")
+    ap.add_argument("--ablation", choices=list(fa.ABLATIONS), default="none",
+                    help="(mpcc only) remove one gaze mechanism; see fit_anchor.ABLATIONS")
     ap.add_argument("--time-limit", type=int, default=18000,
                     help="CMA budget (s); T0 calibration + probes run after it")
     ap.add_argument("--popsize", type=int, default=12)
@@ -166,30 +167,37 @@ def main():
                     help="straight/sharp/corner subset + 2 pointing rounds per radius")
     ap.add_argument("--skip-probe", action="store_true",
                     help="skip the per-participant held-out probes")
-    ap.add_argument("--tag", default="")
+    ap.add_argument("--gamma", type=float, default=None,
+                    help="pin the budget width exponent to this value instead "
+                         "of the base config's (0.66); use 0.55 for the "
+                         "cohort-measured saccade-distance exponent")
+    ap.add_argument("--override", default=None,
+                    help="JSON applied to the base persona (planner_weights/budget merged)")
+    ap.add_argument("--tag", default="", help="stage folder (default pooled8 or pooled8-<ablation>)")
     a = ap.parse_args()
 
-    # One pooled base persona: the (identical) per-pid Stage-G base config.
-    base = pa.load_persona(a.letters[0], "anchor")
+    # One pooled base persona: the (identical) per-pid Stage-G base config
+    # (mpcc) / the EA defaults with the cohort plant constants (baseline).
+    su = fa.build_setup(a.model, a.letters[0], a.ablation,
+                        override=(json.loads(a.override) if a.override else None))
+    base, spec, init, model = su["base"], su["spec"], su["init"], su["model"]
     base.pop("_description", None)
+    if a.gamma is not None:
+        if model != "mpcc":
+            raise SystemExit("--gamma applies to --model mpcc only")
+        print(f"gamma override: {base['budget']['gamma']} -> {a.gamma}", flush=True)
+        base["budget"]["gamma"] = float(a.gamma)
+    tag = a.tag.strip("_") or ("pooled8" if su["ablation"] == "none" else f"pooled8-{su['ablation']}")
 
-    print(f"pooled fit over {a.letters} | budget {a.time_limit}s | "
+    print(f"pooled fit [{model} / {su['ablation']}] over {a.letters} | budget {a.time_limit}s | "
           f"popsize {a.popsize} x {len(a.letters)} pids = "
-          f"{a.popsize * len(a.letters)} units/gen on {a.workers} workers", flush=True)
+          f"{a.popsize * len(a.letters)} units/gen on {a.workers} workers | "
+          f"search {[s['name'] for s in spec]}", flush=True)
     _load_all(a.letters, a.quick)
-
-    spec = list(fa.ANCHOR_SPEC)
-    def _init_val(name):
-        if name in ("plan_deadline_s", "plan_vmax"):
-            return base[name]
-        if name in ("D0", "gamma", "T_min"):
-            return base["budget"][name]
-        return base["planner_weights"][name]
-    init = {s["name"]: _init_val(s["name"]) for s in spec}
 
     t_all = time.time()
     fitted, best, hist = pooled_cmaes(spec, init, base, a.letters, a.w_point,
-                                      a.time_limit, a.seed, a.popsize, a.workers)
+                                      a.time_limit, a.seed, a.popsize, a.workers, model)
     fsm.apply_params(base, fitted)
     print(f"\npooled fitted: {json.dumps({k: float(v) for k, v in fitted.items()})} "
           f"| best pooled loss {best:.4f}", flush=True)
@@ -197,7 +205,7 @@ def main():
     # Pooled T0 calibration: mean pointing loss over participants per grid point.
     t0_scan = None
     pt_letters = [L for L in a.letters if _DATA[L]["pt_train"]]
-    if pt_letters:
+    if pt_letters and not su["skip_t0"]:
         ctx = mp.get_context("fork")
         jobs = [(t0, base, pid) for t0 in fa.T0_GRID for pid in pt_letters]
         with ctx.Pool(processes=min(a.workers, len(jobs))) as pool:
@@ -210,36 +218,47 @@ def main():
               f"(edge={'YES' if i in (0, len(fa.T0_GRID) - 1) else 'no'})", flush=True)
         base["plan_deadline_s"] = fa.T0_GRID[i]
 
-    stage_dir = RESULTS / "stages" / ((a.tag.strip("_") or "pooled8"))
+    stage_dir = RESULTS / "stages" / tag
     stage_dir.mkdir(parents=True, exist_ok=True)
-    cfg_path = stage_dir / f"pooled8_anchor_config{a.tag}_s{a.seed}.json"
-    save_cfg = copy.deepcopy(base)
-    save_cfg["add_noise"] = True                     # fit ran noiseless
-    save_cfg["replan_latency_cv"] = 0.89
+    cfg_path = stage_dir / f"pooled8_{su['tag_model']}_config_s{a.seed}.json"
+    save_cfg = fa.restore_stochasticity(copy.deepcopy(base), model, a.letters[0])
     save_cfg["_description"] = (
-        f"Pooled anchor-drive persona fitted jointly on {a.letters} "
-        f"(seed {a.seed}); pooled Stage-0 GAM + one parameter set. "
-        f"See pooled8_anchor_fit{a.tag}_s{a.seed}.json")
+        f"Pooled {model}/{su['ablation']} persona fitted jointly on {a.letters} "
+        f"(seed {a.seed}); one parameter set. See pooled8_{su['tag_model']}_fit_s{a.seed}.json")
+    save_cfg["_fit"] = {"model": model, "ablation": su["ablation"], "pooled": a.letters,
+                        "seed": a.seed, "tag": tag, "search": [s["name"] for s in spec]}
     with open(cfg_path, "w") as f:
         json.dump(save_cfg, f, indent=2)
     print(f"saved {cfg_path}", flush=True)
 
-    # Held-out probes: the SAME pooled persona against each participant.
-    probes = {}
+    # Held-out: the SAME pooled persona against each participant.
+    heldout, probes = {}, {}
     if not a.skip_probe:
-        probe_ov = {k: v for k, v in base.items()
-                    if k not in ("speed_model", "reference_path", "_description")}
-        for L in a.letters:
-            res = pa.run_probe(L, "anchor", override=probe_ov, quick=False,
-                               n_workers=a.workers)
-            probes[L] = {"tunnel": res["tunnel"], "pointing": res.get("pointing")}
-            print(f"  probe {L} done", flush=True)
+        ctx = mp.get_context("fork")
+        jobs = [(kind, split, base, L, model) for L in a.letters
+                for kind in ("tunnel", "pointing") for split in ("train", "test")]
+        with ctx.Pool(processes=min(a.workers, len(jobs))) as pool:
+            unit = pool.map(_eval_heldout_unit, jobs)
+        for j, (kind, split, _, L, _) in enumerate(jobs):
+            heldout.setdefault(L, {}).setdefault(kind, {})[split] = unit[j]
+        print(f"held-out: {json.dumps(heldout)}", flush=True)
+        if model == "mpcc":
+            probe_ov = {k: v for k, v in base.items()
+                        if k not in ("speed_model", "reference_path", "_description", "_fit")}
+            for L in a.letters:
+                res = pa.run_probe(L, "anchor", override=probe_ov, quick=False,
+                                   n_workers=a.workers)
+                probes[L] = {"tunnel": res["tunnel"], "pointing": res.get("pointing")}
+                print(f"  probe {L} done", flush=True)
 
-    rec = {"letters": a.letters, "fitted": fitted, "best_loss": best,
+    rec = {"letters": a.letters, "model": model, "ablation": su["ablation"], "tag": tag,
+           "seed": a.seed, "search": [s["name"] for s in spec],
+           "fitted": fitted, "best_loss": best,
+           "gamma_pinned": (base.get("budget") or {}).get("gamma"),
            "history": hist, "t0_scan": t0_scan,
-           "deadline": base["plan_deadline_s"], "probes": probes,
+           "deadline": base.get("plan_deadline_s"), "heldout": heldout, "probes": probes,
            "elapsed": time.time() - t_all}
-    with open(stage_dir / f"pooled8_anchor_fit{a.tag}_s{a.seed}.json", "w") as f:
+    with open(stage_dir / f"pooled8_{su['tag_model']}_fit_s{a.seed}.json", "w") as f:
         json.dump(rec, f, indent=2, default=float)
     print("DONE", flush=True)
 

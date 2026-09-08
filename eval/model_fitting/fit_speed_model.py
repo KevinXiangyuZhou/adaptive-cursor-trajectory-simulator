@@ -188,7 +188,7 @@ def decode(vec, spec):
 def apply_params(cfg, params):
     """Apply fitted params to a persona config (in place)."""
     for k, v in params.items():
-        if k in ("Th", "plan_deadline_s", "plan_vmax"):
+        if k in ("Th", "plan_deadline_s", "plan_vmax", "fixed_lead_m"):
             cfg[k] = v          # top-level simulator keys, not planner weights
         elif k in ("D0", "gamma", "T_min"):
             cfg.setdefault("budget", {})[k] = v   # gaze-budget constants
@@ -232,16 +232,15 @@ def load_participant(pid):
 
 
 def build_tunnel_tasks(tid_to_condition, tid_to_bucket):
-    """{tid: (task_config, centerline, half_width)} for steering + ID4SCS."""
+    """{tid: (task_config, centerline, half_width)} for the steering bucket.
+    ID4SCS (variable-width) and constrained-to-unconstrained tasks are out of
+    the paper's scope (2026-09-08) and are neither fitted nor held out."""
     out = {}
     for tid, b in tid_to_bucket.items():
         cond = tid_to_condition[tid]
         if b == "steering":
             tc, cl = em.build_steering_task_config(cond)
             hw = cond["tunnelWidth"] * 0.5
-        elif b in ("id4scs_w2n", "id4scs_n2w"):
-            tc, cl = em._build_wide_to_narrow_config(cond["segment1Width"], cond["segment2Width"], cond.get("curvature", 0.0))
-            hw = min(cond["segment1Width"], cond["segment2Width"]) * 0.5
         else:
             continue
         tc = dict(tc); tc["max_steps"] = MAX_SIM_STEPS
@@ -256,8 +255,7 @@ def split_tunnel(rounds_by_tid, tid_to_condition, tid_to_bucket):
         if b == "steering":
             w = round(tid_to_condition[tid]["tunnelWidth"], 3)
             (train if w in TRAIN_WIDTHS else test)[tid] = rounds
-        elif b in ("id4scs_w2n", "id4scs_n2w"):
-            test[tid] = rounds
+        # id4scs_* / c2u buckets: out of scope (2026-09-08), not held out either
     return train, test
 
 

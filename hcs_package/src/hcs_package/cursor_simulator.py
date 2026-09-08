@@ -155,6 +155,17 @@ class CursorSimulator:
             "horizon_mode": "budget",
             "budget": {"D0": 1.66, "T_min": 0.1,
                        "gamma": 0.66, "W_ref": 0.026},
+            # --- ablation switches (paper evaluation; defaults = full model) ---
+            # horizon_mode "fixed_lead": the anchor sits a constant arc
+            # distance fixed_lead_m ahead of the cursor (reaction-time floor
+            # v*T_min and path-end cap kept) instead of the difficulty
+            # budget — the "no adaptive lookahead" ablation.
+            "fixed_lead_m": 0.03,
+            # catchup_mode "constant": the plan deadline is the free-space
+            # rule everywhere (max(T0, lead/v_max, acc floor)); the pace-law
+            # traversal integral is not used — the "no pace law" ablation.
+            # "pace_law" = finalized design.
+            "catchup_mode": "pace_law",
             # replan_mode "every_step": re-solve each step (ablation baseline).
             # replan_mode "intermittent": execute the plan open-loop and
             # re-solve on arrival at the planned anchor + a post-arrival
@@ -231,8 +242,14 @@ class CursorSimulator:
         self.add_noise = config['add_noise']
 
         self.horizon_mode = str(config.get('horizon_mode', 'budget'))
-        if self.horizon_mode != 'budget':
-            raise ValueError(f"horizon_mode must be 'budget', got {self.horizon_mode!r}")
+        if self.horizon_mode not in ('budget', 'fixed_lead'):
+            raise ValueError(f"horizon_mode must be 'budget' or 'fixed_lead', got {self.horizon_mode!r}")
+        self.fixed_lead_m = float(config.get('fixed_lead_m', 0.03))
+        if self.horizon_mode == 'fixed_lead' and self.fixed_lead_m <= 0.0:
+            raise ValueError("horizon_mode='fixed_lead' needs fixed_lead_m > 0")
+        self.catchup_mode = str(config.get('catchup_mode', 'pace_law'))
+        if self.catchup_mode not in ('pace_law', 'constant'):
+            raise ValueError(f"catchup_mode must be 'pace_law' or 'constant', got {self.catchup_mode!r}")
         budget_cfg = config.get('budget') or {}
         # Fallbacks match the default config above (single source of truth
         # for "unset": the pooled cross-validated refit).
@@ -595,6 +612,8 @@ class CursorSimulator:
             acc_max=float(self.planner_weights.get('acc_max', 0.0) or 0.0),
             horizon_min_steps=self.horizon_min_steps,
             horizon_max_steps=self.horizon_max_steps,
+            horizon_mode=self.horizon_mode, fixed_lead_m=self.fixed_lead_m,
+            catchup_mode=self.catchup_mode,
         )
         motor = MotorModule(
             reference_path,
@@ -700,6 +719,8 @@ class CursorSimulator:
 
         self.last_diagnostics = {
             'horizon_mode': self.horizon_mode,
+            'fixed_lead_m': self.fixed_lead_m,
+            'catchup_mode': self.catchup_mode,
             'replan_mode': self.replan_mode,
             'anchor_drive': True,
             'plan_deadline_s': self.plan_deadline_s,
