@@ -44,7 +44,7 @@ else
     CFG="$RUN_DIR/fit/stages/base/${SHORT}_${TAGM}_config_s${SEED}.json"
 fi
 [ -f "$CFG" ] || { echo "missing fitted persona $CFG"; exit 1; }
-python3 cluster/stage_persona.py "$CFG" "$PERSONA_DIR/${PID}.json" "$MODEL"
+python3 cluster/stage_persona.py "$CFG" "$PERSONA_DIR/${PID}.json" "$MODEL" "$KIND"
 
 echo "[$(date)] eval $MODEL/$KIND $SHORT ($PID) persona=$CFG -> $HCS_EVAL_RESULTS_DIR"
 python -u eval/eval-main/run_eval.py \

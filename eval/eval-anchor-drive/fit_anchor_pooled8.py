@@ -181,8 +181,10 @@ def main():
 
     # One pooled base persona: the (identical) per-pid Stage-G base config
     # (mpcc) / the EA defaults with the cohort plant constants (baseline).
+    # pooled=True: the pooled traversal GAM, never a.letters[0]'s own.
     su = fa.build_setup(a.model, a.letters[0], a.ablation,
-                        override=(json.loads(a.override) if a.override else None))
+                        override=(json.loads(a.override) if a.override else None),
+                        pooled=True)
     base, spec, init, model = su["base"], su["spec"], su["init"], su["model"]
     base.pop("_description", None)
     if a.gamma is not None:

@@ -420,10 +420,52 @@ def _init_val(base, name):
     return base["planner_weights"][name]
 
 
+PACKAGE_MODELS = HERE.parents[1] / "hcs_package" / "src" / "hcs_package" / "models"
+
+
+def _train_participant_gam(pid, name):
+    """Fit the missing per-participant traversal GAM from the pace samples
+    (same features/target as train_traversal_gam.py) into the package
+    models/ dir, where the persona's relative path resolves."""
+    sys.path.insert(0, str(HERE.parents[1] / "eval" / "eval-gaze-lead"))
+    import pandas as pd
+    import train_traversal_gam as ttg
+    d = pd.read_csv(ttg.DATA)
+    d = d[d["participant"] == pid]
+    if not len(d):
+        return False
+    ttg.fit_one(d, PACKAGE_MODELS / name, pid)
+    return True
+
+
+def resolve_speed_model(sm, pid, pooled=False):
+    """A per-participant fit gets the participant's own traversal GAM; the
+    pooled artifact serves ONLY pooled fits. Without this, perpid personas
+    silently shared the pooled GAM — which alone sets tunnel pace, so
+    cross-participant completion-time SD collapsed to ~0.04 s (2026-09-09)."""
+    if not (isinstance(sm, dict) and sm.get("type") == "gam_traversal"):
+        return sm                      # speed_model "none"/legacy: untouched
+    sm = dict(sm)
+    if pooled:
+        sm.pop("path", None)           # pooled fit -> shipped pooled artifact
+        return sm
+    if sm.get("path"):
+        return sm                      # persona already pins its artifact
+    name = f"gam_traversal_{pid}.pkl"
+    if (PACKAGE_MODELS / name).exists() or _train_participant_gam(pid, name):
+        sm["path"] = name
+    else:
+        print(f"WARNING: no per-participant GAM for {pid} ({name} not shipped, "
+              f"no pace samples) — falling back to the pooled artifact", flush=True)
+    return sm
+
+
 def build_setup(model, pid, ablation="none", *, deadline=None, vmax=None,
-                init=None, override=None, fix_budget=False):
+                init=None, override=None, fix_budget=False, pooled=False):
     """Base persona + CMA spec for (model, ablation). Returns a dict with
-    base, spec, init, skip_t0, model, ablation, tag_model."""
+    base, spec, init, skip_t0, model, ablation, tag_model. pooled=True
+    (fit_anchor_pooled8) keeps the pooled traversal GAM; a per-participant
+    fit resolves the participant's own GAM artifact."""
     if model not in MODELS:
         raise ValueError(f"model must be one of {MODELS}, got {model!r}")
     if model == "baseline":
@@ -445,6 +487,7 @@ def build_setup(model, pid, ablation="none", *, deadline=None, vmax=None,
         spec += [sp for sp in ab["add"] if sp["name"] not in {s["name"] for s in spec}]
         skip_t0 = bool(ab["skip_t0"])
         base.setdefault("plan_vmax", 0.8)
+        base["speed_model"] = resolve_speed_model(base.get("speed_model"), pid, pooled=pooled)
     if deadline is not None:
         base["plan_deadline_s"] = deadline
     if vmax is not None:
@@ -546,7 +589,8 @@ def main():
     print(f"{a.pid} [{model} / {su['ablation']}] -> stages/{tag}: tunnel train {len(d['tun_train'])} tids, "
           f"test {len(d['tun_test'])}; pointing train {len(d['pt_train'])} tids "
           f"({sum(len(v) for v in d['pt_train'].values())} rounds); stability {len(d['stab'])}; "
-          f"search {[s['name'] for s in spec]}; deadline {base.get('plan_deadline_s')}", flush=True)
+          f"search {[s['name'] for s in spec]}; deadline {base.get('plan_deadline_s')}; "
+          f"speed_model {base.get('speed_model')}", flush=True)
     t0 = time.time()
     fitted, best, hist = run_cmaes_units(f"{model}/{su['ablation']} joint fit {a.pid}", spec, init, base, d, model,
                                          a.w_point, a.time_limit, a.seed, a.popsize, a.workers,
@@ -584,7 +628,9 @@ def main():
         rec["heldout"] = heldout_losses(base, d, model, workers=a.workers, w_pt=a.w_point)
         print(f"held-out: {json.dumps(rec['heldout'])}", flush=True)
         if model == "mpcc":
-            probe_ov = {k: v for k, v in base.items() if k not in ("speed_model", "reference_path", "_description")}
+            # speed_model stays IN the override: the probe must run with the
+            # same (per-participant) GAM the fit used, not load_persona's base.
+            probe_ov = {k: v for k, v in base.items() if k not in ("reference_path", "_description")}
             res = pa.run_probe(a.pid, "anchor", override=probe_ov, quick=False, n_workers=a.workers)
             rec["tunnel"] = res["tunnel"]; rec["pointing"] = res.get("pointing")
     rec["elapsed"] = time.time() - t0
