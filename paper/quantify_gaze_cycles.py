@@ -10,6 +10,14 @@ participants (participants_10p.txt):
        caught-up segment, controlling log W and segment distance
   3. overrun: % of cycles where the cursor crosses the anchor before the next
      saccade, and median overrun depth as a fraction of the post-saccade lead
+  4. cursor speed -> saccade lead at equal width: partial Spearman rho of the
+     pre-saccade cursor speed vs the post-saccade lead / amplitude / onset
+     lead (all | log W), and an OLS mediation of the straight-vs-sinusoid
+     amplitude gap by speed (does the straight dummy collapse once speed
+     enters?). The pre-saccade speed is the endpoint slope -d(lead)/dt over
+     the PRE_WIN window before onset: during a fixation the gaze anchor is
+     stationary, so the lead decays at the cursor's arc speed — the same
+     estimator applies to human traces and model traces.
 
 Human side: the committed lead series (human-gaze-lead-10p/data/
 p*_steering_lead.csv) with the SAME forward-saccade detector as
@@ -61,6 +69,9 @@ OUT = Path(__file__).resolve().parent / "quant"
 SINUSOIDS = {"gentle", "sharp", "normal"}
 DUR_MIN, DUR_MAX = 0.05, 3.0     # catch-up window, as catchup_curvature_analysis
 DIST_MIN = 0.003                  # m, minimum caught-up distance for curvature
+PRE_WIN, PRE_MIN = 0.20, 0.08     # s, pre-saccade speed window (and its floor)
+V_PRE_MAX = 1.0                   # m/s, above = window contaminated by a
+                                  # backward gaze saccade, not cursor motion
 
 
 # ---------------------------------------------------------------- detection
@@ -99,10 +110,25 @@ def cycle_rows(t, lead, spans, theta=None, phi_of_s=None):
     rows = []
     for k, (i, j) in enumerate(spans):
         r = dict(t=t[i], amp=lead[j] - lead[i], lead_pre=lead[i], lead_post=lead[j],
-                 catchup_s=np.nan, min_lead=np.nan, dist=np.nan, dphi=np.nan)
+                 v_pre=np.nan, catchup_s=np.nan, min_lead=np.nan, dist=np.nan,
+                 dphi=np.nan)
+        # Pre-saccade cursor arc speed: -d(lead)/dt over the last PRE_WIN
+        # seconds of the preceding fixation (anchor stationary there, so the
+        # lead decays at the cursor's speed; endpoint slope is robust to
+        # gaze jitter). Confined to after the previous saccade's end and to
+        # gap-free samples.
+        j_prev = spans[k - 1][1] if k > 0 else 0
+        k0 = i
+        while (k0 > j_prev and t[i] - t[k0 - 1] <= PRE_WIN
+               and t[k0] - t[k0 - 1] <= MAX_DT + 1e-9):
+            k0 -= 1
+        if t[i] - t[k0] >= PRE_MIN:
+            r["v_pre"] = float((lead[k0] - lead[i]) / (t[i] - t[k0]))
         if k + 1 < len(spans):
             i1 = spans[k + 1][0]
-            if np.max(np.diff(t[j:i1 + 1])) <= MAX_DT + 1e-9:
+            # i1 == j: back-to-back saccades, no catch-up interval (the
+            # zero-length cycle would be dropped by DUR_MIN anyway).
+            if i1 > j and np.max(np.diff(t[j:i1 + 1])) <= MAX_DT + 1e-9:
                 r["catchup_s"] = t[i1] - t[j]
                 r["min_lead"] = float(np.min(lead[j:i1 + 1]))
                 if theta is not None:
@@ -280,6 +306,69 @@ def overrun_stats(d, label):
     return crossed.mean(), depth.median()
 
 
+def speed_lead_partial(d, ycol, label, logy=True):
+    """Spearman rho(log v_pre, y | log W): does speed move ``ycol`` at
+    equal width? Pooled + per-participant."""
+    d = d[(d["v_pre"] > 0) & (d["v_pre"] <= V_PRE_MAX)].copy()
+    y = d[ycol].to_numpy()
+    if logy:
+        d = d[d[ycol] > 0]
+        y = np.log(d[ycol].to_numpy())
+    x = np.log(d["v_pre"].to_numpy())
+    ctrl = np.log(d["width_mm"].to_numpy())[:, None]
+    rho, p = stats.spearmanr(_resid(x, ctrl), _resid(y, ctrl))
+    per = []
+    for L, g in d.groupby("participant"):
+        c = np.log(g["width_mm"].to_numpy())[:, None]
+        gy = np.log(g[ycol].to_numpy()) if logy else g[ycol].to_numpy()
+        r, _ = stats.spearmanr(_resid(np.log(g["v_pre"].to_numpy()), c),
+                               _resid(gy, c))
+        per.append(r)
+    per = np.array(per)
+    print(f"  {label}: rho(v_pre, {ycol} | W) = {rho:.3f} (p={p:.1e}, "
+          f"n={len(d)}); per-participant {per.mean():.3f} +- {per.std():.3f}")
+    return rho, p
+
+
+def _ols(y, X):
+    """OLS betas, t-stats, p-values (X without intercept column)."""
+    X1 = np.column_stack([np.ones(len(y)), X])
+    beta, *_ = np.linalg.lstsq(X1, y, rcond=None)
+    r = y - X1 @ beta
+    dof = len(y) - X1.shape[1]
+    s2 = float(r @ r) / dof
+    cov = s2 * np.linalg.inv(X1.T @ X1)
+    t = beta / np.sqrt(np.diag(cov))
+    p = 2 * stats.t.sf(np.abs(t), dof)
+    return beta, t, p
+
+
+def speed_mediation(d, label):
+    """Does pre-saccade speed absorb the straight-vs-sinusoid amplitude gap?
+
+    OLS log amp ~ log W + 1[straight], then + log v_pre. The straight
+    dummy's coefficient is the log gap at equal width; the fraction of it
+    that vanishes when speed enters is the share the speed channel carries.
+    """
+    d = d[d["type_label"].isin(SINUSOIDS | {"straight"})]
+    d = d[(d["v_pre"] > 0) & (d["v_pre"] <= V_PRE_MAX) & (d["amp"] > 0)].copy()
+    straight = (d["type_label"] == "straight").to_numpy(float)
+    y = np.log(d["amp"].to_numpy())
+    logw = np.log(d["width_mm"].to_numpy())
+    logv = np.log(d["v_pre"].to_numpy())
+    b1, _, p1 = _ols(y, np.column_stack([logw, straight]))
+    b2, _, p2 = _ols(y, np.column_stack([logw, straight, logv]))
+    absorbed = 100.0 * (1.0 - b2[2] / b1[2]) if b1[2] != 0 else np.nan
+    # speed gap itself at equal width (premise: straight is traversed faster)
+    bv, _, pv = _ols(logv, np.column_stack([logw, straight]))
+    print(f"  {label}: straight beta = {b1[2]:.3f} (x{np.exp(b1[2]):.2f}, "
+          f"p={p1[2]:.1e}) -> {b2[2]:.3f} (x{np.exp(b2[2]):.2f}, "
+          f"p={p2[2]:.1e}) with log v_pre in; {absorbed:.0f}% absorbed; "
+          f"beta_v = {b2[3]:.3f} (p={p2[3]:.1e}); speed gap at equal width "
+          f"x{np.exp(bv[2]):.2f} (p={pv[2]:.1e}); n={len(d)}")
+    return b1[2], b2[2], absorbed
+
+
 def straight_vs_sinusoid(d, label):
     d = d[d["type_label"].isin(SINUSOIDS | {"straight"})].copy()
     d["cls"] = np.where(d["type_label"] == "straight", "straight", "sinusoid")
@@ -320,6 +409,20 @@ def stage_stats():
     print("\n== 3. overrun below zero before the next saccade ==")
     overrun_stats(hum, "human")
     overrun_stats(mod, "model")
+
+    print("\n== 4. cursor speed -> saccade lead at equal width ==")
+    print("   post-saccade lead vs pre-saccade speed (| log W):")
+    speed_lead_partial(hum, "lead_post", "human")
+    speed_lead_partial(mod, "lead_post", "model")
+    print("   saccade amplitude vs pre-saccade speed (| log W):")
+    speed_lead_partial(hum, "amp", "human")
+    speed_lead_partial(mod, "amp", "model")
+    print("   onset lead (overrun channel; expect negative) vs speed (| log W):")
+    speed_lead_partial(hum, "lead_pre", "human", logy=False)
+    speed_lead_partial(mod, "lead_pre", "model", logy=False)
+    print("   straight-vs-sinusoid amplitude gap, mediated by speed:")
+    speed_mediation(hum, "human")
+    speed_mediation(mod, "model")
 
     print("\n(cycle counts: human", len(ch), "model", len(cm),
           "| curvature intervals: human", len(curv_h), "model", len(curv_m), ")")

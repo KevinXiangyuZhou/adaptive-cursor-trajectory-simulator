@@ -34,15 +34,21 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
 EVAL_DIR = REPO / "results-cluster-10p" / "eval-main-pooled8-local"
+# CHI-26-EA baseline persona, pooled-8 fit + eval (Simulator rows = baseline
+# model; Human rows verified bit-identical to EVAL_DIR's).
+BASELINE_DIR = (REPO / "results-cluster-10p" / "runs"
+                / "baseline-full-pooled8-s42-20260908-1543-1adbed9" / "eval")
 OUT_DIR = Path(__file__).resolve().parent / "figures"
 
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "hcs_package" / "src"))
 from experiment.environment import create_environment  # noqa: E402
 
-# Okabe-Ito blue / vermillion — CVD-validated pair (ΔE 21.9 protan, 31.2 normal).
-COLORS = {"Human": "#0072B2", "Model": "#D55E00"}
-MARKERS = {"Human": "o", "Model": "^"}  # shape = secondary identity encoding
+# Okabe-Ito blue / vermillion — CVD-validated pair (ΔE 21.9 protan, 31.2 normal);
+# neutral gray for the baseline so the two focal series keep the contrast.
+COLORS = {"Human": "#0072B2", "Model": "#D55E00", "Baseline": "#8C8C8C"}
+MARKERS = {"Human": "o", "Model": "^", "Baseline": "s"}  # shape = secondary identity encoding
+SOURCES = ("Human", "Model", "Baseline")
 
 plt.rcParams.update({
     "font.family": "sans-serif",
@@ -61,13 +67,8 @@ plt.rcParams.update({
 })
 
 
-def load_condition_means(csv_path, mt_col):
-    """Collapse per-round rows to one (ID, mean MT) point per (source, tid).
-
-    Flat pooled mean across participants and rounds — identical to the eval
-    pipeline's steering_law_plot / fitts _collapse_by_tid aggregation.
-    """
-    per = defaultdict(lambda: ([], []))  # (src, tid) -> (IDs, MTs)
+def _iter_rows(csv_path, mt_col, sim_label):
+    """Yield (source, tid, ID, MT) rows; Simulator rows get sim_label."""
     with open(csv_path) as f:
         for r in csv.DictReader(f):
             if r.get("timed_out") == "True":
@@ -75,32 +76,47 @@ def load_condition_means(csv_path, mt_col):
             mt = r.get(mt_col)
             if not mt:
                 continue
-            src = "Model" if r["source"] == "Simulator" else "Human"
-            ids, mts = per[(src, r["tid"])]
-            ids.append(float(r["ID"]))
-            mts.append(float(mt))
-    out = {"Human": ([], []), "Model": ([], [])}
+            src = sim_label if r["source"] == "Simulator" else "Human"
+            yield src, r["tid"], float(r["ID"]), float(mt)
+
+
+def load_condition_means(csv_path, mt_col, baseline_csv=None):
+    """Collapse per-round rows to one (ID, mean MT) point per (source, tid).
+
+    Flat pooled mean across participants and rounds — identical to the eval
+    pipeline's steering_law_plot / fitts _collapse_by_tid aggregation.
+    With baseline_csv, its Simulator rows are added as a "Baseline" source
+    (its Human rows are dropped — verified identical to csv_path's).
+    """
+    per = defaultdict(lambda: ([], []))  # (src, tid) -> (IDs, MTs)
+    for src, tid, id_, mt in _iter_rows(csv_path, mt_col, "Model"):
+        per[(src, tid)][0].append(id_)
+        per[(src, tid)][1].append(mt)
+    if baseline_csv is not None:
+        for src, tid, id_, mt in _iter_rows(baseline_csv, mt_col, "Baseline"):
+            if src == "Baseline":
+                per[(src, tid)][0].append(id_)
+                per[(src, tid)][1].append(mt)
+    out = defaultdict(lambda: ([], []))
     for (src, tid), (ids, mts) in per.items():
         out[src][0].append(float(np.mean(ids)))
         out[src][1].append(float(np.mean(mts)))
     return {s: (np.array(x), np.array(y)) for s, (x, y) in out.items()}
 
 
-def load_mt_means_by_tid(csv_path, mt_col):
+def load_mt_means_by_tid(csv_path, mt_col, baseline_csv=None):
     """Same aggregation as load_condition_means, but keyed by tid so the
     per-condition MT means can be joined with tunnel geometry."""
     per = defaultdict(list)
-    with open(csv_path) as f:
-        for r in csv.DictReader(f):
-            if r.get("timed_out") == "True":
-                continue
-            mt = r.get(mt_col)
-            if not mt:
-                continue
-            src = "Model" if r["source"] == "Simulator" else "Human"
-            per[(src, r["tid"])].append(float(mt))
+    for src, tid, _, mt in _iter_rows(csv_path, mt_col, "Model"):
+        per[(src, tid)].append(mt)
+    if baseline_csv is not None:
+        for src, tid, _, mt in _iter_rows(baseline_csv, mt_col, "Baseline"):
+            if src == "Baseline":
+                per[(src, tid)].append(mt)
+    srcs = sorted({s for s, _ in per}, key=SOURCES.index)
     return {src: {tid: float(np.mean(v)) for (s, tid), v in per.items() if s == src}
-            for src in ("Human", "Model")}
+            for src in srcs}
 
 
 def steering_geometry():
@@ -157,7 +173,7 @@ def budget_id_data(mt_by_tid, geoms):
                                 for l in lams])])
     data = {src: ((length + lam * phi) / w,
                   np.array([mt_by_tid[src][t] for t in tids]))
-            for src in ("Human", "Model")}
+            for src in mt_by_tid}
     return data, lam
 
 
@@ -177,7 +193,8 @@ def style_axes(ax):
 def draw_law(ax, data, xlabel, unit):
     fits = {}
     line_lo = 0.0
-    for src in ("Human", "Model"):
+    srcs = [s for s in SOURCES if s in data]
+    for src in srcs:
         x, y = data[src]
         a, b, r2 = fit_line(x, y)
         fits[src] = (a, b, r2)
@@ -198,7 +215,7 @@ def draw_law(ax, data, xlabel, unit):
     lines = [
         f"{src}: MT = {fits[src][0]:.2f} + {fits[src][1]:.3f} {unit}"
         f"  ($R^2$ = {fits[src][2]:.2f})"
-        for src in ("Human", "Model")
+        for src in srcs
     ]
     ax.text(0.03, 0.97, "\n".join(lines), transform=ax.transAxes, fontsize=7,
             va="top", ha="left", linespacing=1.5)
@@ -218,7 +235,8 @@ def save(fig, stem):
 
 def main():
     # --- Steering law: MT vs ID = L/W, full trial time ---
-    steer = load_condition_means(EVAL_DIR / "Steering" / "steering_results.csv", "MT_s")
+    steer = load_condition_means(EVAL_DIR / "Steering" / "steering_results.csv", "MT_s",
+                                 BASELINE_DIR / "Steering" / "steering_results.csv")
     fig, ax = plt.subplots(figsize=(3.4, 2.5))
     fits = draw_law(ax, steer, "Index of difficulty $L/W$", "ID")
     save(fig, "steering_law")
@@ -227,12 +245,13 @@ def main():
               f"n = {len(steer[s][0])} conditions")
 
     # --- Curvature-aware steering law: MT vs ID_k = L/W + lam*PHI ---
-    mt_by_tid = load_mt_means_by_tid(EVAL_DIR / "Steering" / "steering_results.csv", "MT_s")
+    mt_by_tid = load_mt_means_by_tid(EVAL_DIR / "Steering" / "steering_results.csv", "MT_s",
+                                     BASELINE_DIR / "Steering" / "steering_results.csv")
     budget, lam = budget_id_data(mt_by_tid, steering_geometry())
     fig, ax = plt.subplots(figsize=(3.4, 2.5))
     fits = draw_law(ax, budget,
                     r"Curvature-aware ID  $\int (1 + \lambda|\kappa|)/W\,ds$", "ID")
-    ax.text(0.03, 0.79, rf"$\lambda$ = {lam:.2f} m/rad (fit on human)",
+    ax.text(0.03, 0.70, rf"$\lambda$ = {lam:.2f} m/rad (fit on human)",
             transform=ax.transAxes, fontsize=7, va="top", ha="left")
     save(fig, "steering_law_budget")
     print(f"  budget lam = {lam:.4f} m/rad (fit on human condition means)")
@@ -241,7 +260,8 @@ def main():
               f"n = {len(budget[s][0])} conditions")
 
     # --- Fitts' law: aligned kinematic MT vs ID (bits) ---
-    fitts = load_condition_means(EVAL_DIR / "Fitts" / "fitts_results.csv", "MT_kin_s")
+    fitts = load_condition_means(EVAL_DIR / "Fitts" / "fitts_results.csv", "MT_kin_s",
+                                 BASELINE_DIR / "Fitts" / "fitts_results.csv")
     fig, ax = plt.subplots(figsize=(3.4, 2.5))
     fits = draw_law(ax, fitts, "Index of difficulty (bits)", "ID")
     save(fig, "fitts_law")
