@@ -434,8 +434,18 @@ def main():
                     choices=["all", "human", "human-curv", "model", "stats"])
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--runs", type=int, default=3)
+    ap.add_argument("--config-dir", default=None,
+                    help="directory of fitted personas {letter}_anchor_config_s42.json "
+                         "(default: the legacy anchor_fitting_10p stage; use a run's fit/stages/base)")
+    ap.add_argument("--quant-dir", default=None,
+                    help="output/cache directory (default paper/quant); use a separate one per persona set")
     a = ap.parse_args()
-    OUT.mkdir(exist_ok=True)
+    global CONFIG_DIR, OUT
+    if a.config_dir:
+        CONFIG_DIR = Path(a.config_dir).resolve()
+    if a.quant_dir:
+        OUT = Path(a.quant_dir).resolve()
+    OUT.mkdir(exist_ok=True, parents=True)
     if a.stage in ("all", "human"):
         stage_human()
     if a.stage in ("all", "human-curv"):

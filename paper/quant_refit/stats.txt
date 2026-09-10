@@ -1,0 +1,50 @@
+
+== 1. saccade distance vs width (power law amp = a * W^b) ==
+  human: b = 0.549 +- 0.077 (per-participant, n=8); pooled b = 0.512 (r=0.314, p=3.2e-137, n=5999)
+  model: b = 0.681 +- 0.080 (per-participant, n=8); pooled b = 0.667 (r=0.503, p=0.0e+00, n=8341)
+
+   straight vs sinusoidal saccade distance:
+  human: median saccade distance (mm) by width
+cls       sinusoid  straight  ratio
+width_mm                           
+10.0          22.0      30.0   1.36
+12.5          27.0      31.0   1.15
+16.5          29.0      40.0   1.38
+25.0          36.0      74.0   2.06
+50.0          67.0      89.0   1.33
+  model: median saccade distance (mm) by width
+cls       sinusoid  straight  ratio
+width_mm                           
+10.0         16.87     22.39   1.33
+12.5         19.10     33.90   1.77
+16.5         23.96     33.10   1.38
+25.0         32.99     60.93   1.85
+50.0         52.91     74.33   1.40
+
+== 2. catch-up duration vs width (power law dur = a * W^b) ==
+  human: b = -0.330 +- 0.112 (per-participant, n=8); pooled b = -0.294 (r=-0.178, p=4.3e-31, n=4166)
+  model: b = -0.319 +- 0.097 (per-participant, n=8); pooled b = -0.338 (r=-0.288, p=5.1e-148, n=7741)
+
+   duration vs accumulated curvature (partial, | log W, dist):
+  human: pooled partial rho = 0.390 (p=1.4e-116, n=3193); per-participant 0.427 +- 0.084
+  model: pooled partial rho = 0.285 (p=1.1e-144, n=7741); per-participant 0.329 +- 0.082
+
+== 3. overrun below zero before the next saccade ==
+  human: crossed in 72.6% of 3042 cycles (per-participant 75.7 +- 15.0%); median depth = 0.95 of the post-saccade lead
+  model: crossed in 94.1% of 7741 cycles (per-participant 94.3 +- 5.1%); median depth = 1.46 of the post-saccade lead
+
+== 4. cursor speed -> saccade lead at equal width ==
+   post-saccade lead vs pre-saccade speed (| log W):
+  human: rho(v_pre, lead_post | W) = 0.082 (p=1.1e-05, n=2863); per-participant 0.013 +- 0.082
+  model: rho(v_pre, lead_post | W) = -0.049 (p=7.6e-06, n=8251); per-participant -0.260 +- 0.335
+   saccade amplitude vs pre-saccade speed (| log W):
+  human: rho(v_pre, amp | W) = 0.273 (p=1.3e-68, n=3961); per-participant 0.228 +- 0.087
+  model: rho(v_pre, amp | W) = 0.400 (p=0.0e+00, n=8251); per-participant 0.316 +- 0.077
+   onset lead (overrun channel; expect negative) vs speed (| log W):
+  human: rho(v_pre, lead_pre | W) = -0.272 (p=5.5e-68, n=3961); per-participant -0.365 +- 0.117
+  model: rho(v_pre, lead_pre | W) = -0.388 (p=6.5e-295, n=8251); per-participant -0.311 +- 0.048
+   straight-vs-sinusoid amplitude gap, mediated by speed:
+  human: straight beta = 0.353 (x1.42, p=1.9e-19) -> 0.208 (x1.23, p=8.9e-08) with log v_pre in; 41% absorbed; beta_v = 0.196 (p=6.4e-49); speed gap at equal width x2.09 (p=1.0e-44); n=3046
+  model: straight beta = 0.417 (x1.52, p=2.5e-113) -> 0.052 (x1.05, p=1.2e-02) with log v_pre in; 88% absorbed; beta_v = 0.605 (p=2.7e-194); speed gap at equal width x1.83 (p=0.0e+00); n=6313
+
+(cycle counts: human 4166 model 7741 | curvature intervals: human 3193 model 7741 )

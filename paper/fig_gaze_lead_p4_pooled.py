@@ -1,15 +1,22 @@
-"""Alternative gaze-lead figure: p04 human vs the pooled-8 model, side by side.
+"""Alternative gaze-lead figure: p04 human vs the model, side by side.
 
 Four columns — p04 sinusoid, p04 straight (human gaze lead, committed CSVs),
-then model sinusoid, model straight (re-simulated with the pooled single model
-fitted to all eight participants, results-cluster-10p/anchor_fitting_pooled8,
-noise on, seeded) — rows are the five tunnel widths. Unlike
-fig_gaze_lead_cycles.py, human and model are drawn in separate columns, never
-overlaid.
+then model sinusoid, model straight (re-simulated, noise on, seeded) — rows
+are the five tunnel widths. Unlike fig_gaze_lead_cycles.py, human and model
+are drawn in separate columns, never overlaid.
+
+--persona picks the model column's persona:
+    pooled  (default) the pooled single model fitted to all eight
+            participants (results-cluster-10p/anchor_fitting_pooled8)
+    perpid  the participant's own fitted persona (mpcc-full-perpid-s42 run),
+            with the participant's own traversal GAM (gam_traversal_{pid}.pkl)
+            — that fit predates the per-participant-GAM pipeline fix, so the
+            GAM path is patched in here exactly as stage_persona now does
 
 Usage:  python paper/fig_gaze_lead_p4_pooled.py  [--seed 42]
-        [--participant p04] [--round-normal N] [--round-straight N]
-Output: paper/figures/gaze_lead_{participant}_pooled.{pdf,png}
+        [--participant p04] [--persona pooled|perpid] [--config PATH]
+        [--round-normal N] [--round-straight N]
+Output: paper/figures/gaze_lead_{participant}_{persona}.{pdf,png}
 """
 import argparse
 import json
@@ -34,6 +41,9 @@ import fit_speed_model as fsm                     # noqa: E402
 DATA_DIR = PROJECT_ROOT / "eval" / "eval-gaze-lead" / "human-gaze-lead-10p" / "data"
 POOLED_CONFIG = (PROJECT_ROOT / "results-cluster-10p" / "anchor_fitting_pooled8"
                  / "stages" / "pooled8" / "pooled8_anchor_config_s42.json")
+PERPID_RUN = (PROJECT_ROOT / "results-cluster-10p" / "runs"
+              / "mpcc-full-perpid-s42-20260908-1800-c96338d")
+PACKAGE_MODELS = PROJECT_ROOT / "hcs_package" / "src" / "hcs_package" / "models"
 OUT_DIR = Path(__file__).resolve().parent / "figures"
 
 # default human rounds per participant: straight/normal are the ones picked in
@@ -49,21 +59,37 @@ TASK_SHORT = {"normal": "sinusoid", "straight": "straight",
 HUMAN_COLOR, MODEL_COLOR = mg.HUMAN_COLOR, mg.MODEL_COLOR
 
 
-def make_pooled_sim():
-    cfg = json.load(open(POOLED_CONFIG))
+def make_sim(persona, config_path=None):
+    """Simulator for the model columns: the pooled-8 persona, or the
+    participant's own fitted persona with its own traversal GAM."""
+    if config_path is None:
+        config_path = (POOLED_CONFIG if persona == "pooled" else
+                       PERPID_RUN / "fit" / "stages" / "base"
+                       / f"{LETTER}_anchor_config_s{42}.json")
+    cfg = json.load(open(config_path))
     cfg.pop("_description", None)
     cfg["add_noise"] = True
     if not float(cfg.get("replan_latency_cv", 0.0) or 0.0):
         cfg["replan_latency_cv"] = 0.89
+    if persona == "perpid":
+        sm = cfg.get("speed_model")
+        if (isinstance(sm, dict) and sm.get("type") == "gam_traversal"
+                and not sm.get("path")):
+            name = f"gam_traversal_{LETTER}.pkl"
+            if not (PACKAGE_MODELS / name).exists():
+                raise FileNotFoundError(f"per-participant GAM {name} not found")
+            cfg["speed_model"] = {"type": "gam_traversal", "path": name}
+    print(f"  model persona: {config_path}\n  speed_model: {cfg.get('speed_model')}",
+          flush=True)
     return fsm._make_sim(cfg)
 
 
-def load_series(seed):
+def load_series(seed, persona, config_path=None):
     """human[(type, width)] (selected round) and model[(type, width)] traces."""
     hum = pd.read_csv(DATA_DIR / f"{LETTER}_steering_lead.csv")
     hum = hum[hum["type_label"].isin(TYPES)]
     rounds_by_tid, t2c, t2b = fsm.load_participant(LETTER)
-    sim = make_pooled_sim()
+    sim = make_sim(persona, config_path)
 
     human, model = {}, {}
     trials = hum.groupby("trial_id").first().reset_index()
@@ -93,6 +119,12 @@ def main():
     ap.add_argument("--round-task2", type=int, default=None)
     ap.add_argument("--task2", default="straight", choices=["straight", "gentle"],
                     help="second task shown right of the separator")
+    ap.add_argument("--persona", default="pooled", choices=["pooled", "perpid"],
+                    help="model columns: pooled-8 persona or the participant's "
+                         "own fitted persona (with its own traversal GAM)")
+    ap.add_argument("--config", default=None,
+                    help="explicit persona JSON for the model columns "
+                         "(overrides the --persona default path)")
     a = ap.parse_args()
     LETTER = a.participant
     TYPES[1] = a.task2
@@ -103,7 +135,7 @@ def main():
     if a.round_task2 is not None:
         HUMAN_ROUND[a.task2] = a.round_task2
 
-    human, model, widths = load_series(a.seed)
+    human, model, widths = load_series(a.seed, a.persona, a.config)
 
     # column spec: (series dict, type, color, title) — human/model pairs per
     # task, with a vertical separator between the two tasks
@@ -161,7 +193,7 @@ def main():
         [x_mid, x_mid], [0.02, 0.98], transform=fig.transFigure,
         color="0.5", lw=0.8))
     OUT_DIR.mkdir(exist_ok=True)
-    stem = f"gaze_lead_{LETTER}_pooled"
+    stem = f"gaze_lead_{LETTER}_{a.persona}"
     if ty2 != "straight":
         stem += f"_{ty2}"
     for ext in ("pdf", "png"):

@@ -15,10 +15,16 @@ extra effective length, and the single lam is fit on the human condition
 means (max linear-fit R^2), then applied unchanged to the model. The
 curvature-width interaction follows Chen & Fels, "Curves Ahead" (CHI 2025).
 
-Usage:  python paper/plot_laws.py
-Writes: paper/figures/{steering_law, steering_law_budget, fitts_law}.{pdf,png}
+Usage:  python paper/plot_laws.py [--eval pooled8|perpid]
+Writes: paper/figures/{steering_law, steering_law_budget, fitts_law}{,_perpid}.{pdf,png}
+
+--eval perpid swaps both sources for the per-participant runs (each
+participant simulated with their own fitted persona) and suffixes the output
+stems with _perpid; the aggregation is unchanged (flat pooled mean per
+condition), only the personas behind the Simulator rows differ.
 """
 
+import argparse
 import csv
 import glob
 import json
@@ -33,11 +39,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
-EVAL_DIR = REPO / "results-cluster-10p" / "eval-main-pooled8-local"
-# CHI-26-EA baseline persona, pooled-8 fit + eval (Simulator rows = baseline
-# model; Human rows verified bit-identical to EVAL_DIR's).
-BASELINE_DIR = (REPO / "results-cluster-10p" / "runs"
-                / "baseline-full-pooled8-s42-20260908-1543-1adbed9" / "eval")
+RUNS = REPO / "results-cluster-10p" / "runs"
+# (model eval dir, baseline eval dir, output-stem suffix) per --eval choice.
+# Baseline runs: CHI-26-EA persona (Simulator rows = baseline model; its
+# Human rows are dropped — the model run's serve both sources).
+EVAL_SOURCES = {
+    "pooled8": (REPO / "results-cluster-10p" / "eval-main-pooled8-local",
+                RUNS / "baseline-full-pooled8-s42-20260908-1543-1adbed9" / "eval",
+                ""),
+    "perpid": (RUNS / "mpcc-full-perpid-s42-20260909-1257-22c349c" / "eval",
+               RUNS / "baseline-full-perpid-s42-20260908-1800-c96338d" / "eval",
+               "_perpid"),
+}
+PANEL_TITLES = {"perpid": "Per-participant fits", "pooled8": "Pooled fit"}
 OUT_DIR = Path(__file__).resolve().parent / "figures"
 
 sys.path.insert(0, str(REPO))
@@ -46,9 +60,9 @@ from experiment.environment import create_environment  # noqa: E402
 
 # Okabe-Ito blue / vermillion — CVD-validated pair (ΔE 21.9 protan, 31.2 normal);
 # neutral gray for the baseline so the two focal series keep the contrast.
-COLORS = {"Human": "#0072B2", "Model": "#D55E00", "Baseline": "#8C8C8C"}
-MARKERS = {"Human": "o", "Model": "^", "Baseline": "s"}  # shape = secondary identity encoding
-SOURCES = ("Human", "Model", "Baseline")
+COLORS = {"Human": "#0072B2", "Ours": "#D55E00", "Baseline": "#8C8C8C"}
+MARKERS = {"Human": "o", "Ours": "^", "Baseline": "s"}  # shape = secondary identity encoding
+SOURCES = ("Human", "Ours", "Baseline")
 
 plt.rcParams.update({
     "font.family": "sans-serif",
@@ -89,7 +103,7 @@ def load_condition_means(csv_path, mt_col, baseline_csv=None):
     (its Human rows are dropped — verified identical to csv_path's).
     """
     per = defaultdict(lambda: ([], []))  # (src, tid) -> (IDs, MTs)
-    for src, tid, id_, mt in _iter_rows(csv_path, mt_col, "Model"):
+    for src, tid, id_, mt in _iter_rows(csv_path, mt_col, "Ours"):
         per[(src, tid)][0].append(id_)
         per[(src, tid)][1].append(mt)
     if baseline_csv is not None:
@@ -108,7 +122,7 @@ def load_mt_means_by_tid(csv_path, mt_col, baseline_csv=None):
     """Same aggregation as load_condition_means, but keyed by tid so the
     per-condition MT means can be joined with tunnel geometry."""
     per = defaultdict(list)
-    for src, tid, _, mt in _iter_rows(csv_path, mt_col, "Model"):
+    for src, tid, _, mt in _iter_rows(csv_path, mt_col, "Ours"):
         per[(src, tid)].append(mt)
     if baseline_csv is not None:
         for src, tid, _, mt in _iter_rows(baseline_csv, mt_col, "Baseline"):
@@ -190,7 +204,7 @@ def style_axes(ax):
     ax.tick_params(length=2.5)
 
 
-def draw_law(ax, data, xlabel, unit):
+def draw_law(ax, data, xlabel, unit, ylabel=True, legend=True):
     fits = {}
     line_lo = 0.0
     srcs = [s for s in SOURCES if s in data]
@@ -204,7 +218,8 @@ def draw_law(ax, data, xlabel, unit):
                    linewidths=0, alpha=0.85, zorder=3, label=src)
         line_lo = min(line_lo, float((a + b * xs).min()))
     ax.set_xlabel(xlabel)
-    ax.set_ylabel("Movement time (s)")
+    if ylabel:
+        ax.set_ylabel("Movement time (s)")
     # Keep the full regression lines visible: only clamp the bottom at 0 when
     # no line dips below it; otherwise pad below the lowest line endpoint.
     ax.set_ylim(bottom=line_lo if line_lo == 0.0 else line_lo - 0.3)
@@ -217,10 +232,11 @@ def draw_law(ax, data, xlabel, unit):
         f"  ($R^2$ = {fits[src][2]:.2f})"
         for src in srcs
     ]
-    ax.text(0.03, 0.97, "\n".join(lines), transform=ax.transAxes, fontsize=7,
+    ax.text(0.03, 0.97, "\n".join(lines), transform=ax.transAxes, fontsize=6,
             va="top", ha="left", linespacing=1.5)
-    ax.legend(loc="lower right", frameon=False, handletextpad=0.2,
-              borderaxespad=0.2)
+    if legend:
+        ax.legend(loc="lower right", frameon=False, handletextpad=0.2,
+                  borderaxespad=0.2)
     return fits
 
 
@@ -233,51 +249,100 @@ def save(fig, stem):
     plt.close(fig)
 
 
-def main():
-    # --- Steering law: MT vs ID = L/W, full trial time ---
-    steer = load_condition_means(EVAL_DIR / "Steering" / "steering_results.csv", "MT_s",
-                                 BASELINE_DIR / "Steering" / "steering_results.csv")
-    fig, ax = plt.subplots(figsize=(3.4, 2.5))
-    fits = draw_law(ax, steer, "Index of difficulty $L/W$", "ID")
-    save(fig, "steering_law")
-    for s, (a, b, r2) in fits.items():
-        print(f"  steering {s}: MT = {a:.3f} + {b:.4f} ID, R2 = {r2:.3f}, "
-              f"n = {len(steer[s][0])} conditions")
+LAW_SPECS = {   # law -> (data key, xlabel, unit)
+    "steering_law": ("steer", "Index of difficulty $L/W$", "ID"),
+    "steering_law_budget": ("budget",
+                            r"Curvature-aware ID  $\int (1 + \lambda|\kappa|)/W\,ds$",
+                            "ID"),
+    "fitts_law": ("fitts", r"Index of difficulty $\log_2(D/W+1)$", "ID"),
+}
 
-    # --- Curvature-aware steering law: MT vs ID_k = L/W + lam*PHI ---
-    mt_by_tid = load_mt_means_by_tid(EVAL_DIR / "Steering" / "steering_results.csv", "MT_s",
-                                     BASELINE_DIR / "Steering" / "steering_results.csv")
-    budget, lam = budget_id_data(mt_by_tid, steering_geometry())
-    fig, ax = plt.subplots(figsize=(3.4, 2.5))
-    fits = draw_law(ax, budget,
-                    r"Curvature-aware ID  $\int (1 + \lambda|\kappa|)/W\,ds$", "ID")
-    ax.text(0.03, 0.70, rf"$\lambda$ = {lam:.2f} m/rad (fit on human)",
-            transform=ax.transAxes, fontsize=7, va="top", ha="left")
-    save(fig, "steering_law_budget")
-    print(f"  budget lam = {lam:.4f} m/rad (fit on human condition means)")
-    for s, (a, b, r2) in fits.items():
-        print(f"  steering-budget {s}: MT = {a:.3f} + {b:.4f} ID_k, R2 = {r2:.3f}, "
-              f"n = {len(budget[s][0])} conditions")
 
-    # --- Fitts' law: aligned kinematic MT vs ID (bits) ---
-    fitts = load_condition_means(EVAL_DIR / "Fitts" / "fitts_results.csv", "MT_kin_s",
-                                 BASELINE_DIR / "Fitts" / "fitts_results.csv")
-    fig, ax = plt.subplots(figsize=(3.4, 2.5))
-    fits = draw_law(ax, fitts, "Index of difficulty (bits)", "ID")
-    save(fig, "fitts_law")
-    for s, (a, b, r2) in fits.items():
-        print(f"  fitts {s}: MT = {a:.3f} + {b:.4f} ID, R2 = {r2:.3f}, "
-              f"n = {len(fitts[s][0])} conditions")
+def load_law_data(eval_key, geoms):
+    """All three laws' condition-mean data for one eval source."""
+    eval_dir, baseline_dir, _ = EVAL_SOURCES[eval_key]
+    steer = load_condition_means(eval_dir / "Steering" / "steering_results.csv", "MT_s",
+                                 baseline_dir / "Steering" / "steering_results.csv")
+    mt_by_tid = load_mt_means_by_tid(eval_dir / "Steering" / "steering_results.csv", "MT_s",
+                                     baseline_dir / "Steering" / "steering_results.csv")
+    budget, lam = budget_id_data(mt_by_tid, geoms)
+    fitts = load_condition_means(eval_dir / "Fitts" / "fitts_results.csv", "MT_kin_s",
+                                 baseline_dir / "Fitts" / "fitts_results.csv")
+    return {"steer": steer, "budget": budget, "lam": lam, "fitts": fitts}
 
-    # Cross-check the Fitts refit against the eval pipeline's stored regression.
-    ref = json.loads((EVAL_DIR / "Fitts" / "fitts_regression.json").read_text())
-    for src, key in (("Human", "human"), ("Model", "model")):
-        a, b, r2 = fits[src]
+
+def report_fits(label, fits, unit="ID"):
+    for s, (a_, b, r2) in fits.items():
+        print(f"  {label} {s}: MT = {a_:.3f} + {b:.4f} {unit}, R2 = {r2:.3f}")
+
+
+def check_fitts_regression(eval_key, fits):
+    """Cross-check the Fitts refit against the eval pipeline's stored regression."""
+    ref = json.loads((EVAL_SOURCES[eval_key][0] / "Fitts"
+                      / "fitts_regression.json").read_text())
+    for src, key in (("Human", "human"), ("Ours", "model")):
+        a_, b, r2 = fits[src]
         ra, rb, rr2 = (ref["aligned"][key][k] for k in
                        ("a_intercept", "b_slope_s_per_bit", "r_squared"))
-        ok = abs(a - ra) < 1e-3 and abs(b - rb) < 1e-3 and abs(r2 - rr2) < 1e-3
-        print(f"  fitts {src} vs fitts_regression.json[aligned]: "
+        ok = abs(a_ - ra) < 1e-3 and abs(b - rb) < 1e-3 and abs(r2 - rr2) < 1e-3
+        print(f"  fitts [{eval_key}] {src} vs fitts_regression.json[aligned]: "
               f"{'MATCH' if ok else f'MISMATCH (json: a={ra}, b={rb}, R2={rr2})'}")
+
+
+def lam_note(ax, lam):
+    ax.text(0.03, 0.70, rf"$\lambda$ = {lam:.2f} m/rad (fit on human)",
+            transform=ax.transAxes, fontsize=6, va="top", ha="left")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--eval", default="pooled8",
+                    choices=sorted(EVAL_SOURCES) + ["both"],
+                    help="which eval feeds the Simulator rows: the pooled-8 "
+                         "personas (default), the per-participant fits, or "
+                         "'both' — one figure per law with two panels "
+                         "(per-participant | pooled), stems suffixed _compare")
+    a = ap.parse_args()
+
+    if a.eval == "both":
+        geoms = steering_geometry()
+        keys = ("perpid", "pooled8")
+        data = {k: load_law_data(k, geoms) for k in keys}
+        for k in keys:
+            print(f"[{k}] model: {EVAL_SOURCES[k][0].relative_to(REPO)}")
+        for law, (dkey, xlabel, unit) in LAW_SPECS.items():
+            fig, axes = plt.subplots(1, 2, figsize=(6.8, 2.5))
+            for i, k in enumerate(keys):
+                fits = draw_law(axes[i], data[k][dkey], xlabel, unit,
+                                ylabel=(i == 0), legend=(i == 1))
+                if dkey == "budget":
+                    lam_note(axes[i], data[k]["lam"])
+                axes[i].set_title(PANEL_TITLES[k])
+                report_fits(f"{law} [{k}]", fits, unit)
+                if dkey == "fitts":
+                    check_fitts_regression(k, fits)
+            # shared y scale so the two panels compare directly
+            lo = min(ax.get_ylim()[0] for ax in axes)
+            hi = max(ax.get_ylim()[1] for ax in axes)
+            for ax in axes:
+                ax.set_ylim(lo, hi)
+            fig.tight_layout()
+            save(fig, f"{law}_compare")
+        return
+
+    EVAL_DIR, BASELINE_DIR, sfx = EVAL_SOURCES[a.eval]
+    print(f"eval: {a.eval}\n  model:    {EVAL_DIR}\n  baseline: {BASELINE_DIR}")
+    data = load_law_data(a.eval, steering_geometry())
+    for law, (dkey, xlabel, unit) in LAW_SPECS.items():
+        fig, ax = plt.subplots(figsize=(3.4, 2.5))
+        fits = draw_law(ax, data[dkey], xlabel, unit)
+        if dkey == "budget":
+            lam_note(ax, data["lam"])
+            print(f"  budget lam = {data['lam']:.4f} m/rad (fit on human condition means)")
+        save(fig, f"{law}{sfx}")
+        report_fits(law, fits, unit)
+        if dkey == "fitts":
+            check_fitts_regression(a.eval, fits)
 
 
 if __name__ == "__main__":
