@@ -15,8 +15,10 @@
 # POPSIZE / PARTICIPANTS_FILE / VENV_DIR / GAMMA. Single wide task, not an
 # array: parallelism is over (candidate x participant) units.
 #
-# Wall 12 h; CMA budget 9 h (default TIME_LIMIT=32400) — the pooled T0 scan
-# and the per-participant held-out probes run after the budget.
+# Wall 12 h; CMA budget 8 h (default TIME_LIMIT=28800) — the pooled T0 scan
+# and the per-participant held-out probes run after the budget (2026-09-10:
+# 9 h -> 8 h for extra margin, the 3-width/3-condition split evaluates ~1.7x
+# more trial units per generation).
 
 set -euo pipefail
 : "${RUN_DIR:?set by submit_run.sh}" "${MODEL:?}" "${VARIANT:?}" "${SEED:?}"
@@ -29,7 +31,7 @@ export TMPDIR="$RUN_DIR/tmp/job_${SLURM_JOB_ID:-local}_0"
 mkdir -p "$TMPDIR"; trap 'rm -rf "$TMPDIR"' EXIT
 export HCS_FIT_RESULTS_DIR="$RUN_DIR/fit"
 export HCS_HUMAN_DATA_DIR="$RUN_DIR/code/human_data/task_aligned_all"
-TIME_LIMIT="${TIME_LIMIT:-32400}"      # 9 h CMA budget < 12 h wall
+TIME_LIMIT="${TIME_LIMIT:-28800}"      # 8 h CMA budget < 12 h wall
 POPSIZE="${POPSIZE:-12}"
 PARTICIPANTS_FILE="${PARTICIPANTS_FILE:-participants_10p.txt}"
 ABLATION=$([ "$VARIANT" = "full" ] && echo none || echo "$VARIANT")
