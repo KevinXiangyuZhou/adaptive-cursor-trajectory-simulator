@@ -535,14 +535,13 @@ def load_training(pid, quick=False):
         pt_train = {t: r[:2] for t, r in pt_train.items()}
         pt_test = {t: r[:2] for t, r in pt_test.items()}
     fsm.compute_tunnel_scales(tun_train, tasks); fsm.compute_pointing_scales(pt_train)
-    # Noise-on stability trials: the widest corner/sinusoid TRAIN conditions,
-    # capped like the fit trials. (The protocol every fitted row shares —
-    # kept as is on 2026-09-08 so the finished mpcc fits stay valid; the
-    # baseline's noise instability is addressed by its per-type reference
-    # velocity and tighter weight bounds instead.)
+    # Noise-on stability trials: wide/middle corner + widest sinusoid TRAIN
+    # conditions, capped like the fit trials. (2026-09-10: the middle corner
+    # is 16.5 mm — the old spec asked for a nonexistent 30 mm corner, so
+    # every earlier fit silently ran 2 stability trials instead of 3.)
     stab = []
     def _ty(t): return t2c[t].get("tunnelType") or "sinusoidal"
-    for ty, w in (("corner", 0.05), ("corner", 0.03), ("sinusoidal", 0.05)):
+    for ty, w in (("corner", 0.05), ("corner", 0.0165), ("sinusoidal", 0.05)):
         tid = next((t for t in tun_train if abs(t2c[t]["tunnelWidth"] - w) < 1e-6 and _ty(t) == ty), None)
         if tid is None:
             continue
