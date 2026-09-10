@@ -20,9 +20,11 @@
 # after the longest single trial (2026-09-08; was 12 cores = one candidate
 # per core).
 #
-# Wall 8 h; CMA budget 6.5 h — start-up, the generation in flight when the
-# budget expires, the noise-on stability runs and the held-out probe + save
-# all run after the budget and must clear the wall with margin.
+# Wall 8 h; CMA budget 7.5 h (2026-09-10: was 6.5 h — margin cut to 0.5 h to
+# buy back generations lost to the 27-unit candidates). Start-up, the
+# generation in flight when the budget expires, the noise-on stability runs
+# and the held-out probe + save all run after the budget and must clear the
+# wall within that margin.
 
 set -euo pipefail
 : "${RUN_DIR:?set by submit_run.sh}" "${MODEL:?}" "${VARIANT:?}" "${SEED:?}"
@@ -35,7 +37,7 @@ export TMPDIR="$RUN_DIR/tmp/job_${SLURM_JOB_ID:-local}_${SLURM_ARRAY_TASK_ID:-0}
 mkdir -p "$TMPDIR"; trap 'rm -rf "$TMPDIR"' EXIT   # node /tmp is small+shared
 export HCS_FIT_RESULTS_DIR="$RUN_DIR/fit"
 export HCS_HUMAN_DATA_DIR="$RUN_DIR/code/human_data/task_aligned_all"
-TIME_LIMIT="${TIME_LIMIT:-23400}"      # 6.5 h CMA budget < 8 h wall
+TIME_LIMIT="${TIME_LIMIT:-27000}"      # 7.5 h CMA budget < 8 h wall
 POPSIZE="${POPSIZE:-12}"
 PARTICIPANTS_FILE="${PARTICIPANTS_FILE:-participants_10p.txt}"
 ABLATION=$([ "$VARIANT" = "full" ] && echo none || echo "$VARIANT")
