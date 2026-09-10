@@ -23,19 +23,21 @@ the goal-precision well, which is scaled by nc^2, stays active during fitting):
            central 10–90 % of progress (cruise) with the features computed on
            the fitted reference path exactly as the simulator does.
   Stage 2  MPCC tunnel weights via CMA-ES (contour, lag, jerk, constraint,
-           progress, Th) on the steering training widths {10, 30, 50} mm.
+           progress, Th) on the steering training widths {10, 16.5, 50} mm.
            Loss = human-variability-normalised lateral RMSE + speed-profile
            RMSE + (1 - speed corr) + relative time diff + wall margin.
   Stage 3  Free-space (pointing) LQ weights via CMA-ES (goal, free_velocity;
            jerk fixed from Stage 2; goal_precision stays at the base config's
-           value, default 0) on the pointing training radii {5, 15, 25} mm. Loss = normalised |relative MT_kin diff| +
+           value, default 0) on three pointing training conditions spanning
+           the ID range (R=25.5, 12, 5 mm, one per distance). Loss = normalised |relative MT_kin diff| +
            speed-profile RMSE + (1 - corr) + endpoint-depth diff + lateral
            RMSE, with MT_kin = movement onset -> final target entry on both
            sides (human reaction and click latency are NOT fitted; the model
            dwell_s stands in for click latency).
 
-Held-out evaluation: steering widths {20, 40} mm, ID4SCS (both directions),
-pointing radii {10, 20} mm. Constrained->unconstrained trials are not used.
+Held-out evaluation: steering widths {12.5, 25} mm and the 12 pointing
+conditions outside POINT_TRAIN_R. Constrained->unconstrained trials are not
+used.
 
 Outputs (eval/model_fitting/results/):
     {pid}_gam_s{seed}.pkl           fitted GAM speed model
@@ -110,10 +112,20 @@ GAM_PROGRESS_WINDOW = (0.10, 0.90)          # cruise samples for the GAM
 INCOMPLETE_PENALTY = 100.0
 WALL_MARGIN_WEIGHT = 20.0
 
-TRAIN_WIDTHS = {0.01, 0.03, 0.05}
-TEST_WIDTHS = {0.02, 0.04}
-POINT_TRAIN_R = {0.005, 0.015, 0.025}
-POINT_TEST_R = {0.010, 0.020}
+# Steering split (2026-09-10): three training widths — the extremes plus the
+# middle of the battery {10, 12.5, 16.5, 25, 50} mm — with {12.5, 25} held
+# out. (Before this the set said {10, 30, 50}, but no 30 mm corridor exists,
+# so the effective split was the two extremes only.)
+TRAIN_WIDTHS = {0.01, 0.0165, 0.05}
+TEST_WIDTHS = {0.0125, 0.025}
+# Pointing split (2026-09-10): three training conditions spanning the ID
+# range, one per distance — (D=0.153, R=25.5mm, ID 2.1), (D=0.307, R=12mm,
+# ID 3.8), (D=0.46, R=5mm, ID 5.6); the other 12 conditions are held out.
+# Radii are unique to their distance (10mm is not: it appears at two
+# distances, so it stays out of this radius-keyed set). Before this the set
+# said {5, 15, 25} mm, but only 5mm exists in the battery, so the effective
+# training set was the single hardest condition.
+POINT_TRAIN_R = {0.0255, 0.012, 0.005}
 
 REF_PATH_PARAM_SPEC = [
     {"name": "w_cut",                "bounds": (0.0, 1.0)},
@@ -256,7 +268,7 @@ def split_tunnel(rounds_by_tid, tid_to_condition, tid_to_bucket):
     for tid, rounds in rounds_by_tid.items():
         b = tid_to_bucket.get(tid)
         if b == "steering":
-            w = round(tid_to_condition[tid]["tunnelWidth"], 3)
+            w = round(tid_to_condition[tid]["tunnelWidth"], 4)
             (train if w in TRAIN_WIDTHS else test)[tid] = rounds
         # id4scs_* / c2u buckets: out of scope (2026-09-08), not held out either
     return train, test

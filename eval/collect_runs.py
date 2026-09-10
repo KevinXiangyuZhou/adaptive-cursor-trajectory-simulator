@@ -26,7 +26,9 @@ from pathlib import Path
 import numpy as np
 
 DEFAULT_ROOT = os.environ.get("RESULTS_ROOT", "/home/xiangyz/ondemand/data/sys/myjobs/projects/chi-27/results")
-TRAIN_WIDTHS_MM = {10.0, 30.0, 50.0}   # fit_speed_model.TRAIN_WIDTHS
+# fit_speed_model.TRAIN_WIDTHS (2026-09-10: {10, 16.5, 50}; runs fitted
+# before that date used the two extremes {10, 50} — 30 mm never existed).
+TRAIN_WIDTHS_MM = {10.0, 16.5, 50.0}
 
 
 def _linfit(x, y):

@@ -4,11 +4,16 @@ Reads the pooled-8 main eval's steering_condition_summary.csv (one row per
 participant x condition) and prints LaTeX rows of mean +/- SD for lateral RMSE
 (mm), speed RMSE (m/s), speed correlation, and time ratio (model/human
 completion time). Train conditions are the fitted widths {10, 50} mm
-(fit_speed_model.TRAIN_WIDTHS); test conditions are {12.5, 16.5, 25} mm.
+(fit_speed_model.TRAIN_WIDTHS); test conditions are {12.5, 25} mm.
+NOTE: runs fitted before 2026-09-10 used train widths {10, 50} — pass
+--train-widths 10,50 when tabulating one of those.
 
-Usage: python paper/table_steering_metrics.py
+Usage: python paper/table_steering_metrics.py [--csv PATH]
+       (default: the pooled-8 main eval; pass a run's
+        eval/Steering/steering_condition_summary.csv for per-participant fits)
 """
 
+import argparse
 import csv
 from collections import defaultdict
 from pathlib import Path
@@ -19,7 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 CSV = (REPO / "results-cluster-10p" / "eval-main-pooled8-local" / "Steering"
        / "steering_condition_summary.csv")
 
-TRAIN_WIDTHS_MM = {10.0, 50.0}
+TRAIN_WIDTHS_MM = {10.0, 16.5, 50.0}
 
 # tid -> tunnel type (from the trial conditions in the raw participant JSON)
 TYPE_BY_TID = {}
@@ -33,11 +38,20 @@ ROW_ORDER = ["Straight", "Corner", "Sinusoidal", "Gentle sinusoidal",
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv", default=str(CSV),
+                    help="steering_condition_summary.csv to tabulate")
+    ap.add_argument("--train-widths", default=None,
+                    help="comma-separated train widths in mm (default: the "
+                         "current fit split; use 10,50 for pre-2026-09-10 runs)")
+    a = ap.parse_args()
+    train_widths = (TRAIN_WIDTHS_MM if a.train_widths is None
+                    else {float(w) for w in a.train_widths.split(",")})
     groups = defaultdict(lambda: defaultdict(list))  # (type, split) -> metric -> vals
-    with open(CSV) as f:
+    with open(a.csv) as f:
         for r in csv.DictReader(f):
             ttype = TYPE_BY_TID[int(r["tid"])]
-            split = "Train" if float(r["width_mm"]) in TRAIN_WIDTHS_MM else "Test"
+            split = "Train" if float(r["width_mm"]) in train_widths else "Test"
             vals = {
                 "lat_mm": float(r["lateral_rmse"]) * 1000.0,
                 "spd": float(r["speed_rmse"]),
