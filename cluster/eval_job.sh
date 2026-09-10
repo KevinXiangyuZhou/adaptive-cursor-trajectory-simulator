@@ -46,6 +46,9 @@ fi
 [ -f "$CFG" ] || { echo "missing fitted persona $CFG"; exit 1; }
 python3 cluster/stage_persona.py "$CFG" "$PERSONA_DIR/${PID}.json" "$MODEL" "$KIND"
 
+# SKIP_EVAL=1 (resubmit_eval.sh --gaze-lead-only): leave the eval outputs as
+# they are and only (re)generate the gaze-lead outputs below.
+if [ "${SKIP_EVAL:-0}" != 1 ]; then
 echo "[$(date)] eval $MODEL/$KIND $SHORT ($PID) persona=$CFG -> $HCS_EVAL_RESULTS_DIR"
 python -u eval/eval-main/run_eval.py \
     --model "$MODEL" \
@@ -56,6 +59,7 @@ python -u eval/eval-main/run_eval.py \
     --min-runs "$MIN_RUNS" \
     --data-dir "$DATA_DIR" \
     2>&1 | tee "$HCS_EVAL_RESULTS_DIR/eval_${SHORT}_s${SEED}.log"
+fi
 
 # Gaze-lead outputs after the eval. GAZE_LEAD level (default by variant):
 #   full   model_gaze_lead.py (planning-event CSV + per-trial PDF) AND
@@ -75,6 +79,7 @@ if [ -z "${GAZE_LEAD:-}" ] || [ "${GAZE_LEAD}" = 1 ]; then
 fi
 if [ "$MODEL" = "mpcc" ] && [ "$GAZE_LEAD" != 0 ]; then
     set +e
+    rm -f "$GAZE_LEAD_DIR/FAILED_model_gaze_lead_${SHORT}" "$GAZE_LEAD_DIR/FAILED_gaze_lead_grids_${SHORT}"
     python -u eval/eval-gaze-lead/model_gaze_lead.py \
         --letters "$SHORT" --config "$PERSONA_DIR/${PID}.json" --noise on \
         --out-dir "$GAZE_LEAD_DIR/$SHORT" \

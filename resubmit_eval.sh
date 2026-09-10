@@ -2,7 +2,7 @@
 # Re-run ONLY the eval + aggregate of an existing run whose fit completed
 # (e.g. after an eval-side fix), keeping its fitted personas and RUN_ID.
 #
-#   resubmit_eval.sh <RUN_DIR> [--min-runs N] [--wall HH:MM:SS] [--no-gaze-lead] [--aggregate-only]
+#   resubmit_eval.sh <RUN_DIR> [--min-runs N] [--wall HH:MM:SS] [--no-gaze-lead] [--aggregate-only] [--gaze-lead-only]
 #
 # --wall           SLURM time limit for the eval array (default 01:30:00 from
 #                  cluster/eval_job.sh; every-step variants such as no_gaze need more)
@@ -11,6 +11,9 @@
 # --aggregate-only submit only the aggregate on the eval outputs already in
 #                  <RUN_DIR>/eval (e.g. after the eval tasks were killed by the
 #                  wall during the figure step); nothing is deleted or refreshed
+# --gaze-lead-only re-run only the gaze-lead step (planning events / figures) on the
+#                  existing personas and eval outputs; eval-side code is refreshed,
+#                  the eval outputs and DONE marker are kept
 #
 # The run's code snapshot keeps the fitting code it was fitted with; only
 # the cluster job scripts (cluster/*.sh, cluster/*.py) and eval-side Python
@@ -24,13 +27,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 RUN_DIR="${1:?usage: resubmit_eval.sh <RUN_DIR> [--min-runs N]}"; shift
-MIN_RUNS=0; WALL=""; GAZE_LEAD=""; AGG_ONLY=0
+MIN_RUNS=0; WALL=""; GAZE_LEAD=""; AGG_ONLY=0; GL_ONLY=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --min-runs) MIN_RUNS="$2"; shift 2;;
         --wall) WALL="$2"; shift 2;;
         --no-gaze-lead) GAZE_LEAD=0; shift;;
         --aggregate-only) AGG_ONLY=1; shift;;
+        --gaze-lead-only) GL_ONLY=1; shift;;
         *) echo "unknown option $1"; exit 2;;
     esac
 done
@@ -75,6 +79,24 @@ for d in cluster eval/eval-main eval/utils eval/eval-gaze-lead eval/eval-gaze-cu
 done
 cp "$REPO_ROOT/eval/collect_runs.py" "$CODE/eval/collect_runs.py"
 rm -rf "$CODE/human_data"; ln -s "$REPO_ROOT/human_data" "$CODE/human_data"
+if [ "$GL_ONLY" = 1 ]; then
+    # keep eval outputs, personas and DONE; the gaze-lead step overwrites its own files
+    mkdir -p "$RUN_DIR/gaze-lead" "$RUN_DIR/logs" "$RUN_DIR/tmp"
+    GL_JOB=$(sbatch --parsable --job-name "gl-$(basename "$RUN_DIR")" --array="1-$N_PIDS" ${WALL:+--time "$WALL"} \
+        --output "$RUN_DIR/logs/gl_%A_%a.out" --error "$RUN_DIR/logs/gl_%A_%a.err" \
+        --export="$EXPORTS,SKIP_EVAL=1" "$CODE/cluster/eval_job.sh")
+    GL_JOB="${GL_JOB%%;*}"
+    python3 - "$RUN_DIR" "$SHA" "$GL_JOB" <<'EOF3'
+import json, sys, datetime
+d, sha, gl = sys.argv[1:]
+p = d + "/RUN_INFO.json"; j = json.load(open(p))
+j.setdefault("eval_resubmits", []).append({"when": datetime.datetime.now().isoformat(timespec="seconds"),
+    "eval_code_commit": sha, "gaze_lead_only": True, "jobs": {"gaze_lead": gl}})
+json.dump(j, open(p, "w"), indent=2)
+EOF3
+    echo "resubmitted gaze-lead step $GL_JOB for $(basename "$RUN_DIR") (eval code $SHA)"
+    exit 0
+fi
 rm -rf "$RUN_DIR/eval" "$RUN_DIR/gaze-lead" "$RUN_DIR/personas" "$RUN_DIR/DONE"
 mkdir -p "$RUN_DIR/eval" "$RUN_DIR/gaze-lead" "$RUN_DIR/personas" "$RUN_DIR/logs" "$RUN_DIR/tmp"
 
