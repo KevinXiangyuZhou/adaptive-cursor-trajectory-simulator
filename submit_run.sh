@@ -8,7 +8,7 @@
 #
 # --time-limit is the CMA-ES budget in seconds; --wall overrides the fit job's
 # SLURM time limit (default 08:00:00, per-participant and pooled). Keep
-# wall >= budget + 0.5 h (per-participant) / + 3 h (pooled) for the post-fit
+# wall >= budget + 0.5 h (per-participant) / + 2 h (pooled) for the post-fit
 # T0 scan, held-out probes and save; a shorter wall backfills sooner.
 #
 # One run = one RUN_ID = one code snapshot = one results tree:
