@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=36
 #SBATCH --mem-per-cpu=512M
-#SBATCH --time=12:00:00
+#SBATCH --time=08:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=xiangyz@umich.edu
 
@@ -15,10 +15,9 @@
 # POPSIZE / PARTICIPANTS_FILE / VENV_DIR / GAMMA. Single wide task, not an
 # array: parallelism is over (candidate x participant) units.
 #
-# Wall 12 h; CMA budget 8 h (default TIME_LIMIT=28800) — the pooled T0 scan
-# and the per-participant held-out probes run after the budget (2026-09-10:
-# 9 h -> 8 h for extra margin, the 3-width/3-condition split evaluates ~1.7x
-# more trial units per generation).
+# Wall 8 h (2026-09-10: matches the per-participant fit job); CMA budget 5 h
+# (default TIME_LIMIT=18000) — the pooled T0 scan and the per-participant
+# held-out probes run after the budget and need ~3 h under the wall.
 
 set -euo pipefail
 : "${RUN_DIR:?set by submit_run.sh}" "${MODEL:?}" "${VARIANT:?}" "${SEED:?}"
@@ -31,7 +30,7 @@ export TMPDIR="$RUN_DIR/tmp/job_${SLURM_JOB_ID:-local}_0"
 mkdir -p "$TMPDIR"; trap 'rm -rf "$TMPDIR"' EXIT
 export HCS_FIT_RESULTS_DIR="$RUN_DIR/fit"
 export HCS_HUMAN_DATA_DIR="$RUN_DIR/code/human_data/task_aligned_all"
-TIME_LIMIT="${TIME_LIMIT:-28800}"      # 8 h CMA budget < 12 h wall
+TIME_LIMIT="${TIME_LIMIT:-18000}"      # 5 h CMA budget < 8 h wall (pooled post-fit ~3 h)
 POPSIZE="${POPSIZE:-12}"
 PARTICIPANTS_FILE="${PARTICIPANTS_FILE:-participants_10p.txt}"
 ABLATION=$([ "$VARIANT" = "full" ] && echo none || echo "$VARIANT")
