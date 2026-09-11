@@ -40,15 +40,46 @@ Rounds longer than 60 s are dropped (harness rule); the old CHI-26 harness
 used 20 s. In the 14p steering data 17 of 1610 rounds exceed 20 s and none
 exceed 60 s, so every round is kept.
 
+### Protocol checks (2026-09-11)
+
+Geometry: every 14p human sample of all 28 tunnel conditions lies inside
+the tunnel the harness rebuilds from the condition dict (100% within
+W/2 · 1.05), every round starts on the centerline start, and the arc
+lengths equal the 8p ones per family (507.2 / 660.0 / 458.0 / 476.6 /
+626.2 mm). The current `experiment/environment.py` reproduces the CHI-26
+tunnels.
+
+Goal rule — the one real difference: a CHI-26 trial ends when the cursor is
+within a FIXED 10 mm of the tunnel end (last samples within 10.00 mm at
+every width, 322 rounds per width), whereas the current web experiment ends
+within W/2 (8p last samples within exactly W/2), which is also the harness's
+default for the model. With the default the model would travel 5 mm farther
+than the humans at W = 10 mm and stop up to 15 mm earlier at W = 50 mm. The
+pipeline therefore runs the harness with `--tunnel-target-radius 0.01`
+(env `TUNNEL_TARGET_RADIUS`, recorded in RUN_INFO.json and in the
+`target_radius_mm` column of the summary CSV). The override changes only
+the stop rule: the waypoint spacing of the reference path the model
+receives stays at the width rule (W/4, what the persona was fitted with),
+and without the flag the harness output is byte-identical to before. On
+P204813 the correction moves the model/human time ratio by about −0.1 at
+10 mm and +0.1 at 50 mm. The first cluster run (before this flag existed)
+used W/2 — rerun.
+
 ## Run on Great Lakes
 
 ```bash
 # once: the tracked persona copy; eval-14p/ must be committed (git archive
 # snapshot) or pass --allow-dirty
 eval-14p/submit_eval_14p.sh                       # defaults: persona pooled8-991900f, seed 42, steering
-eval-14p/submit_eval_14p.sh --source-run mpcc-full-pooled8-s42-20260910-1540-991900f   # stage from the cluster run instead
+# evaluate other pooled runs: persona, model (mpcc / baseline) and the 8p
+# reference summary come from the run itself; tag = <model>-<kind>-<sha7>
+eval-14p/submit_eval_14p.sh --source-run mpcc-full-pooled8-s42-20260910-1540-991900f
+eval-14p/submit_eval_14p.sh --source-run mpcc-full-pooled8-s42-20260911-0334-c70a5dd
+eval-14p/submit_eval_14p.sh --source-run mpcc-full-pooled8all-s42-20260911-0335-c70a5dd
+eval-14p/submit_eval_14p.sh --source-run baseline-full-pooled8all-s42-20260911-0336-c70a5dd --wall 02:00:00   # baseline: ~58 core-min per participant
 eval-14p/submit_eval_14p.sh --min-runs 10 --wall 01:30:00                             # more noise draws per condition
 eval-14p/submit_eval_14p.sh --dry-run
+TUNNEL_TARGET_RADIUS=0.01 eval-14p/submit_eval_14p.sh   # the default; the CHI-26 goal rule (see Protocol checks)
 ```
 
 Run tree: `$RESULTS_ROOT/runs-14p/<RUN_ID>/` with `RUN_ID =
@@ -67,9 +98,20 @@ logs/eval_<job>_<n>.out|err, agg_<job>.out|err     DONE when finished
 
 Each array task evaluates one participant (`run_eval.py --pid`, fresh
 simulation, one model run per human round unless `--min-runs`); 25
-conditions / 115 runs take a few minutes on 4 cores (about a minute on a
-laptop), no pointing, no gaze-lead step. The aggregate rebuilds the pooled
-Steering outputs from the cached sims and writes `SUMMARY_14p`.
+conditions / 115 runs take ~5 min on 4 cores for the MPCC model (about a
+minute on a laptop; the baseline replans every step, ~3x longer), no
+pointing, no gaze-lead step; wall 1 h. A `--source-run` whose fit is still
+in the queue is accepted: the eval array waits for the fit job (afterok)
+and stages the persona itself; the source run's 8p summary is used as the
+reference if it exists when the aggregate runs. The aggregate (4 cores, 30 min
+wall) rebuilds the pooled Steering outputs from the cached sims with
+`--no-trial-plots` (the per-trial figures were already written by the eval
+tasks) and writes `SUMMARY_14p` — one to two minutes. The first aggregate
+overran 30 min on one core: the progress resampling in `eval/utils/stats.py`
+was a point-by-segment Python loop (~4 s per condition, ~23 core-min for
+350 conditions) and the pool spawned one worker per node core. It is now
+vectorised (bit-identical results, ~150x faster), and the worker pool
+follows the SLURM allocation (`run_eval.n_pool_workers`).
 
 ## Locally
 

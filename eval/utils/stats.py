@@ -3,6 +3,58 @@
 import numpy as np
 
 
+def _centerline_arcs(centerline):
+    cl = np.asarray(centerline, dtype=float)
+    seg = np.diff(cl, axis=0)                       # (M, 2)
+    seg_len = np.linalg.norm(seg, axis=1)           # (M,)
+    cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+    return cl, seg, seg_len, cum
+
+
+def project_progress(trajectory, centerline):
+    """Progress (arc length / total, in [0, 1]) and signed lateral offset of
+    every trajectory point at its closest point on the polyline centerline.
+
+    Vectorised (2026-09-11) replacement of the point x segment Python loop:
+    all N x M clipped segment projections at once, first minimum-distance
+    segment per point (np.argmin), so ties resolve as the loop's strict '<'
+    did. Same arithmetic per element, results equal to ~1e-15; the old loop
+    was ~4 s per condition and the whole of an eval aggregate's run time.
+
+    Returns (progress (N,), lateral (N,), cl_total). lateral is positive to
+    the left of the path direction; 0 on degenerate segments.
+    """
+    traj = np.asarray(trajectory, dtype=float).reshape(-1, 2)
+    cl, seg, seg_len, cum = _centerline_arcs(centerline)
+    cl_total = cum[-1]
+    n, m = len(traj), len(seg)
+    if cl_total < 1e-9 or n == 0 or m == 0:
+        return np.zeros(n), np.zeros(n), cl_total
+    seg_len2 = np.einsum("ij,ij->i", seg, seg)                    # (M,)
+    rel = traj[:, None, :] - cl[None, :-1, :]                     # (N, M, 2) = pt - cl[i]
+    dots = rel[..., 0] * seg[None, :, 0] + rel[..., 1] * seg[None, :, 1]
+    ok = seg_len2 >= 1e-18
+    t = np.zeros((n, m))
+    t[:, ok] = np.clip(dots[:, ok] / seg_len2[ok], 0.0, 1.0)
+    proj = cl[None, :-1, :] + t[..., None] * seg[None, :, :]      # (N, M, 2)
+    off = traj[:, None, :] - proj                                 # (N, M, 2) = pt - proj
+    d2 = off[..., 0] ** 2 + off[..., 1] ** 2
+    best = np.argmin(d2, axis=1)                                  # first minimum, as the loop's '<'
+    rows = np.arange(n)
+    t_b = t[rows, best]
+    arc = cum[best] + t_b * seg_len[best]
+    # signed lateral: perp = (-seg_y, seg_x) / |seg|
+    perp = np.stack([-seg[:, 1], seg[:, 0]], axis=1)
+    perp_len = np.linalg.norm(perp, axis=1)
+    lat = np.zeros(n)
+    good = perp_len[best] > 1e-12
+    if good.any():
+        pb = perp[best[good]] / perp_len[best[good]][:, None]
+        ob = off[rows[good], best[good]]
+        lat[good] = ob[:, 0] * pb[:, 0] + ob[:, 1] * pb[:, 1]
+    return arc / cl_total, lat, cl_total
+
+
 def resample_by_progress(trajectory, centerline, n_bins=100):
     """Resample a trajectory at uniform progress points along the centerline.
 
@@ -12,47 +64,9 @@ def resample_by_progress(trajectory, centerline, n_bins=100):
         lateral: (n_bins,) array of signed lateral deviation from centerline
     """
     traj = np.asarray(trajectory, dtype=float)
-    cl = np.asarray(centerline, dtype=float)
-
-    # Compute centerline arc-length
-    cl_diffs = np.diff(cl, axis=0)
-    cl_seg_lens = np.linalg.norm(cl_diffs, axis=1)
-    cl_cum = np.concatenate([[0.0], np.cumsum(cl_seg_lens)])
-    cl_total = cl_cum[-1]
+    traj_progress, traj_lateral, cl_total = project_progress(traj, centerline)
     if cl_total < 1e-9:
         return np.linspace(0, 1, n_bins), np.tile(traj[0], (n_bins, 1)), np.zeros(n_bins)
-
-    # For each trajectory point, find closest point on centerline → progress
-    traj_progress = []
-    traj_lateral = []
-    for pt in traj:
-        best_dist2 = np.inf
-        best_arc = 0.0
-        best_lateral = 0.0
-        for i in range(len(cl) - 1):
-            seg = cl[i + 1] - cl[i]
-            seg_len2 = np.dot(seg, seg)
-            if seg_len2 < 1e-18:
-                t = 0.0
-            else:
-                t = np.clip(np.dot(pt - cl[i], seg) / seg_len2, 0.0, 1.0)
-            proj = cl[i] + t * seg
-            d2 = np.sum((pt - proj) ** 2)
-            if d2 < best_dist2:
-                best_dist2 = d2
-                best_arc = cl_cum[i] + t * cl_seg_lens[i]
-                # Signed lateral: positive = left of path direction
-                perp = np.array([-seg[1], seg[0]])
-                perp_len = np.linalg.norm(perp)
-                if perp_len > 1e-12:
-                    best_lateral = np.dot(pt - proj, perp / perp_len)
-                else:
-                    best_lateral = 0.0
-        traj_progress.append(best_arc / cl_total)
-        traj_lateral.append(best_lateral)
-
-    traj_progress = np.array(traj_progress)
-    traj_lateral = np.array(traj_lateral)
 
     # Resample at uniform progress bins
     progress_bins = np.linspace(0, 1, n_bins)
@@ -69,33 +83,11 @@ def resample_by_progress(trajectory, centerline, n_bins=100):
 def resample_speeds_by_progress(speeds, trajectory, centerline, n_bins=100):
     """Resample speed profile at uniform progress along centerline."""
     traj = np.asarray(trajectory, dtype=float)
-    cl = np.asarray(centerline, dtype=float)
     spd = np.asarray(speeds, dtype=float)
-
-    # Minimal: use same progress computation
-    cl_diffs = np.diff(cl, axis=0)
-    cl_seg_lens = np.linalg.norm(cl_diffs, axis=1)
-    cl_cum = np.concatenate([[0.0], np.cumsum(cl_seg_lens)])
-    cl_total = cl_cum[-1]
+    traj_progress, _lat, cl_total = project_progress(traj, centerline)
     if cl_total < 1e-9 or len(spd) < 2:
         return np.linspace(0, 1, n_bins), np.zeros(n_bins)
 
-    traj_progress = []
-    for pt in traj:
-        best_dist2 = np.inf
-        best_arc = 0.0
-        for i in range(len(cl) - 1):
-            seg = cl[i + 1] - cl[i]
-            seg_len2 = np.dot(seg, seg)
-            t = 0.0 if seg_len2 < 1e-18 else np.clip(np.dot(pt - cl[i], seg) / seg_len2, 0.0, 1.0)
-            proj = cl[i] + t * seg
-            d2 = np.sum((pt - proj) ** 2)
-            if d2 < best_dist2:
-                best_dist2 = d2
-                best_arc = cl_cum[i] + t * cl_seg_lens[i]
-        traj_progress.append(best_arc / cl_total)
-
-    traj_progress = np.array(traj_progress)
     # Truncate speeds to trajectory length
     spd = spd[:len(traj)]
     if len(spd) < len(traj):

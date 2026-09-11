@@ -341,7 +341,7 @@ def load_trials_by_participant(trial_ids, data_dir=None):
 # Environment / task-config builders
 # ---------------------------------------------------------------------------
 
-def _build_sigmoidal_config(width, curvature, target_radius=None):
+def _build_sigmoidal_config(width, curvature, target_radius=None, waypoint_density=None):
     if target_radius is None:
         target_radius = width * 0.5
     env_dict = {
@@ -354,11 +354,11 @@ def _build_sigmoidal_config(width, curvature, target_radius=None):
         "target_radius": target_radius,
     }
     environment = create_environment(env_dict)
-    task_config = generate_task_config(environment, include_constraints=True)
+    task_config = generate_task_config(environment, waypoint_density=waypoint_density, include_constraints=True)
     return task_config, environment["centerline"]
 
 
-def _build_corner_config(width, num_corners, corner_offset):
+def _build_corner_config(width, num_corners, corner_offset, target_radius=None, waypoint_density=None):
     env_dict = {
         "env_type": "tunnel_steering_corner",
         "screen_width": 460,
@@ -367,10 +367,10 @@ def _build_corner_config(width, num_corners, corner_offset):
         "num_corners": num_corners,
         "corner_offset": corner_offset,
         "max_steps": 800,
-        "target_radius": width * 0.5,
+        "target_radius": width * 0.5 if target_radius is None else target_radius,
     }
     environment = create_environment(env_dict)
-    task_config = generate_task_config(environment, include_constraints=True)
+    task_config = generate_task_config(environment, waypoint_density=waypoint_density, include_constraints=True)
     return task_config, environment["centerline"]
 
 
@@ -385,11 +385,27 @@ def _build_wide_to_narrow_config(segment1_width, segment2_width, curvature=0.0):
         "curvature": curvature,
         "max_steps": 800,
         # Terminate reliably at the tunnel end: use segment2 (the exit segment).
-        "target_radius": segment2_width * 0.5,
+        "target_radius": (segment2_width * 0.5 if TUNNEL_TARGET_RADIUS is None
+                          else TUNNEL_TARGET_RADIUS),
     }
     environment = create_environment(env_dict)
-    task_config = generate_task_config(environment, include_constraints=True)
+    # waypoint spacing follows the width rule (half of segment2 / 2), not the
+    # goal-radius override — see build_steering_task_config
+    task_config = generate_task_config(environment, waypoint_density=segment2_width * 0.25,
+                                       include_constraints=True)
     return task_config, environment["centerline"]
+
+
+# --tunnel-target-radius: the goal radius (m) that ends a tunnel trial, for
+# every steering / ID4SCS condition, overriding the half-width rule. The
+# model's run ends when the cursor is within this radius of the last
+# waypoint, so it must be the radius the human protocol used: the current
+# web experiment ends a trial within W/2 (the 8p data's last samples lie
+# within exactly W/2 of the end), the CHI-26 protocol (eval-14p) within a
+# fixed 10 mm at every width (last samples within 10.00 mm, 322 rounds per
+# width) — with the default rule the model would travel 5 mm farther than
+# those humans at W = 10 mm and stop 15 mm earlier at W = 50 mm.
+TUNNEL_TARGET_RADIUS = None
 
 
 def build_steering_task_config(cond):
@@ -397,14 +413,23 @@ def build_steering_task_config(cond):
     Dispatch a Steering-bucket condition dict to the right env builder.
     Condition keys are camelCase, matching the raw data file
     (numCorners, cornerOffset, radiusRatio) — not the snake_case builder
-    *parameter* names.
+    *parameter* names. Goal radius: --tunnel-target-radius if given, else
+    width * radiusRatio when the condition carries one, else width / 2.
     """
-    if cond.get("tunnelType") == "corner":
-        return _build_corner_config(cond["tunnelWidth"], cond["numCorners"], cond["cornerOffset"])
     width = cond["tunnelWidth"]
     radius_ratio = cond.get("radiusRatio")
-    target_radius = width * radius_ratio if radius_ratio is not None else None
-    return _build_sigmoidal_config(width, cond.get("curvature", 0.0), target_radius=target_radius)
+    protocol_radius = width * (radius_ratio if radius_ratio is not None else 0.5)
+    target_radius = TUNNEL_TARGET_RADIUS if TUNNEL_TARGET_RADIUS is not None else protocol_radius
+    # Waypoint spacing (the reference-path / corridor sampling the model
+    # receives) stays at half the width-rule radius, i.e. exactly what
+    # generate_task_config picks by default and what the personas were
+    # fitted with — the goal-radius override changes ONLY the stop rule.
+    density = 0.5 * protocol_radius
+    if cond.get("tunnelType") == "corner":
+        return _build_corner_config(width, cond["numCorners"], cond["cornerOffset"],
+                                    target_radius=target_radius, waypoint_density=density)
+    return _build_sigmoidal_config(width, cond.get("curvature", 0.0),
+                                   target_radius=target_radius, waypoint_density=density)
 
 
 def make_width_profile(centerline, w1, w2):
@@ -636,7 +661,11 @@ def save_sim_cache(cache_dict, cache_path):
 # ---------------------------------------------------------------------------
 
 def process_condition(law_dir, pid, tid, folder_name, human_rounds, model_records,
-                       tunnel_path, tunnel_width, condition):
+                       tunnel_path, tunnel_width, condition, trial_plots=True):
+    """Per-(participant, condition) outputs: the three per-trial figures
+    (unless trial_plots is False — --no-trial-plots, for an aggregate pass
+    over eval outputs that already carry them), the comparison metrics and
+    results_summary.json."""
     trial_folder = law_dir / f"participant_{pid}" / folder_name
     trial_folder.mkdir(parents=True, exist_ok=True)
 
@@ -653,10 +682,11 @@ def process_condition(law_dir, pid, tid, folder_name, human_rounds, model_record
     tunnel_paths = {tid: tunnel_path}
     tunnel_widths = {tid: tunnel_width}
 
-    plot_experiment_results(all_results, trial_folder, tunnel_paths, tunnel_widths)
-    plot_enhanced_speed_profiles(all_results, trial_folder, time_step=0.05)
-    if tunnel_path and len(tunnel_path) >= 2:
-        plot_speeds_vs_progress_enhanced(all_results, trial_folder, tunnel_paths, bin_size=0.1)
+    if trial_plots:
+        plot_experiment_results(all_results, trial_folder, tunnel_paths, tunnel_widths)
+        plot_enhanced_speed_profiles(all_results, trial_folder, time_step=0.05)
+        if tunnel_path and len(tunnel_path) >= 2:
+            plot_speeds_vs_progress_enhanced(all_results, trial_folder, tunnel_paths, bin_size=0.1)
 
     # Experiment-main-style human-vs-model comparison metrics (lateral RMSE,
     # speed RMSE/correlation, goal-approach speed, time diff) — additive on
@@ -707,6 +737,30 @@ POOL_TIMEOUT_S = 3600
 # job dict so worker processes construct the right class.
 MODEL_KIND = "mpcc"
 
+# --no-trial-plots: skip the per-trial figures (aggregate pass over eval
+# outputs that already have them). Set in main(); carried in every job dict.
+TRIAL_PLOTS = True
+
+
+def n_pool_workers():
+    """Worker count for the per-condition ProcessPoolExecutor: the CPUs this
+    process may actually run on. os.cpu_count() reports the whole node, so
+    under SLURM a 4-core allocation used to spawn 36 workers (and a 1-core
+    aggregate job 36 matplotlib processes on one core). Precedence:
+    HCS_EVAL_WORKERS, the scheduler's affinity mask / SLURM_CPUS_PER_TASK,
+    then os.cpu_count()."""
+    env = os.environ.get("HCS_EVAL_WORKERS")
+    if env and env.isdigit() and int(env) > 0:
+        return int(env)
+    try:
+        n = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        n = 0
+    slurm = os.environ.get("SLURM_CPUS_PER_TASK")
+    if slurm and slurm.isdigit() and int(slurm) > 0:
+        n = int(slurm) if n <= 0 else min(n, int(slurm))
+    return n if n > 0 else (os.cpu_count() or 4)
+
 
 def _make_simulator(config_path, model=None, cond=None, bucket=None):
     """Simulator for one condition: this repo's MPCC, or the CHI-26-EA
@@ -754,7 +808,7 @@ def build_condition_job(pid, tid, bucket, cond, human_rounds, cached_records,
         "human_rounds": human_rounds, "cached_records": cached_records,
         "n_needed": n_needed, "config_path": config_path_str,
         "law_dir": str(law_dir), "human_only": human_only,
-        "model": MODEL_KIND,
+        "model": MODEL_KIND, "trial_plots": TRIAL_PLOTS,
     }
 
     if bucket == "steering":
@@ -854,7 +908,8 @@ def _run_condition_job(job):
 
     law_dir = Path(job["law_dir"])
     summary = process_condition(law_dir, pid, tid, job["folder_name"], human_rounds,
-                                 model_records, tunnel_path, tunnel_width, cond)
+                                 model_records, tunnel_path, tunnel_width, cond,
+                                 trial_plots=job.get("trial_plots", True))
     metrics = summary.get("metrics", {})
 
     n_timed_out = sum(1 for r in model_records if r.get("timed_out"))
@@ -1046,7 +1101,7 @@ def process_participant(pid, participant_data, config_path_str, tid_to_condition
     if not jobs:
         return rows_by_bucket, condition_summaries
 
-    n_workers = os.cpu_count() or 4
+    n_workers = min(n_pool_workers(), len(jobs))
     with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
         futures = {executor.submit(_run_condition_job, job): tid for tid, job in jobs.items()}
         try:
@@ -1527,6 +1582,18 @@ def main():
                              "from scratch. The simulator applies stochastic per-step motor/"
                              "device noise, so this produces a different random draw than "
                              "whatever is currently cached, not just a repeat of it.")
+    parser.add_argument("--tunnel-target-radius", type=float, default=None, metavar="M",
+                        help="Goal radius (m) ending every steering / ID4SCS run, replacing the "
+                             "half-width rule (and radiusRatio). Must match the human protocol: "
+                             "omit for the current web experiment (W/2); 0.01 for the CHI-26 "
+                             "protocol of eval-14p (fixed 10 mm goal at every width).")
+    parser.add_argument("--no-trial-plots", action="store_true", default=False,
+                        help="Skip the three per-trial figures of every (participant, condition) "
+                             "folder; metrics, results_summary.json and the pooled outputs are "
+                             "still written. For --aggregate-only over eval outputs that already "
+                             "carry the figures (the eval tasks drew them): ~1.5 s per condition "
+                             "saved, i.e. most of an aggregate pass since the 2026-09-11 "
+                             "vectorisation of utils.stats.project_progress.")
     parser.add_argument("--model", choices=["mpcc", "baseline"], default="mpcc",
                         help="Simulator the persona configs drive: this repo's anchor-drive "
                              "MPCC (default) or the CHI-26-EA baseline package "
@@ -1535,8 +1602,14 @@ def main():
                              "(alignment, metrics, plots) is identical.")
     args = parser.parse_args()
 
-    global MODEL_KIND
+    global MODEL_KIND, TRIAL_PLOTS, TUNNEL_TARGET_RADIUS
     MODEL_KIND = args.model
+    TRIAL_PLOTS = not args.no_trial_plots
+    if args.tunnel_target_radius is not None:
+        if not (0 < args.tunnel_target_radius < 0.1):
+            print(f"--tunnel-target-radius {args.tunnel_target_radius} m is not a sane goal radius")
+            return
+        TUNNEL_TARGET_RADIUS = args.tunnel_target_radius
     if args.buckets is None:
         # ID4SCS (variable-width) and constrained-to-unconstrained tasks are
         # out of the paper's scope (2026-09-08): the default evaluation is
@@ -1572,6 +1645,9 @@ def main():
     print(f"  Results:  {RESULTS_DIR}")
     if config_dir is not None:
         print(f"  Configs:  per-participant from {config_dir}")
+    print(f"  Workers:  {n_pool_workers()} per participant" + ("" if TRIAL_PLOTS else "   (--no-trial-plots)"))
+    print("  Goal:     tunnel target radius " + ("W/2 (or W * radiusRatio)" if TUNNEL_TARGET_RADIUS is None
+                                                 else f"{TUNNEL_TARGET_RADIUS * 1000:g} mm at every width (--tunnel-target-radius)"))
     if human_only:
         print("  Mode:     --human-only (simulator is never called)")
     else:

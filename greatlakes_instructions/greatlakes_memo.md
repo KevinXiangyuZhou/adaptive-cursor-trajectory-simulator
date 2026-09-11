@@ -224,3 +224,31 @@ of wall on the last row covers a train-all baseline generation (~90 min)
 still in flight when the budget expires.
 Check the pace after the first hour: `grep "gen " <RUN_DIR>/fit/fit_p01_s42.log | tail`
 (the "(NNNs gen" field is the generation time).
+
+## eval-14p (2026-09-11): the pooled model on 14 new participants
+
+No fitting. One persona fitted on the 8-participant cohort (default: the
+tracked copy `eval-14p/personas/pooled8-991900f/default.json` = the pooled8
+fit of `mpcc-full-pooled8-s42-20260910-1540-991900f`) is evaluated with
+`eval/eval-main/run_eval.py` on the 14 participants in
+`eval-14p/human_data/raw` (CHI-26 steering protocol: 5 tunnel types x
+10/20/30/40/50 mm; lasso / menu trials are excluded by the harness,
+wide-to-narrow is off unless `--buckets "steering id4scs_w2n"`).
+  eval-14p/submit_eval_14p.sh                      # eval array (14 tasks, 4 cores, 1 h) -> aggregate
+  eval-14p/submit_eval_14p.sh --source-run <pooled8 RUN_ID>   # persona + model (mpcc/baseline) + 8p reference from that run
+  eval-14p/submit_eval_14p.sh --min-runs 10 --wall 01:30:00
+The 2026-09-11 pooled round on the 14p (one command each, tags
+mpcc-pooled8-c70a5dd / mpcc-pooled8all-c70a5dd / baseline-pooled8all-c70a5dd):
+  eval-14p/submit_eval_14p.sh --source-run mpcc-full-pooled8-s42-20260911-0334-c70a5dd
+  eval-14p/submit_eval_14p.sh --source-run mpcc-full-pooled8all-s42-20260911-0335-c70a5dd
+  eval-14p/submit_eval_14p.sh --source-run baseline-full-pooled8all-s42-20260911-0336-c70a5dd --wall 02:00:00
+(the baseline replans every step: ~58 core-min per participant vs ~3 for
+mpcc, hence the 2 h wall). A source run whose fit is still queued is fine (eval waits afterok on the fit
+job and stages the persona itself); the goal rule is the CHI-26 fixed 10 mm
+(--tunnel-target-radius 0.01) in every eval-14p run.
+Run tree `$RESULTS_ROOT/runs-14p/eval14p-<tag>-s<seed>-<stamp>-<sha7>/`
+(separate from runs/, invisible to collect_runs.py); results in eval/Steering/
+and the generalisation table eval/SUMMARY_14p.txt (new cohort vs the
+fitting cohort in-sample, widths shared 10/50 mm vs new 20/30/40 mm, per
+participant). eval-14p/ must be committed for the git-archive snapshot, or
+pass --allow-dirty. Details: eval-14p/README.md.

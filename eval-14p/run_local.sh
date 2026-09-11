@@ -2,8 +2,8 @@
 # Local (no SLURM) eval-14p run: the same harness, persona and data as the
 # cluster job, for a smoke test or a full run on a workstation.
 #
-#   eval-14p/run_local.sh [--pid P...] [--persona-dir DIR] [--tag NAME] [--min-runs N]
-#                         [--buckets "steering"] [--aggregate-only] [--reference CSV]
+#   eval-14p/run_local.sh [--pid P...] [--persona-dir DIR] [--model mpcc|baseline] [--tag NAME]
+#                         [--min-runs N] [--buckets "steering"] [--aggregate-only] [--reference CSV]
 #
 # --pid            one participant only (any line of eval-14p/participants_14p.txt);
 #                  without it every participant runs in turn, then the aggregate
@@ -15,11 +15,12 @@
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
-PID=""; PERSONA_DIR="eval-14p/personas/pooled8-991900f"; TAG=""; MIN_RUNS=0; BUCKETS="steering"; AGG=0; REFERENCE=""; SEED=42
+PID=""; PERSONA_DIR="eval-14p/personas/pooled8-991900f"; TAG=""; MIN_RUNS=0; BUCKETS="steering"; AGG=0; REFERENCE=""; SEED=42; MODEL="mpcc"
 while [ $# -gt 0 ]; do
     case "$1" in
         --pid) PID="$2"; shift 2;;
         --persona-dir) PERSONA_DIR="$2"; shift 2;;
+        --model) MODEL="$2"; shift 2;;
         --tag) TAG="$2"; shift 2;;
         --min-runs) MIN_RUNS="$2"; shift 2;;
         --buckets) BUCKETS="$2"; shift 2;;
@@ -36,13 +37,15 @@ done
 PY="${PYTHON:-$REPO_ROOT/.venv/bin/python}"; [ -x "$PY" ] || PY=python3
 DATA_DIR="eval-14p/human_data/raw"
 RESULTS="$REPO_ROOT/eval-14p/results/$TAG"
+TUNNEL_TARGET_RADIUS="${TUNNEL_TARGET_RADIUS:-0.01}"   # CHI-26 protocol: fixed 10 mm goal at every width
 mkdir -p "$RESULTS"
 export MPLBACKEND=Agg OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 
 run_eval() {  # $@ = extra run_eval args
     # shellcheck disable=SC2086
-    "$PY" -u eval/eval-main/run_eval.py --model mpcc --config-dir "$PERSONA_DIR" --seed "$SEED" \
-        --data-dir "$DATA_DIR" --results-dir "$RESULTS" --buckets $BUCKETS "$@"
+    "$PY" -u eval/eval-main/run_eval.py --model "$MODEL" --config-dir "$PERSONA_DIR" --seed "$SEED" \
+        --data-dir "$DATA_DIR" --results-dir "$RESULTS" --buckets $BUCKETS \
+        --tunnel-target-radius "$TUNNEL_TARGET_RADIUS" "$@"
 }
 if [ "$AGG" = 0 ]; then
     if [ -n "$PID" ]; then
@@ -55,7 +58,7 @@ if [ "$AGG" = 0 ]; then
     fi
 fi
 if [ "$AGG" = 1 ] || [ -z "$PID" ]; then
-    run_eval --aggregate-only 2>&1 | tee "$RESULTS/eval_aggregate_s${SEED}.log"
+    run_eval --aggregate-only --no-trial-plots 2>&1 | tee "$RESULTS/eval_aggregate_s${SEED}.log"
     REF_ARG=(); [ -n "$REFERENCE" ] && REF_ARG=(--reference "$REFERENCE")
     "$PY" -u eval-14p/summarize_14p.py "$RESULTS" --data-dir "$DATA_DIR" --out "$RESULTS/SUMMARY_14p" ${REF_ARG[@]+"${REF_ARG[@]}"}
 fi
