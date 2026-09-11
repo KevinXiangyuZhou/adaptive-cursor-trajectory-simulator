@@ -19,8 +19,10 @@ baseline, under ONE protocol.
 Loss = mean tunnel loss on the training widths (fit_speed_model.tunnel_loss,
 human-variability scaled) + w_pt * mean pointing loss on the training radii
 (fit_speed_model.pointing_loss) + a noise-on stability penalty. Held-out:
-test widths / radii. Fits run noiseless; the saved persona has noise (and
-latency variability) restored.
+test widths / radii. --train-all drops the split and trains on every
+steering width and every pointing condition (the pooled protocol since
+2026-09-11; the fit record then carries no test loss). Fits run noiseless;
+the saved persona has noise (and latency variability) restored.
 
 Parallelism (2026-09-08): the work unit is one TRIAL of one candidate —
 (candidate x tunnel condition | pointing round | stability trial) — not one
@@ -519,12 +521,20 @@ def restore_stochasticity(save_cfg, model, pid):
     return save_cfg
 
 
-def load_training(pid, quick=False):
+def load_training(pid, quick=False, train_all=False):
+    """Training/held-out data of one participant. train_all=True merges the
+    held-out steering widths and pointing conditions into the training set
+    (every condition trains; the test dicts come back empty), and the
+    human-variability scales are then computed over all conditions."""
     rounds_by_tid, t2c, t2b = fsm.load_participant(pid)
     tasks = fsm.build_tunnel_tasks(t2c, t2b)
     tun_train, tun_test = fsm.split_tunnel(rounds_by_tid, t2c, t2b)
     tun_train = {t: r for t, r in tun_train.items() if t2b[t] == "steering"}
+    tun_test = {t: r for t, r in tun_test.items() if t2b[t] == "steering"}
     pt_train, pt_test = fsm.split_pointing(rounds_by_tid, t2c, t2b)
+    if train_all:
+        tun_train = {**tun_train, **tun_test}; tun_test = {}
+        pt_train = {**pt_train, **pt_test}; pt_test = {}
     if quick:
         keep = {}
         for t in sorted(tun_train):
@@ -551,7 +561,7 @@ def load_training(pid, quick=False):
     return dict(tun_train=tun_train, tun_test=tun_test, tasks=tasks,
                 pt_train=pt_train, pt_test=pt_test, stab=stab, types=types,
                 scales=dict(fsm.TUNNEL_SCALES), pscales=dict(fsm.POINT_SCALES),
-                t2c=t2c, t2b=t2b)
+                t2c=t2c, t2b=t2b, train_all=bool(train_all))
 
 
 def main():
@@ -574,6 +584,8 @@ def main():
     ap.add_argument("--fix-budget", action="store_true", help="keep D0 fixed at the base (gaze-calibrated) value; fit planner weights only (gamma is always fixed at the base constant)")
     ap.add_argument("--fix-deadline", action="store_true", help="skip the post-fit T0 calibration scan (keep the base persona's plan_deadline_s)")
     ap.add_argument("--quick", action="store_true", help="fit on the straight/sharp/corner subset + 2 pointing rounds per radius")
+    ap.add_argument("--train-all", action="store_true",
+                    help="train on every steering width and pointing condition (no held-out split)")
     ap.add_argument("--skip-probe", action="store_true", help="skip the held-out probe after the fit")
     a = ap.parse_args()
     RESULTS.mkdir(exist_ok=True, parents=True)
@@ -584,8 +596,9 @@ def main():
                      fix_budget=a.fix_budget)
     base, spec, init, model = su["base"], su["spec"], su["init"], su["model"]
     tag = (a.tag.strip("_") or (su["ablation"] if su["ablation"] != "none" else "base"))
-    d = load_training(a.pid, a.quick)
-    print(f"{a.pid} [{model} / {su['ablation']}] -> stages/{tag}: tunnel train {len(d['tun_train'])} tids, "
+    d = load_training(a.pid, a.quick, a.train_all)
+    print(f"{a.pid} [{model} / {su['ablation']}] -> stages/{tag}{' (train-all)' if a.train_all else ''}: "
+          f"tunnel train {len(d['tun_train'])} tids, "
           f"test {len(d['tun_test'])}; pointing train {len(d['pt_train'])} tids "
           f"({sum(len(v) for v in d['pt_train'].values())} rounds); stability {len(d['stab'])}; "
           f"search {[s['name'] for s in spec]}; deadline {base.get('plan_deadline_s')}; "
@@ -611,11 +624,12 @@ def main():
     cfg_path = stage_dir / f"{a.pid}_{su['tag_model']}_config_s{a.seed}.json"
     save_cfg = restore_stochasticity(copy.deepcopy(base), model, a.pid)
     save_cfg["_fit"] = {"model": model, "ablation": su["ablation"], "pid": a.pid, "seed": a.seed,
-                        "tag": tag, "search": [s["name"] for s in spec]}
+                        "tag": tag, "search": [s["name"] for s in spec], "train_all": a.train_all}
     with open(cfg_path, "w") as f:
         json.dump(save_cfg, f, indent=2)
     print(f"\nfitted: {json.dumps({k: float(v) for k, v in fitted.items()})}\nbest joint loss {best:.4f}; saved {cfg_path}")
     rec = {"pid": a.pid, "model": model, "ablation": su["ablation"], "tag": tag, "seed": a.seed,
+           "train_all": a.train_all,
            "search": [s["name"] for s in spec], "fitted": fitted, "best_loss": best, "history": hist,
            "deadline": base.get("plan_deadline_s"), "t0_scan": t0_scan,
            "caps": {"tunnel_mult": TUNNEL_CAP_MULT, "tunnel_min_steps": TUNNEL_CAP_MIN_STEPS, "point_steps": POINT_CAP_STEPS,

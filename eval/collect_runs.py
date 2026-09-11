@@ -47,7 +47,10 @@ def _read_csv(path):
         return list(csv.DictReader(f))
 
 
-def _steering(run_dir):
+def _steering(run_dir, train_all=False):
+    """Steering law + trajectory agreement by train/test width. A train-all
+    run (RUN_INFO train_all=true) has no held-out widths: every row is
+    'train' and the test columns stay empty."""
     p = run_dir / "eval" / "Steering" / "steering_condition_summary.csv"
     if not p.exists():
         return {}
@@ -74,7 +77,7 @@ def _steering(run_dir):
     # trajectory agreement by train/test width
     for split in ("train", "test"):
         sel = [r for r in rows if r.get("width_mm") and
-               ((float(r["width_mm"]) in TRAIN_WIDTHS_MM) == (split == "train"))]
+               ((train_all or float(r["width_mm"]) in TRAIN_WIDTHS_MM) == (split == "train"))]
         def m(key):
             v = [float(r[key]) for r in sel if r.get(key) not in (None, "", "nan")]
             return float(np.mean(v)) if v else None
@@ -155,14 +158,15 @@ def collect(root):
         run_dir = Path(info_p).parent
         info = json.load(open(info_p))
         kind = info.get("kind", "perpid")
+        train_all = bool(info.get("train_all", False))
         row = {"run_id": info.get("run_id", run_dir.name), "model": info.get("model"), "variant": info.get("variant"),
-               "kind": kind, "seed": info.get("seed"), "commit": (info.get("commit") or "")[:7],
+               "kind": kind, "train_all": train_all, "seed": info.get("seed"), "commit": (info.get("commit") or "")[:7],
                "dirty": info.get("dirty"), "submitted": info.get("submitted"),
                "status": _status(run_dir, kind, info.get("superseded_by", "")),
                "superseded_by": info.get("superseded_by", ""),
                "path": str(run_dir)}
         row.update(_fit_summary(run_dir, kind))
-        row.update(_steering(run_dir))
+        row.update(_steering(run_dir, train_all))
         row.update(_fitts(run_dir))
         rows.append(row)
     return rows

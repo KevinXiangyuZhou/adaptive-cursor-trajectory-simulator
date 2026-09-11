@@ -37,7 +37,8 @@ the goal-precision well, which is scaled by nc^2, stays active during fitting):
 
 Held-out evaluation: steering widths {12.5, 25} mm and the 12 pointing
 conditions outside POINT_TRAIN_R. Constrained->unconstrained trials are not
-used.
+used. The pooled fit (fit_anchor_pooled8.py --train-all, cluster default
+since 2026-09-11) skips this split and trains on every condition.
 
 Outputs (eval/model_fitting/results/):
     {pid}_gam_s{seed}.pkl           fitted GAM speed model

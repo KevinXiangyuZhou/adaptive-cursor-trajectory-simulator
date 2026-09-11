@@ -180,9 +180,22 @@ cd <repo>; git pull; git status          # commit first: submit refuses a dirty 
 ./submit_run.sh --model mpcc     --variant no_lookahead    --kind pooled8  # no_intermittent
 ./submit_run.sh --model mpcc     --variant no_intermittent --kind pooled8
 ```
-Options: `--seed`, `--time-limit` (CMA seconds), `--popsize`, `--min-runs`,
-`--gamma`, `--participants FILE`, `--results-root DIR`, `--allow-dirty`,
-`--dry-run`. Each call prints RUN_ID and the three job ids.
+Options: `--train-all` / `--holdout`, `--seed`, `--time-limit` (CMA seconds),
+`--wall`, `--popsize`, `--min-runs`, `--gamma`, `--participants FILE`,
+`--results-root DIR`, `--allow-dirty`, `--dry-run`. Each call prints RUN_ID
+and the three job ids.
+
+Training set (2026-09-11): the POOLED kind trains on ALL task conditions —
+every steering width and every pointing condition of the 8 participants, no
+train/test split (`--train-all`, the pooled default; RUN_ID kind segment
+`pooled8all`, `"train_all": true` in RUN_INFO.json, per-pid "test" losses in
+the fit record are null). Budget 12 h CMA (`TIME_LIMIT=43200`) in a 15 h
+wall (`cluster/fit_pooled_job.sh`); a train-all generation is ~3x a split
+generation (~7000 vs ~2600 trial units; the 9-10 split run made 36
+generations of ~10 min in 6 h), so expect ~25 generations. Pass
+`--holdout` to fit a pooled row on the old split. The per-participant kind
+keeps the held-out split by default (`--train-all` works there too, but the
+8 h wall / 7.5 h budget is sized for the split).
 
 Layout: `results/runs/<RUN_ID>/{RUN_INFO.json,COMMIT,code/,fit/stages/{base|pooled8}/,personas/,eval/{Steering,Fitts}/,gaze-lead/,logs/,DONE}`.
 Monitor: `squeue -u $USER`, `tail -f results/runs/<RUN_ID>/logs/fit_*_1.out`.
@@ -197,6 +210,17 @@ Fit jobs use one full node (36 cores) since 2026-09-08: the CMA work unit is
 spread over the node. The baseline replans every step and is ~3x slower per
 trial than the current model; give it a longer budget:
   ./submit_run.sh --model baseline --variant full --kind perpid  --time-limit 37800 --wall 12:00:00
-  ./submit_run.sh --model baseline --variant full --kind pooled8 --time-limit 75600 --wall 24:00:00
+
+Pooled round 2026-09-11 (four rows, one 12 h budget each; kind segment
+`pooled8` = previous split of 3 steering widths + 3 pointing conditions,
+`pooled8all` = every condition trains):
+  ./submit_run.sh --model baseline --variant full --kind pooled8 --holdout
+  ./submit_run.sh --model mpcc     --variant full --kind pooled8 --holdout
+  ./submit_run.sh --model mpcc     --variant full --kind pooled8 --train-all
+  ./submit_run.sh --model baseline --variant full --kind pooled8 --train-all --wall 16:00:00
+The baseline is ~3x slower per trial, so at 12 h it gets ~12 split
+generations and ~8 train-all generations (mpcc: ~36 / ~25); the extra hour
+of wall on the last row covers a train-all baseline generation (~90 min)
+still in flight when the budget expires.
 Check the pace after the first hour: `grep "gen " <RUN_DIR>/fit/fit_p01_s42.log | tail`
 (the "(NNNs gen" field is the generation time).

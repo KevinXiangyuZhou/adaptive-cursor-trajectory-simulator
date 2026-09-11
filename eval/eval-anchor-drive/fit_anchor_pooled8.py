@@ -20,9 +20,17 @@ sides) gives cohort b = 0.72 +/- 0.08 vs the gamma=0.66 model's emergent
                [ tunnel train loss + w_pt * pointing train loss
                  + noise-on stability penalty ]
 
+Training set: with --train-all (the cluster default for the pooled kind
+since 2026-09-11) EVERY steering width and EVERY pointing condition of every
+participant trains — no held-out split; the fit record's per-pid "test"
+losses are then None. Without it the fit uses fit_speed_model's split
+(steering {10, 16.5, 50} mm, three pointing conditions) and reports
+train/test losses.
+
 Parallelism: the work unit is one TRIAL of one candidate on one participant
 — (candidate x participant x {tunnel condition | pointing round | stability
-trial}) — ~2400 units per generation of 12 candidates, so a generation ends
+trial}) — ~2600 units per generation of 12 candidates with the split,
+~7000 with --train-all (8 x (25 + 45 + 3)), so a generation ends
 after the longest single trial, not the slowest candidate. Each
 participant's data are loaded once in the parent and reach the workers by
 fork (copy-on-write); jobs carry only (vector, pid, kind, key).
@@ -38,8 +46,8 @@ pooled8-<ablation>):
     pooled8_{anchor|baseline}_fit_s{seed}.json      params, history, T0 scan, per-pid held-out
 
 Usage:
-  python fit_anchor_pooled8.py --time-limit 18000 --workers 36
-  python fit_anchor_pooled8.py --model baseline --time-limit 18000 --workers 36
+  python fit_anchor_pooled8.py --train-all --time-limit 43200 --workers 36
+  python fit_anchor_pooled8.py --model baseline --train-all --time-limit 43200 --workers 36
   python fit_anchor_pooled8.py --ablation no_pace --quick --time-limit 120 --workers 8 \
       --letters p01 p02 --skip-probe          # local smoke
 """
@@ -69,12 +77,14 @@ _DATA = {}
 _CTXS = {}
 
 
-def _load_all(letters, quick):
+def _load_all(letters, quick, train_all=False):
     for L in letters:
-        _DATA[L] = fa.load_training(L, quick)
+        _DATA[L] = fa.load_training(L, quick, train_all)
         d = _DATA[L]
-        print(f"  {L}: tunnel train {len(d['tun_train'])} tids, pointing train "
-              f"{len(d['pt_train'])} tids, stability {len(d['stab'])}", flush=True)
+        print(f"  {L}: tunnel train {len(d['tun_train'])} tids (test {len(d['tun_test'])}), "
+              f"pointing train {len(d['pt_train'])} tids / "
+              f"{sum(len(v) for v in d['pt_train'].values())} rounds (test {len(d['pt_test'])} tids), "
+              f"stability {len(d['stab'])}", flush=True)
 
 
 def _eval_pid_unit(job):
@@ -168,6 +178,9 @@ def main():
     ap.add_argument("--letters", nargs="+", default=LETTERS)
     ap.add_argument("--quick", action="store_true",
                     help="straight/sharp/corner subset + 2 pointing rounds per radius")
+    ap.add_argument("--train-all", action="store_true",
+                    help="train on every steering width and pointing condition of every "
+                         "participant (no held-out split; the cluster default for pooled runs)")
     ap.add_argument("--skip-probe", action="store_true",
                     help="skip the per-participant held-out probes")
     ap.add_argument("--gamma", type=float, default=None,
@@ -195,8 +208,9 @@ def main():
     tag = a.tag.strip("_") or ("pooled8" if su["ablation"] == "none" else f"pooled8-{su['ablation']}")
 
     print(f"pooled fit [{model} / {su['ablation']}] over {a.letters} | budget {a.time_limit}s | "
-          f"popsize {a.popsize} on {a.workers} workers | search {[s['name'] for s in spec]}", flush=True)
-    _load_all(a.letters, a.quick)
+          f"popsize {a.popsize} on {a.workers} workers | search {[s['name'] for s in spec]} | "
+          f"{'ALL conditions train (no held-out split)' if a.train_all else 'train/test split'}", flush=True)
+    _load_all(a.letters, a.quick, a.train_all)
 
     t_all = time.time()
     fitted, best, hist = pooled_cmaes(spec, init, base, a.letters, a.w_point,
@@ -229,7 +243,8 @@ def main():
         f"Pooled {model}/{su['ablation']} persona fitted jointly on {a.letters} "
         f"(seed {a.seed}); one parameter set. See pooled8_{su['tag_model']}_fit_s{a.seed}.json")
     save_cfg["_fit"] = {"model": model, "ablation": su["ablation"], "pooled": a.letters,
-                        "seed": a.seed, "tag": tag, "search": [s["name"] for s in spec]}
+                        "seed": a.seed, "tag": tag, "search": [s["name"] for s in spec],
+                        "train_all": a.train_all}
     with open(cfg_path, "w") as f:
         json.dump(save_cfg, f, indent=2)
     print(f"saved {cfg_path}", flush=True)
@@ -250,7 +265,7 @@ def main():
                 print(f"  probe {L} done", flush=True)
 
     rec = {"letters": a.letters, "model": model, "ablation": su["ablation"], "tag": tag,
-           "seed": a.seed, "search": [s["name"] for s in spec],
+           "seed": a.seed, "train_all": a.train_all, "search": [s["name"] for s in spec],
            "fitted": fitted, "best_loss": best,
            "gamma_pinned": (base.get("budget") or {}).get("gamma"),
            "history": hist, "t0_scan": t0_scan,

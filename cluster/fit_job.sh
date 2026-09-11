@@ -12,8 +12,12 @@
 # Per-participant joint fit (one array task per participant) of one run.
 # Never sbatch this directly: submit_run.sh creates the run tree, snapshots
 # the code, and exports RUN_DIR / MODEL / VARIANT / KIND / SEED / TIME_LIMIT /
-# POPSIZE / PARTICIPANTS_FILE / VENV_DIR. Every path below derives from
-# RUN_DIR, so concurrent runs never touch each other's files.
+# POPSIZE / PARTICIPANTS_FILE / VENV_DIR / TRAIN_ALL. Every path below
+# derives from RUN_DIR, so concurrent runs never touch each other's files.
+# TRAIN_ALL=1 (submit_run.sh --train-all) trains on every steering width and
+# pointing condition instead of the held-out split (default 0 per
+# participant; the 8 h wall / 7.5 h budget is sized for the split — pass
+# --time-limit/--wall when using it here).
 #
 # One full node (36 cores): the work unit is (candidate x trial), ~300
 # units per generation, so every core stays busy and a generation ends
@@ -41,12 +45,15 @@ TIME_LIMIT="${TIME_LIMIT:-27000}"      # 7.5 h CMA budget < 8 h wall
 POPSIZE="${POPSIZE:-12}"
 PARTICIPANTS_FILE="${PARTICIPANTS_FILE:-participants_10p.txt}"
 ABLATION=$([ "$VARIANT" = "full" ] && echo none || echo "$VARIANT")
+TRAIN_ALL="${TRAIN_ALL:-0}"
+TRAIN_ALL_ARG=$([ "$TRAIN_ALL" = 1 ] && echo --train-all || echo "")
 mkdir -p "$HCS_FIT_RESULTS_DIR"
 
 PID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$PARTICIPANTS_FILE")
-echo "[$(date)] fit $MODEL/$VARIANT $PID -> $HCS_FIT_RESULTS_DIR (budget ${TIME_LIMIT}s, seed $SEED, code $(cat "$RUN_DIR/COMMIT" 2>/dev/null || echo ?))"
+echo "[$(date)] fit $MODEL/$VARIANT $PID -> $HCS_FIT_RESULTS_DIR (budget ${TIME_LIMIT}s, train_all=$TRAIN_ALL, seed $SEED, code $(cat "$RUN_DIR/COMMIT" 2>/dev/null || echo ?))"
+# shellcheck disable=SC2086
 python3 eval/eval-anchor-drive/fit_anchor.py --pid "$PID" --model "$MODEL" --ablation "$ABLATION" \
     --tag base --time-limit "$TIME_LIMIT" --popsize "$POPSIZE" \
-    --workers "$SLURM_CPUS_PER_TASK" --seed "$SEED" \
+    --workers "$SLURM_CPUS_PER_TASK" --seed "$SEED" $TRAIN_ALL_ARG \
     2>&1 | tee "$HCS_FIT_RESULTS_DIR/fit_${PID}_s${SEED}.log"
 echo "[$(date)] done $PID"

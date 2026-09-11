@@ -2,14 +2,25 @@
 # Submit one isolated run (fit -> eval -> aggregate) to Great Lakes.
 #
 #   submit_run.sh --model {mpcc,baseline} --variant {full,no_gaze,no_lookahead,no_pace,no_intermittent} \
-#                 --kind {perpid,pooled8} [--seed 42] [--participants participants_10p.txt] \
+#                 --kind {perpid,pooled8} [--train-all | --holdout] [--seed 42] \
+#                 [--participants participants_10p.txt] \
 #                 [--time-limit S] [--popsize N] [--min-runs N] [--gamma G] \
 #                 [--wall HH:MM:SS] [--results-root DIR] [--data-root DIR] [--allow-dirty] [--dry-run]
 #
+# Training set: --train-all fits on EVERY steering width and EVERY pointing
+# condition (no held-out split); --holdout uses fit_speed_model's split
+# (steering {10, 16.5, 50} mm + three pointing conditions train, the rest
+# held out). Default: pooled8 -> train-all (the pooled protocol since
+# 2026-09-11), perpid -> holdout. A train-all run carries "all" in its
+# RUN_ID kind segment (e.g. mpcc-full-pooled8all-s42-...) and
+# "train_all": true in RUN_INFO.json.
+#
 # --time-limit is the CMA-ES budget in seconds; --wall overrides the fit job's
-# SLURM time limit (default 08:00:00, per-participant and pooled). Keep
-# wall >= budget + 0.5 h (per-participant) / + 2 h (pooled) for the post-fit
-# T0 scan, held-out probes and save; a shorter wall backfills sooner.
+# SLURM time limit. Defaults: per-participant 7.5 h budget / 8 h wall;
+# pooled 12 h budget / 15 h wall. Keep wall >= budget + 0.5 h
+# (per-participant) / + 3 h (pooled train-all) for the in-flight generation,
+# the post-fit T0 scan, the per-participant probes and the save; a shorter
+# wall backfills sooner.
 #
 # One run = one RUN_ID = one code snapshot = one results tree:
 #   $RESULTS_ROOT/runs/<RUN_ID>/{RUN_INFO.json,COMMIT,code/,fit/,personas/,eval/,gaze-lead/,logs/,tmp/}
@@ -28,7 +39,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 MODEL=""; VARIANT=""; KIND=""; SEED=42; PARTICIPANTS_FILE="participants_10p.txt"
-TIME_LIMIT=""; WALL=""; POPSIZE=12; MIN_RUNS=0; GAMMA=""; ALLOW_DIRTY=0; DRY=0
+TIME_LIMIT=""; WALL=""; POPSIZE=12; MIN_RUNS=0; GAMMA=""; ALLOW_DIRTY=0; DRY=0; TRAIN_ALL=""
 RESULTS_ROOT="${RESULTS_ROOT:-/home/xiangyz/ondemand/data/sys/myjobs/projects/chi-27/results}"
 DATA_ROOT="$REPO_ROOT/human_data"
 DATA_DIR="$DATA_ROOT/task_aligned_all"
@@ -38,6 +49,8 @@ while [ $# -gt 0 ]; do
         --model) MODEL="$2"; shift 2;;
         --variant) VARIANT="$2"; shift 2;;
         --kind) KIND="$2"; shift 2;;
+        --train-all) TRAIN_ALL=1; shift;;
+        --holdout) TRAIN_ALL=0; shift;;
         --seed) SEED="$2"; shift 2;;
         --participants) PARTICIPANTS_FILE="$2"; shift 2;;
         --time-limit) TIME_LIMIT="$2"; shift 2;;
@@ -50,7 +63,7 @@ while [ $# -gt 0 ]; do
         --venv) VENV_DIR="$2"; shift 2;;
         --allow-dirty) ALLOW_DIRTY=1; shift;;
         --dry-run) DRY=1; shift;;
-        -h|--help) sed -n 2,20p "$0"; exit 0;;
+        -h|--help) sed -n 2,32p "$0"; exit 0;;
         *) echo "unknown option $1"; exit 2;;
     esac
 done
@@ -58,6 +71,8 @@ case "$MODEL" in mpcc|baseline) ;; *) echo "--model must be mpcc or baseline"; e
 case "$VARIANT" in full|no_gaze|no_lookahead|no_pace|no_intermittent) ;; *) echo "--variant invalid"; exit 2;; esac
 case "$KIND" in perpid|pooled8) ;; *) echo "--kind must be perpid or pooled8"; exit 2;; esac
 if [ "$MODEL" = "baseline" ] && [ "$VARIANT" != "full" ]; then echo "baseline has no ablations (use --variant full)"; exit 2; fi
+[ -z "$TRAIN_ALL" ] && TRAIN_ALL=$([ "$KIND" = pooled8 ] && echo 1 || echo 0)
+KIND_ID="$KIND"; [ "$TRAIN_ALL" = 1 ] && KIND_ID="${KIND}all"
 [ -f "$PARTICIPANTS_FILE" ] || { echo "missing $PARTICIPANTS_FILE"; exit 2; }
 [ -d "$DATA_DIR" ] || { echo "missing data dir $DATA_DIR (rsync human_data/task_aligned_all first)"; exit 2; }
 ls "$DATA_DIR"/p01_task_aligned_analysis*.csv >/dev/null 2>&1 || echo "WARNING: no task-aligned gaze CSVs under $DATA_DIR — the mpcc gaze-lead figures will fail (rsync human_data/task_aligned_all/*.csv up to enable; the eval itself is unaffected)"
@@ -73,11 +88,12 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     fi
 fi
 STAMP=$(date +%Y%m%d-%H%M)
-RUN_ID="${MODEL}-${VARIANT}-${KIND}-s${SEED}-${STAMP}-${SHA}"
+RUN_ID="${MODEL}-${VARIANT}-${KIND_ID}-s${SEED}-${STAMP}-${SHA}"
 RUN_DIR="$RESULTS_ROOT/runs/$RUN_ID"
 [ -e "$RUN_DIR" ] && { echo "run dir exists: $RUN_DIR (wait a minute or change --seed)"; exit 2; }
 echo "RUN_ID  $RUN_ID"
 echo "RUN_DIR $RUN_DIR"
+echo "TRAIN   $([ "$TRAIN_ALL" = 1 ] && echo 'all conditions (no held-out split)' || echo 'held-out split (steering {10,16.5,50} mm + 3 pointing conditions)')"
 [ "$DRY" = 1 ] && { echo "(dry run: nothing created)"; exit 0; }
 
 # --- run tree + code snapshot --------------------------------------------
@@ -101,7 +117,7 @@ ln -s "$DATA_ROOT" "$RUN_DIR/code/human_data"
 # the legacy default location inside the snapshot point at it as well
 rm -rf "$RUN_DIR/code/eval/eval-anchor-drive/results"; ln -s "$RUN_DIR/fit" "$RUN_DIR/code/eval/eval-anchor-drive/results"
 
-EXPORTS="ALL,RUN_DIR=$RUN_DIR,MODEL=$MODEL,VARIANT=$VARIANT,KIND=$KIND,SEED=$SEED,POPSIZE=$POPSIZE,MIN_RUNS=$MIN_RUNS,PARTICIPANTS_FILE=$PARTICIPANTS_FILE,VENV_DIR=$VENV_DIR"
+EXPORTS="ALL,RUN_DIR=$RUN_DIR,MODEL=$MODEL,VARIANT=$VARIANT,KIND=$KIND,SEED=$SEED,POPSIZE=$POPSIZE,MIN_RUNS=$MIN_RUNS,PARTICIPANTS_FILE=$PARTICIPANTS_FILE,VENV_DIR=$VENV_DIR,TRAIN_ALL=$TRAIN_ALL"
 [ -n "$TIME_LIMIT" ] && EXPORTS="$EXPORTS,TIME_LIMIT=$TIME_LIMIT"
 [ -n "$GAMMA" ] && EXPORTS="$EXPORTS,GAMMA=$GAMMA"
 
@@ -134,13 +150,14 @@ import json, sys, datetime, os
 d = sys.argv[1]
 info = {
   "run_id": "$RUN_ID", "model": "$MODEL", "variant": "$VARIANT", "kind": "$KIND", "seed": $SEED,
+  "train_all": bool($TRAIN_ALL),
   "commit": open(os.path.join(d, "COMMIT")).read().strip(), "dirty": bool($DIRTY),
   "submitted": datetime.datetime.now().isoformat(timespec="seconds"),
   "participants_file": "$PARTICIPANTS_FILE", "n_participants": $N_PIDS,
   "time_limit": "${TIME_LIMIT:-default}", "wall": "${WALL:-default}", "popsize": $POPSIZE, "min_runs": $MIN_RUNS, "gamma": "${GAMMA:-default}",
   "data_root": "$DATA_ROOT", "data_dir": "$DATA_DIR", "venv": "$VENV_DIR",
   "jobs": {"fit": "$FIT_JOB", "eval": "$EVAL_JOB", "aggregate": "$AGG_JOB"},
-  "cmdline": " ".join(sys.argv[1:]) or "$0 --model $MODEL --variant $VARIANT --kind $KIND --seed $SEED",
+  "cmdline": "$0 --model $MODEL --variant $VARIANT --kind $KIND $([ "$TRAIN_ALL" = 1 ] && echo --train-all || echo --holdout) --seed $SEED",
 }
 json.dump(info, open(os.path.join(d, "RUN_INFO.json"), "w"), indent=2)
 EOF
