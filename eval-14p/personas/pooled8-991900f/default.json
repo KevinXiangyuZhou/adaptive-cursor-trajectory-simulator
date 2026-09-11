@@ -1,0 +1,71 @@
+{
+  "Tp": 0.05,
+  "Th": 0.3,
+  "planner_weights": {
+    "jerk": 0.00014283834900451176,
+    "constraint": 51.771106372602205,
+    "contour": 208.86468936102202,
+    "desired_speed": 0.2,
+    "goal": 2.4793860745396246,
+    "lag_anchor": 2000.0,
+    "acc_max": 4.0
+  },
+  "speed_model": {
+    "type": "gam_traversal"
+  },
+  "horizon_mode": "budget",
+  "replan_mode": "intermittent",
+  "budget": {
+    "D0": 1.302501391043712,
+    "gamma": 0.66,
+    "T_min": 0.1,
+    "W_ref": 0.026
+  },
+  "replan_latency_s": 0.19,
+  "replan_latency_cv": 0.89,
+  "replan_deviation_frac": 0.3,
+  "reference_path": {
+    "w_cut": 0.3367214340332282,
+    "w_width_exp": 0.00039204398988715024,
+    "w_center": 0.01002787978319478,
+    "global_clearance_ref": 0.0152937958468396
+  },
+  "add_noise": true,
+  "plan_deadline_s": 0.08,
+  "plan_vmax": 0.66,
+  "arrival_mode": "distance",
+  "anchor_lead_floor": true,
+  "anchor_tail_pace": true,
+  "nc": [
+    0.2,
+    0.02
+  ],
+  "forearm": 0.35,
+  "_description": "Pooled mpcc/none persona fitted jointly on ['p01', 'p02', 'p03', 'p04', 'p06', 'p07', 'p08', 'p10'] (seed 42); one parameter set. See pooled8_anchor_fit_s42.json",
+  "_fit": {
+    "model": "mpcc",
+    "ablation": "none",
+    "pooled": [
+      "p01",
+      "p02",
+      "p03",
+      "p04",
+      "p06",
+      "p07",
+      "p08",
+      "p10"
+    ],
+    "seed": 42,
+    "tag": "pooled8",
+    "search": [
+      "jerk",
+      "contour",
+      "constraint",
+      "goal",
+      "D0"
+    ],
+    "staged_from": "results-cluster-10p/runs/mpcc-full-pooled8-s42-20260910-1540-991900f/fit/stages/pooled8/pooled8_anchor_config_s42.json",
+    "source_run": "mpcc-full-pooled8-s42-20260910-1540-991900f",
+    "source_commit": "991900f48f681c5d1cc22498c49906998450e6fa"
+  }
+}
