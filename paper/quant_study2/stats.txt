@@ -1,0 +1,100 @@
+=== sources ===
+  Study 2 model     results-cluster-10p/runs-14p/eval14p-mpcc-pooled8all-c70a5dd-s42-20260911-1709-ca2b4a7/eval
+  Study 2 baseline  results-cluster-10p/runs-14p/eval14p-baseline-pooled8all-c70a5dd-s42-20260911-1709-ca2b4a7/eval
+  Study 1 model     results-cluster-10p/runs/mpcc-full-perpid-s42-20260909-1257-22c349c/eval
+  Study 1 baseline  results-cluster-10p/runs/baseline-full-perpid-s42-20260908-1800-c96338d/eval
+
+=== Study 1 (per-participant fits) with lam = 0.2196 m/rad fit on Study 1 human ===
+  Human    MT = 0.351 + 0.0590 ID_k  (R2 0.908)
+  Ours     MT = 0.955 + 0.0494 ID_k  (R2 0.941)
+  Baseline MT = 4.583 + 0.0300 ID_k  (R2 0.320)
+
+=== Study 2 timing: 25 conditions, lam = 0.1673 m/rad fit on Study 2 human (Study 1: 0.2196) ===
+  ID_k range 9.2 .. 188.2 (Study 1: 9.2 .. 227.5)
+  (with Study 1 lam 0.22 fixed) Human    MT = 0.137 + 0.0578 ID_k  (R2 0.979)
+  (with Study 1 lam 0.22 fixed) Ours     MT = 0.685 + 0.0524 ID_k  (R2 0.955)
+  (with Study 1 lam 0.22 fixed) Baseline MT = 5.648 + 0.0452 ID_k  (R2 0.131)
+  Human    MT = 0.024 + 0.0701 ID_k  (R2 0.980)
+  Ours     MT = 0.565 + 0.0639 ID_k  (R2 0.965)
+  Baseline MT = 5.748 + 0.0515 ID_k  (R2 0.116)
+  Study 2 vs Study 1 human slope: 0.0701 vs 0.0590 -> 18.8% apart
+  Study 2 vs Study 1 human intercept: 0.024 vs 0.351
+  Ours     slope within 8.9% of Study 2 human; intercept diff +0.54 s; MAE over conditions 0.41 s = 9.9% of mean human MT (4.09 s); mean per-condition rel. error 10.2%; mean MT ratio 1.08
+           Study 1 counterpart: slope 16.2% off human, intercept diff +0.60 s
+  Baseline slope within 26.5% of Study 2 human; intercept diff +5.72 s; MAE over conditions 5.78 s = 141.1% of mean human MT (4.09 s); mean per-condition rel. error 180.1%; mean MT ratio 2.57
+           Study 1 counterpart: slope 49.2% off human, intercept diff +4.23 s
+  per width (human MT | model MT | ratio | baseline MT):
+    W=  10 mm   9.14 |  9.31 | 1.12 |  8.60
+    W=  20 mm   4.08 |  4.39 | 1.09 |  8.63
+    W=  30 mm   2.82 |  2.94 | 1.04 |  8.78
+    W=  40 mm   2.38 |  2.49 | 1.05 |  8.75
+    W=  50 mm   2.03 |  2.24 | 1.10 |  8.92
+  per type (human MT | model MT | ratio | baseline MT):
+    Straight            1.76 |  2.17 | 1.15 |  1.00
+    Corner              5.18 |  5.21 | 1.04 |  5.24
+    Sinusoidal          4.14 |  4.34 | 1.06 | 15.66
+    Gentle sinusoidal   3.28 |  3.88 | 1.17 |  3.39
+    Sharp sinusoidal    6.11 |  5.77 | 0.99 | 18.41
+
+=== Study 2 spread of completion time ===
+  human (14 participants): SD across participants of per-participant mean MT, mean over conditions = 1.53 s; within-participant round-to-round SD = 0.61 s
+  pooled model: run-to-run SD within a condition = 0.19 s (identical draws for every participant: across-participant SD 0.00 s) -> human across-participant SD / model run-to-run SD = 8.0x
+  pooled baseline: run-to-run SD = 1.22 s
+    Straight           human SD across participants 0.96 s | model run-to-run SD 0.13 s
+    Corner             human SD across participants 2.17 s | model run-to-run SD 0.37 s
+    Sinusoidal         human SD across participants 1.38 s | model run-to-run SD 0.09 s
+    Gentle sinusoidal  human SD across participants 1.19 s | model run-to-run SD 0.08 s
+    Sharp sinusoidal   human SD across participants 1.94 s | model run-to-run SD 0.28 s
+  Study 1 reference (8 participants): human SD across participants 1.63 s, per-participant model SD across participants 1.19 s, model run-to-run SD 0.14 s
+
+=== Table 3: trajectory metrics (mean +/- SD over participant x condition rows) ===
+  rows: Study 1 all 200, Study 2 model 350, Study 2 baseline 350; timed-out/diverged model runs in Study 2: model 0, baseline 0
+type               | S2 model lat     spd   corr  tdiff% |  S2 base lat     spd   corr  tdiff%
+  Straight           |     2.1   0.216    0.26    53.1 |     2.0   0.502   -0.19    38.6
+  Corner             |     4.1   0.092    0.63    32.7 |     4.8   0.130    0.19    71.0
+  Sinusoidal         |     3.5   0.069    0.03    30.5 |     4.5   0.164    0.15   470.9
+  Gentle sinusoidal  |     3.0   0.107   -0.04    42.3 |     4.5   0.132    0.16    78.5
+  Sharp sinusoidal   |     3.5   0.060    0.22    23.9 |     5.1   0.139    0.02   356.6
+  All                |     3.2   0.109    0.22    36.5 |     4.2   0.213    0.06   203.1
+  Study 1 reference (per-participant models, all conditions, Table 1 Model Overall):     2.5   0.087    0.21    17.2  (n=200)
+  time ratio (model/human) by type, Study 2 model vs baseline:
+    Straight           model 1.39  baseline 0.77
+    Corner             model 1.16  baseline 1.48
+    Sinusoidal         model 1.16  baseline 5.71
+    Gentle sinusoidal  model 1.32  baseline 1.54
+    Sharp sinusoidal   model 1.06  baseline 4.55
+    All                model 1.22  baseline 2.81
+  Study 2 pooled model by width (shared with fit cohort: 10, 50 mm; new: 20, 30, 40):
+    W= 10 lat 1.1 mm  spd 0.053  corr 0.27  tdiff 47.9%  ratio 1.30
+    W= 20 lat 2.2 mm  spd 0.087  corr 0.25  tdiff 34.4%  ratio 1.23
+    W= 30 lat 3.1 mm  spd 0.114  corr 0.28  tdiff 32.2%  ratio 1.17
+    W= 40 lat 4.6 mm  spd 0.141  corr 0.13  tdiff 33.7%  ratio 1.18
+    W= 50 lat 5.2 mm  spd 0.147  corr 0.17  tdiff 34.1%  ratio 1.22
+
+=== paired one-sided Wilcoxon over Study 2 participants, pooled model vs pooled baseline ===
+  lateral RMSE  model   3.243  baseline   4.202  W=0 p=0.0001  model better in 14/14 participants
+  speed RMSE    model   0.109  baseline   0.213  W=0 p=0.0001  model better in 14/14 participants
+  speed corr    model   0.218  baseline   0.064  W=91 p=0.0067  model better in 11/14 participants
+  time diff     model  36.476  baseline 203.112  W=0 p=0.0001  model better in 14/14 participants
+  |dT| (s)      model   1.271  baseline   5.960  W=0 p=0.0001  model better in 14/14 participants
+
+=== Study 1 (per-participant models vs per-participant baseline), one-sided paired Wilcoxon over participants ===
+  common participant x condition pairs: 192 (model rows 200, baseline rows 192)
+  [all]
+    lateral RMSE  model   2.438  baseline   4.084  W=0 p=0.0039  model better in 8/8 participants
+    speed RMSE    model   0.088  baseline   0.149  W=0 p=0.0039  model better in 8/8 participants
+    speed corr    model   0.214  baseline   0.040  W=36 p=0.0039  model better in 8/8 participants
+    time diff     model  17.173  baseline  91.363  W=0 p=0.0039  model better in 8/8 participants
+    |dT| (s)      model   0.953  baseline   3.130  W=0 p=0.0039  model better in 8/8 participants
+  [train]
+    lateral RMSE  model   3.258  baseline   4.616  W=1 p=0.0078  model better in 7/8 participants
+    speed RMSE    model   0.109  baseline   0.187  W=0 p=0.0039  model better in 8/8 participants
+    speed corr    model   0.170  baseline   0.013  W=35 p=0.0078  model better in 7/8 participants
+    time diff     model  18.922  baseline 134.057  W=0 p=0.0039  model better in 8/8 participants
+    |dT| (s)      model   1.159  baseline   3.661  W=0 p=0.0039  model better in 8/8 participants
+  [test]
+    lateral RMSE  model   1.889  baseline   3.728  W=0 p=0.0039  model better in 8/8 participants
+    speed RMSE    model   0.075  baseline   0.124  W=0 p=0.0039  model better in 8/8 participants
+    speed corr    model   0.243  baseline   0.059  W=36 p=0.0039  model better in 8/8 participants
+    time diff     model  15.982  baseline  62.791  W=0 p=0.0039  model better in 8/8 participants
+    |dT| (s)      model   0.814  baseline   2.778  W=0 p=0.0039  model better in 8/8 participants

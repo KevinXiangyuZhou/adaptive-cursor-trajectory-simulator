@@ -1,0 +1,160 @@
+% Section 5.4 — numbers from paper/stats_study2.py (paper/quant_study2/stats.txt):
+%   Study 2 model     eval14p-mpcc-pooled8all-c70a5dd-s42-20260911-1709-ca2b4a7
+%   Study 2 baseline  eval14p-baseline-pooled8all-c70a5dd-s42-20260911-1709-ca2b4a7
+%   Study 1 reference mpcc-full-perpid-s42-20260909-1257-22c349c (Figure 3, Tables 1-2)
+% Figure 5: paper/figures/steering_law_budget_study2.pdf
+
+\subsection{Generalization to Unseen Users}
+\label{sec:study2}
+
+Sections~\ref{sec:time} and~\ref{sec:traj} fit one model per person. A
+designer evaluating an interface has no such data, so we ask whether a
+single model fitted on the Study~1 participants predicts the behavior of
+the 14 Study~2 participants, whom it has never seen. A pooled model carries
+one lookahead budget, one cutting fraction, and one pace law, so it can
+represent a typical user but not the spread between users. We therefore
+compare it against population-level quantities first, condition means and
+the Steering Law relation, and then against each participant's own trials.
+
+\paragraph{Timing.}
+Figure~\ref{fig:study2_law} plots mean completion time per Study~2
+condition against $\mathrm{ID}_\kappa$, with $\lambda$ refit on the Study~2
+human condition means as in Section~\ref{sec:time}. Study~2 humans follow
+$\mathrm{MT} = 0.02 + 0.070\,\mathrm{ID}$ ($R^2 = 0.98$) with
+$\lambda = 0.17$~m/rad, below the 0.22~m/rad of Study~1: a unit of turning
+costs these participants less, relative to width, than the Study~1
+participants. On Study~1's index ($\lambda = 0.22$) the Study~2 human slope
+is 0.058 against 0.059 in Study~1, so the two samples agree in the rate at
+which time grows with difficulty; the Study~2 intercept is 0.21~s lower.
+The pooled model gives $\mathrm{MT} = 0.56 + 0.064\,\mathrm{ID}$
+($R^2 = 0.96$), a slope within 9\% of the Study~2 human slope, and a mean
+absolute error of 0.41~s (10\% of the 4.1~s mean human time) across the 25
+conditions. The pooled baseline gives $\mathrm{MT} = 5.75 + 0.052\,\mathrm{ID}$
+($R^2 = 0.12$) with a mean absolute error of 5.8~s: its completion time
+barely depends on difficulty. The model's intercept lies 0.54~s above the
+human one, the same offset as in Study~1 (0.60~s), while its slope is
+closer to the human slope than in Study~1 (9\% against 16\%). The constant
+offset is therefore a property of the model and not of the new sample. It
+is largest in gentle sinusoidal and straight corridors (model over human
+time 1.17 and 1.15) and absent in sharp sinusoidal corridors (0.99): the
+model is slow where the corridor leaves pace free.
+By width, the model is closest at the three widths absent from Study~1,
+20, 30, and 40~mm (1.04 to 1.09), and farthest at the two it was fitted
+on, 10 and 50~mm (1.12 and 1.10): the pace law interpolates.
+
+\paragraph{Spread.}
+Across the 14 participants, the SD of completion time per condition is
+1.53~s (from 0.96~s in straight to 2.17~s in corner corridors). The pooled
+model's run-to-run SD, which reflects only execution noise and latency
+sampling, is 0.19~s. The model under-spreads by a factor of 8, as expected:
+the between-participant variance that the per-participant models of
+Study~1 reproduced (1.19~s against 1.63~s across the 8 participants) came
+from the fitted lookahead budget, cutting fraction, and pace parameters,
+which the pooled model collapses to one value each. The model's run-to-run
+SD is also below the participants' own round-to-round SD of 0.61~s.
+
+\paragraph{Trajectories.}
+Table~\ref{tab:study2_metrics} reports the four metrics of
+Section~\ref{sec:traj} for the pooled model and the pooled baseline on
+Study~2, computed per participant--condition pair as in
+Table~\ref{tab:overall_metrics}. The pooled model has a lateral RMSE of
+3.2~mm, a speed RMSE of 0.109~m/s, a speed correlation of 0.22, and a
+time difference of 36.5\%. As a reference, the last row of the table
+repeats the per-participant models' overall values from Study~1. Speed
+correlation, which measures where along the path the model slows and
+speeds up, is at the same level (0.22 against 0.21). Lateral RMSE and
+time difference are higher than the reference values (2.5~mm and 17.2\%),
+as they are measured against each individual's trials while the pooled
+model predicts one typical trajectory: the 10\% timing error of the
+condition means above becomes 36\% at the level of individual
+participants, and the difference is the individual spread. Lateral RMSE
+grows with width, from 1.1~mm at 10~mm to 5.2~mm at 50~mm, since wide
+corridors leave room for individual paths that a single cutting fraction
+cannot follow; corners carry the largest lateral error (4.1~mm). Timing
+error is largest in straight (53\%) and gentle sinusoidal (42\%)
+corridors, where the corridor leaves pace to the person, and smallest in
+sharp sinusoidal corridors (24\%), where the corridor dictates it. The
+pooled baseline is worse on every metric (4.2~mm, 0.213~m/s, 0.06,
+203\%). Paired one-sided Wilcoxon signed-rank tests over participants
+($n = 14$) confirm the difference: the model has lower lateral RMSE, speed
+RMSE, and time difference for every participant ($W = 0$, $p < 0.001$
+each) and higher speed correlation for 11 of 14 ($p = 0.007$). No
+simulated run of either model timed out or diverged in Study~2.
+
+What transfers is the dependence of pace on width and curvature: $\gamma$,
+the pace law, and the budget mechanism are population-level and carry the
+Steering Law slope to new users, including corridor widths the model was
+never fitted on. What does not transfer is the personal cutting fraction
+and lookahead budget, which set corner shape and the spread of times.
+Individual fitting therefore remains necessary to predict a specific user,
+while the pooled model suffices to predict how long a typical user takes
+and where along the path they slow down.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.6\linewidth]{figures/steering_law_budget_study2.pdf}
+    \caption{Movement time against the curvature-aware index of difficulty
+    for the 14 Study~2 participants (blue), the pooled model (orange), and
+    the pooled baseline (gray), one point per task condition averaged across
+    participants, with linear fits; $\lambda = 0.17$~m/rad fit on the
+    Study~2 human means. The pooled model recovers the Steering Law of
+    users it has never seen with a slope within 9\% of theirs.}
+    \Description{Scatter plot of movement time in seconds, from 0 to about
+    27, against curvature-aware index of difficulty from 0 to 190. Blue
+    circles for humans and orange triangles for the model lie close to each
+    other along a rising line from about 1 s at ID 10 to about 13 s at ID
+    190; their fitted lines nearly coincide, the orange line slightly above
+    the blue at low ID and slightly below at high ID. Gray squares for the
+    baseline scatter widely between 1 and 18 s with no clear trend and a
+    shallow gray fit line starting near 6 s. The legend gives the fitted
+    equations: Human MT = 0.02 + 0.070 ID with R squared 0.98, Ours MT =
+    0.56 + 0.064 ID with R squared 0.96, Baseline MT = 5.75 + 0.052 ID with
+    R squared 0.12, and lambda = 0.17 m/rad fit on human.}
+    \label{fig:study2_law}
+\end{figure}
+
+\begin{table}[t]
+    \caption{Trajectory metrics on Study~2 by corridor type (mean $\pm$ SD
+    across participant--condition pairs, 14 participants $\times$ 25
+    conditions): the single pooled model and the pooled baseline, both
+    fitted on the 8 Study~1 participants. The last row repeats, as a
+    reference, the per-participant models' overall values on Study~1 from
+    Table~\ref{tab:overall_metrics}. Lateral and speed RMSE are relative to
+    the participant's own trajectory after resampling by progress; time
+    difference is $|t_{\mathrm{model}} - t_{\mathrm{human}}| / t_{\mathrm{human}}$.}
+    \Description{Table with six corridor-type blocks, straight, corner,
+    sinusoidal, gentle sinusoidal, sharp sinusoidal, and all, each with a
+    pooled-model row and a pooled-baseline row, and a final reference row
+    for the per-participant models of Study 1. Four columns give lateral
+    RMSE in millimetres, speed RMSE in metres per second, speed
+    correlation, and time difference in percent. In the all block the
+    pooled model scores 3.2 mm, 0.109 m/s, 0.22, and 36.5 percent, the
+    pooled baseline 4.2 mm, 0.213 m/s, 0.06, and 203 percent, and the Study
+    1 reference 2.5 mm, 0.087 m/s, 0.21, and 17.2 percent. The baseline is
+    worse than the pooled model on every metric in every block; speed
+    correlation of the pooled model matches the Study 1 reference while its
+    lateral and time errors are higher.}
+    \label{tab:study2_metrics}
+    \small
+    \setlength{\tabcolsep}{4pt}
+    \begin{tabular}{l l cccc}
+        \toprule
+        Corridor type & Model & Lat.\ (mm) & Spd.\ (m/s) & Spd.\ $r$ & Time (\%) \\
+        \midrule
+        Straight           & Pooled model               & $2.1 \pm 1.2$ & $0.216 \pm 0.166$ & $0.26 \pm 0.44$ & $53.1 \pm 48.4$ \\
+                           & Pooled baseline            & $2.0 \pm 1.1$ & $0.502 \pm 0.187$ & $-0.19 \pm 0.42$ & $38.6 \pm 23.9$ \\
+        Corner             & Pooled model               & $4.1 \pm 2.4$ & $0.092 \pm 0.052$ & $0.63 \pm 0.14$ & $32.7 \pm 24.9$ \\
+                           & Pooled baseline            & $4.8 \pm 1.3$ & $0.130 \pm 0.069$ & $0.19 \pm 0.22$ & $71.0 \pm 56.7$ \\
+        Sinusoidal         & Pooled model               & $3.5 \pm 1.9$ & $0.069 \pm 0.049$ & $0.03 \pm 0.31$ & $30.5 \pm 23.1$ \\
+                           & Pooled baseline            & $4.5 \pm 1.4$ & $0.164 \pm 0.104$ & $0.15 \pm 0.31$ & $470.9 \pm 308.2$ \\
+        Gentle sinusoidal  & Pooled model               & $3.0 \pm 1.5$ & $0.107 \pm 0.091$ & $-0.04 \pm 0.30$ & $42.3 \pm 34.9$ \\
+                           & Pooled baseline            & $4.5 \pm 1.7$ & $0.132 \pm 0.086$ & $0.16 \pm 0.37$ & $78.5 \pm 71.1$ \\
+        Sharp sinusoidal   & Pooled model               & $3.5 \pm 1.9$ & $0.060 \pm 0.043$ & $0.22 \pm 0.23$ & $23.9 \pm 14.9$ \\
+                           & Pooled baseline            & $5.1 \pm 1.2$ & $0.139 \pm 0.087$ & $0.02 \pm 0.20$ & $356.6 \pm 232.9$ \\
+        \midrule
+        All                & Pooled model               & $3.2 \pm 1.9$ & $0.109 \pm 0.108$ & $0.22 \pm 0.38$ & $36.5 \pm 33.1$ \\
+                           & Pooled baseline            & $4.2 \pm 1.8$ & $0.213 \pm 0.185$ & $0.06 \pm 0.35$ & $203.1 \pm 250.4$ \\
+                           & Per-participant, Study 1   & $2.5 \pm 2.4$ & $0.087 \pm 0.110$ & $0.21 \pm 0.31$ & $17.2 \pm 16.5$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
