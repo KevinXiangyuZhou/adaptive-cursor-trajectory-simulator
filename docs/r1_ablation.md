@@ -19,17 +19,16 @@ other ablations.
 **V1 `fixed_horizon`** (fixed horizon + pace law)
 - `horizon_mode: fixed_lead`. Every planning event puts the anchor at a
   constant arc lead `fixed_lead_m` ahead of the cursor.
-- `fixed_lead_m` is not fitted. It is set to the participant's mean human
-  gaze lead at fixation onset (`eval/eval-anchor-drive/human_gaze_horizon_10p.json`,
-  made by `human_gaze_horizon.py`: canonical merged fixation events, the
-  25 constant-width steering conditions). A pooled fit uses the mean of
-  the fitted participants' means (41.7 mm for the 8).
-  - Per participant (mm): p01 34.3, p02 39.7, p03 30.2, p04 49.4,
-    p06 46.5, p07 38.3, p08 38.2, p10 56.9.
-  - The model's horizon is the anchor lead at a planning event, so the
-    matching human quantity is the lead at fixation onset. The
-    time-averaged continuous lead is about 0 for every participant, because
-    the cursor catches up to and passes each anchor, so it would not work.
+- `fixed_lead_m` is fitted by CMA-ES in place of D0 (bounds 10-150 mm), so
+  the ablation has as many free parameters as the full model. It starts at
+  the participant's mean human gaze lead at fixation onset
+  (`eval/eval-anchor-drive/human_gaze_horizon_10p.json`, made by
+  `human_gaze_horizon.py`: canonical merged fixation events, the 25
+  constant-width steering conditions). Per participant (mm): p01 34.3,
+  p02 39.7, p03 30.2, p04 49.4, p06 46.5, p07 38.3, p08 38.2, p10 56.9;
+  pooled fits start at the mean of the fitted participants' means (41.7).
+- `fixed_horizon_human` is the same model with the lead pinned to that
+  human value and not fitted (search: jerk, contour, constraint, goal).
 - `fixed_lead_speed_floor: false`: no `v*T_min` floor, so the lead is the
   same constant at every speed. The old `no_lookahead` ablation kept the
   floor.
@@ -38,9 +37,8 @@ other ablations.
   lookahead is fixed. With a fixed lead in free space, pointing breaks into
   short hops. The old `no_lookahead` did this, and its Fitts slope rose to
   0.28 against 0.21 for the model and 0.23 for humans.
-- Search: jerk, contour, constraint, goal. D0 is dropped and nothing is
-  added. The pace law, replanning and the T0 scan are the same as in the
-  full model.
+- Search: jerk, contour, constraint, goal, fixed_lead_m. The pace law,
+  replanning and the T0 scan are the same as in the full model.
 
 **V2 `fixed_speed`** (adaptive gaze lookahead + fixed target speed)
 - `catchup_mode: target_speed`. In a corridor the plan deadline is
@@ -91,26 +89,74 @@ So:
   changes. The pooled fitting code there is the same as `c70a5dd`, the
   commit behind the paper's pooled runs.
 
+## Revised run plan (2026-11-24, after reviewing the September ablations)
+
+Three changes to what gets submitted:
+
+1. **Pace law on training widths only (`--gam-holdout`).** The
+   per-participant pace law (traversal GAM) was fitted on all five corridor
+   widths, including the held-out ones (reviewer 1, comment 4). With
+   `--gam-holdout` the fit job trains `gam_traversal_<pid>_train10-50.pkl`
+   from the pace samples of the training widths only, inside the run's code
+   snapshot, and copies it to `<RUN_DIR>/fit/gam/`. Runs carry `gh` in the
+   RUN_ID (`mpcc-full-perpidgh-...`) and `"gam_train_only": true` in
+   RUN_INFO.json. Local check on p01/p04: the two-width pace law
+   interpolates the held-out widths within about 15% of the all-width one.
+   The corrected main model must be refitted too (`--variant full`). The
+   baseline needs no rerun: it has no pace law and its reference speeds were
+   already fitted on the training widths.
+   To analyse a `gh` run locally, copy `<RUN_DIR>/fit/gam/*.pkl` into
+   `hcs_package/src/hcs_package/models/`.
+2. **`fixed_horizon` now fits its lead.** The lead takes D0's place in the
+   search (same number of free parameters as the full model) and starts at
+   the participant's human mean gaze lead. The human-pinned version is kept
+   as `fixed_horizon_human`.
+3. **Cycle statistics are part of every mpcc run.** `cluster/cycles_job.sh`
+   is chained after the fit (8 cores, 3 h wall) and writes
+   `<RUN_DIR>/cycles/{cycles_model.csv,stats.txt}`. `stats.txt` has two new
+   sections: fixation-onset lead vs width, and saccades per trial vs width.
+   These isolate the lookahead; the saccade distance of section 1 includes
+   the overrun, which grows with speed even under a fixed horizon.
+   `submit_cycles.sh <RUN_DIR>` runs the same job on a finished run.
+
 ## Cluster commands (Great Lakes login node)
 
 ```bash
 cd /home/xiangyz/ondemand/data/sys/myjobs/projects/chi-27/adaptive-cursor-trajectory-simulator
+R=/home/xiangyz/ondemand/data/sys/myjobs/projects/chi-27/results/runs
 
-# --- Study 1: per-participant fits, 22c349c protocol -------------------------
+# --- 0. Cycle statistics for the September runs (no refit; ~1-2 h each) -------
+git checkout precision
+for r in mpcc-full-perpid-s42-20260909-1257-22c349c \
+         mpcc-no_lookahead-perpid-s42-20260909-1259-22c349c \
+         mpcc-no_intermittent-perpid-s42-20260909-1300-22c349c \
+         mpcc-no_pace-perpid-s42-20260909-1259-22c349c; do
+  ./submit_cycles.sh $R/$r        # add --wall 06:00:00 for every-step variants
+done
+
+# --- 1. Study 1: per-participant fits, 22c349c protocol, corrected pace law ---
 git show precision:docs/r1_ablation_s1_22c349c.patch > /tmp/r1_s1.patch   # after pushing precision
 git checkout -b r1-ablation-s1 22c349c && git am /tmp/r1_s1.patch
-./submit_run.sh --model mpcc --variant fixed_horizon --kind perpid --dry-run
-./submit_run.sh --model mpcc --variant fixed_horizon --kind perpid
-./submit_run.sh --model mpcc --variant fixed_speed   --kind perpid
-# 8 x (8 h fit) -> 8 x eval (+ gaze-lead events) -> aggregate, per variant
+./submit_run.sh --model mpcc --variant full          --kind perpid --gam-holdout --dry-run
+./submit_run.sh --model mpcc --variant full          --kind perpid --gam-holdout   # corrected main model
+./submit_run.sh --model mpcc --variant fixed_horizon --kind perpid --gam-holdout   # R1's ablation
+./submit_run.sh --model mpcc --variant fixed_speed   --kind perpid --gam-holdout   # converse
+# optional, if allocation allows:
+./submit_run.sh --model mpcc --variant fixed_horizon_human --kind perpid --gam-holdout
+./submit_run.sh --model mpcc --variant no_intermittent     --kind perpid --gam-holdout
+# each: 8 x (36 cores, 8 h fit) -> 8 x eval -> aggregate; cycles after the fit
+# (about 2,300 core-hours per run)
 
-# --- Study 2: pooled train-all fits on 8p, evaluated on the 14 new participants
+# --- 2. Study 2: pooled train-all fits on 8p, evaluated on the 14 new participants
 git checkout precision
 ./submit_run.sh --model mpcc --variant fixed_horizon --kind pooled8   # train-all, 12 h budget
 ./submit_run.sh --model mpcc --variant fixed_speed   --kind pooled8
 eval-14p/submit_eval_14p.sh --source-run <mpcc-fixed_horizon-pooled8all-...>   # waits on the fit job
 eval-14p/submit_eval_14p.sh --source-run <mpcc-fixed_speed-pooled8all-...>
 ```
+
+Study 2 keeps the all-width pooled pace law: the pooled protocol trains on
+every Study 1 condition, and Study 2's 20/30/40 mm widths are unseen anyway.
 
 ## Analysis (after mirroring the runs into results-cluster-10p/)
 
@@ -122,13 +168,8 @@ python paper/r1_ablation_table.py --train-widths 10,50 \
   --run V1_fixed_horizon=results-cluster-10p/runs/<mpcc-fixed_horizon-perpid-...> \
   --run V2_fixed_speed=results-cluster-10p/runs/<mpcc-fixed_speed-perpid-...>
 
-# Study 1: saccade-fixate-catch-up cycle statistics (Sec. eval_cycle), the
-# human side reused from the paper's quant_refit
-for v in fixed_horizon fixed_speed; do
-  mkdir -p paper/quant_r1_$v && cp paper/quant_refit/{cycles_human,curv_human}.csv paper/quant_r1_$v/
-  python paper/quantify_gaze_cycles.py --stage model --config-dir results-cluster-10p/runs/<mpcc-$v-perpid-...>/fit/stages/base --quant-dir paper/quant_r1_$v
-  python paper/quantify_gaze_cycles.py --stage stats --quant-dir paper/quant_r1_$v
-done
+# Study 1: cycle statistics come with each run: <RUN_DIR>/cycles/stats.txt
+# (sections 5 and 6 are the lookahead-specific measures)
 
 # Study 2: Section 5.4 numbers with the ablation in the model slot
 python paper/stats_study2.py --s2-model results-cluster-10p/runs-14p/<eval14p-mpcc-fixed_speed-pooled8all-...> \

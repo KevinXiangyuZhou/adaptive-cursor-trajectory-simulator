@@ -198,9 +198,9 @@ def main():
           f"popsize {a.popsize} on {a.workers} workers | search {[s['name'] for s in spec]}", flush=True)
     _load_all(a.letters, a.quick)
     fa.init_target_speeds(su, [_DATA[L] for L in a.letters])
-    if su["ablation"] == "fixed_horizon":
-        print(f"  fixed_horizon: fixed_lead_m = {base['fixed_lead_m'] * 1000:.1f} mm "
-              f"(mean of the participants' human mean gaze leads)", flush=True)
+    if su["ablation"] in ("fixed_horizon", "fixed_horizon_human"):
+        print(f"  {su['ablation']}: fixed_lead_m {'starts at' if su['ablation'] == 'fixed_horizon' else 'pinned to'} "
+              f"{base['fixed_lead_m'] * 1000:.1f} mm (mean of the participants' human mean gaze leads)", flush=True)
 
     t_all = time.time()
     fitted, best, hist = pooled_cmaes(spec, init, base, a.letters, a.w_point,
@@ -235,6 +235,8 @@ def main():
     save_cfg["_fit"] = {"model": model, "ablation": su["ablation"], "pooled": a.letters,
                         "seed": a.seed, "tag": tag, "search": [s["name"] for s in spec]}
     if su["ablation"] == "fixed_horizon":
+        save_cfg["_fit"]["fixed_lead_init"] = init.get("fixed_lead_m")
+    if su["ablation"] == "fixed_horizon_human":
         save_cfg["_fit"]["fixed_lead_source"] = f"{fa.HUMAN_HORIZON_FILE.name}:mean({','.join(a.letters)})"
     if su["ablation"] == "fixed_speed":
         save_cfg["_fit"]["target_speed_init"] = {k.split(":", 1)[1]: init[k] for k in init

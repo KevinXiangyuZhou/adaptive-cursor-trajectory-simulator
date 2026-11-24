@@ -128,18 +128,27 @@ ABLATIONS = {
                         "drop": [], "add": [], "skip_t0": False},
     # Reviewer-1 pair (2x2 with the full model and the baseline: lookahead
     # {adaptive gaze, fixed} x catch-up {pace law, fixed target speed}).
-    # V1 fixed horizon + pace law: the anchor sits a constant lead ahead of
-    # the cursor in corridors, the lead FIXED (not fitted) at the
-    # participant's mean human gaze lead at fixation onset (pooled fits: the
-    # mean over the fitted participants). No speed floor on the lead; free
-    # space looks at the target as the budget does. D0 leaves the search,
-    # nothing enters it; pace law, replanning and the post-fit T0 scan as in
-    # the full model.
+    # V1 fixed horizon + pace law (the ablation reviewer 1 asked for): the
+    # anchor sits a constant lead ahead of the cursor in corridors. No speed
+    # floor on the lead; free space looks at the target as the budget does;
+    # pace law, replanning and the post-fit T0 scan as in the full model.
+    # The lead is FITTED, taking D0's place in the search (same number of
+    # free parameters as the full model, whose lookahead scale D0 is fitted
+    # on cursor data too), and starts at the participant's mean human gaze
+    # lead at fixation onset.
     "fixed_horizon": {"override": {"horizon_mode": "fixed_lead",
                                    "fixed_lead_speed_floor": False,
                                    "fixed_lead_free_space": "target"},
-                      "drop": ["D0"], "add": [], "skip_t0": False,
+                      "drop": ["D0"], "add": [FIXED_LEAD_SPEC], "skip_t0": False,
                       "human_horizon": True},
+    # Secondary: the same, with the lead PINNED (not fitted) to the mean
+    # human gaze lead (pooled fits: the mean over the fitted participants).
+    # Tests whether a human-sized constant horizon is enough.
+    "fixed_horizon_human": {"override": {"horizon_mode": "fixed_lead",
+                                         "fixed_lead_speed_floor": False,
+                                         "fixed_lead_free_space": "target"},
+                            "drop": ["D0"], "add": [], "skip_t0": False,
+                            "human_horizon": True},
     # V2 adaptive gaze lookahead + fixed target speed: the budget anchor
     # stays; the corridor plan deadline is lead / v_type with one constant
     # target speed per task type, fitted jointly (as the baseline fits its
@@ -511,22 +520,47 @@ def _init_val(base, name):
 PACKAGE_MODELS = HERE.parents[1] / "hcs_package" / "src" / "hcs_package" / "models"
 
 
-def _train_participant_gam(pid, name):
+BATTERY_WIDTHS = {0.01, 0.0125, 0.0165, 0.025, 0.05}   # steering corridor widths of the 8p study (m)
+
+
+def gam_train_widths():
+    """Steering training widths (m) that exist in the corridor battery."""
+    return sorted(w for w in BATTERY_WIDTHS if w in {round(x, 4) for x in fsm.TRAIN_WIDTHS})
+
+
+def train_gam_name(pid):
+    """Artifact name of the participant's pace law fitted on the steering
+    TRAINING widths only (fit_speed_model.TRAIN_WIDTHS), e.g.
+    gam_traversal_p01_train10-50.pkl. The widths are in the name so runs
+    under different splits never share an artifact."""
+    ws = "-".join(f"{w * 1000:g}" for w in gam_train_widths())
+    return f"gam_traversal_{pid}_train{ws}.pkl"
+
+
+def _train_participant_gam(pid, name, train_only=False):
     """Fit the missing per-participant traversal GAM from the pace samples
     (same features/target as train_traversal_gam.py) into the package
-    models/ dir, where the persona's relative path resolves."""
+    models/ dir, where the persona's relative path resolves. train_only
+    keeps only the pace samples recorded in corridors of the steering
+    training widths, so the held-out widths stay unseen by the pace law
+    (reviewer 1, comment 4)."""
     sys.path.insert(0, str(HERE.parents[1] / "eval" / "eval-gaze-lead"))
     import pandas as pd
     import train_traversal_gam as ttg
     d = pd.read_csv(ttg.DATA)
     d = d[d["participant"] == pid]
+    if train_only:
+        n_all = len(d)
+        d = d[np.round(d["W_loc"], 4).isin(gam_train_widths())]
+        print(f"  pace law {pid}: training widths {[round(w * 1000, 1) for w in gam_train_widths()]} mm only "
+              f"({len(d)} of {n_all} pace samples)", flush=True)
     if not len(d):
         return False
     ttg.fit_one(d, PACKAGE_MODELS / name, pid)
     return True
 
 
-def resolve_speed_model(sm, pid, pooled=False):
+def resolve_speed_model(sm, pid, pooled=False, train_only=False):
     """A per-participant fit gets the participant's own traversal GAM; the
     pooled artifact serves ONLY pooled fits. Without this, perpid personas
     silently shared the pooled GAM — which alone sets tunnel pace, so
@@ -536,6 +570,14 @@ def resolve_speed_model(sm, pid, pooled=False):
     sm = dict(sm)
     if pooled:
         sm.pop("path", None)           # pooled fit -> shipped pooled artifact
+        return sm
+    if train_only:
+        # pace law fitted on the training widths only; always (re)resolved,
+        # whatever the base persona pins, and never the all-width fallback
+        name = train_gam_name(pid)
+        if not ((PACKAGE_MODELS / name).exists() or _train_participant_gam(pid, name, train_only=True)):
+            raise SystemExit(f"no pace samples at the training widths for {pid}: cannot fit {name}")
+        sm["path"] = name
         return sm
     if sm.get("path"):
         return sm                      # persona already pins its artifact
@@ -550,7 +592,7 @@ def resolve_speed_model(sm, pid, pooled=False):
 
 def build_setup(model, pid, ablation="none", *, deadline=None, vmax=None,
                 init=None, override=None, fix_budget=False, pooled=False,
-                letters=None):
+                letters=None, gam_train_only=False):
     """Base persona + CMA spec for (model, ablation). Returns a dict with
     base, spec, init, skip_t0, model, ablation, tag_model. pooled=True
     (fit_anchor_pooled8) keeps the pooled traversal GAM; a per-participant
@@ -581,7 +623,10 @@ def build_setup(model, pid, ablation="none", *, deadline=None, vmax=None,
         spec += [sp for sp in ab["add"] if sp["name"] not in {s["name"] for s in spec}]
         skip_t0 = bool(ab["skip_t0"])
         base.setdefault("plan_vmax", 0.8)
-        base["speed_model"] = resolve_speed_model(base.get("speed_model"), pid, pooled=pooled)
+        if gam_train_only and pooled:
+            raise ValueError("gam_train_only is for per-participant fits (the pooled protocol trains on all widths)")
+        base["speed_model"] = resolve_speed_model(base.get("speed_model"), pid, pooled=pooled,
+                                                  train_only=gam_train_only)
     if deadline is not None:
         base["plan_deadline_s"] = deadline
     if vmax is not None:
@@ -670,20 +715,23 @@ def main():
     ap.add_argument("--fix-deadline", action="store_true", help="skip the post-fit T0 calibration scan (keep the base persona's plan_deadline_s)")
     ap.add_argument("--quick", action="store_true", help="fit on the straight/sharp/corner subset + 2 pointing rounds per radius")
     ap.add_argument("--skip-probe", action="store_true", help="skip the held-out probe after the fit")
+    ap.add_argument("--gam-train-only", action="store_true",
+                    help="(mpcc) fit this participant's pace law on the steering training widths only, "
+                         "so held-out widths are unseen by every fitted component")
     a = ap.parse_args()
     RESULTS.mkdir(exist_ok=True, parents=True)
 
     su = build_setup(a.model, a.pid, a.ablation, deadline=a.deadline, vmax=a.vmax,
                      init=(json.loads(a.init) if a.init else None),
                      override=(json.loads(a.override) if a.override else None),
-                     fix_budget=a.fix_budget)
+                     fix_budget=a.fix_budget, gam_train_only=a.gam_train_only)
     base, spec, init, model = su["base"], su["spec"], su["init"], su["model"]
     tag = (a.tag.strip("_") or (su["ablation"] if su["ablation"] != "none" else "base"))
     d = load_training(a.pid, a.quick)
     init_target_speeds(su, [d])
-    if a.ablation == "fixed_horizon":
-        print(f"  fixed_horizon: fixed_lead_m = {base['fixed_lead_m'] * 1000:.1f} mm "
-              f"(human mean gaze lead, {HUMAN_HORIZON_FILE.name})", flush=True)
+    if a.ablation in ("fixed_horizon", "fixed_horizon_human"):
+        print(f"  {a.ablation}: fixed_lead_m {'starts at' if a.ablation == 'fixed_horizon' else 'pinned to'} "
+              f"{base['fixed_lead_m'] * 1000:.1f} mm (human mean gaze lead, {HUMAN_HORIZON_FILE.name})", flush=True)
     print(f"{a.pid} [{model} / {su['ablation']}] -> stages/{tag}: tunnel train {len(d['tun_train'])} tids, "
           f"test {len(d['tun_test'])}; pointing train {len(d['pt_train'])} tids "
           f"({sum(len(v) for v in d['pt_train'].values())} rounds); stability {len(d['stab'])}; "
@@ -712,7 +760,12 @@ def main():
     save_cfg["_fit"] = {"model": model, "ablation": su["ablation"], "pid": a.pid, "seed": a.seed,
                         "tag": tag, "search": [s["name"] for s in spec]}
     if su["ablation"] == "fixed_horizon":
+        save_cfg["_fit"]["fixed_lead_init"] = init.get("fixed_lead_m")
+    if su["ablation"] == "fixed_horizon_human":
         save_cfg["_fit"]["fixed_lead_source"] = f"{HUMAN_HORIZON_FILE.name}:{a.pid}"
+    if a.gam_train_only and model == "mpcc":
+        save_cfg["_fit"]["gam_train_only"] = True
+        save_cfg["_fit"]["gam_train_widths_mm"] = [round(w * 1000, 1) for w in gam_train_widths()]
     if su["ablation"] == "fixed_speed":
         save_cfg["_fit"]["target_speed_init"] = {k.split(":", 1)[1]: init[k] for k in init
                                                  if k.startswith("target_speed:")}
