@@ -9,6 +9,10 @@ baseline, under ONE protocol.
                       and plan_deadline_s (free-space plan-time floor) is
                       calibrated post-fit by a 1-D scan on the pointing loss.
     --ablation NAME   (mpcc only) removes one gaze mechanism; see ABLATIONS.
+                      fixed_horizon / fixed_speed are the reviewer-1 pair that
+                      separates the adaptive gaze lookahead from the pace law
+                      (each swaps exactly one of the two for the baseline's
+                      kind of mechanism; see ABLATIONS).
     --model baseline  the CHI-26-EA MPCC (eval/chi-26-ea_baseline_pacakage):
                       fixed horizon Th, per-step replanning, tracked reference
                       velocity v_des/(1+c|kappa|). CMA-ES fits eight
@@ -89,6 +93,17 @@ ANCHOR_SPEC = [
 # Ablation-only search entries.
 FIXED_LEAD_SPEC = {"name": "fixed_lead_m", "bounds": (0.01, 0.15)}
 T0_SPEC = {"name": "plan_deadline_s", "bounds": (0.08, 0.40)}
+# fixed_speed: one constant corridor target speed per steering task type —
+# the baseline's reference-velocity parameterisation (BASELINE_SPEC
+# desired_speed:<type>, same bounds 0.03 .. 1.26 m/s), without its curvature
+# slow-down. Pointing keeps the full model's free-space T0 rule, so there is
+# no pointing entry.
+TARGET_SPEED_TYPES = tuple(t for t in bl.TASK_TYPES if t != bl.POINTING_TYPE)
+TARGET_SPEED_SPEC = [{"name": f"target_speed:{t}", "log_scale": True, "bounds": (-1.5, 0.1)}
+                     for t in TARGET_SPEED_TYPES]
+TARGET_SPEED_PRIOR = 0.15   # m/s; replaced by the training data's mean speed per type
+# fixed_horizon: the per-participant human gaze lead (human_gaze_horizon.py).
+HUMAN_HORIZON_FILE = HERE / "human_gaze_horizon_10p.json"
 
 # Ablations of the current model (paper §Evaluation). Each removes one of
 # the three gaze mechanisms; parameters that the removed mechanism owned
@@ -111,7 +126,78 @@ ABLATIONS = {
     # C4: no intermittency — budget + pace law kept; replan every step.
     "no_intermittent": {"override": {"replan_mode": "every_step"},
                         "drop": [], "add": [], "skip_t0": False},
+    # Reviewer-1 pair (2x2 with the full model and the baseline: lookahead
+    # {adaptive gaze, fixed} x catch-up {pace law, fixed target speed}).
+    # V1 fixed horizon + pace law: the anchor sits a constant lead ahead of
+    # the cursor in corridors, the lead FIXED (not fitted) at the
+    # participant's mean human gaze lead at fixation onset (pooled fits: the
+    # mean over the fitted participants). No speed floor on the lead; free
+    # space looks at the target as the budget does. D0 leaves the search,
+    # nothing enters it; pace law, replanning and the post-fit T0 scan as in
+    # the full model.
+    "fixed_horizon": {"override": {"horizon_mode": "fixed_lead",
+                                   "fixed_lead_speed_floor": False,
+                                   "fixed_lead_free_space": "target"},
+                      "drop": ["D0"], "add": [], "skip_t0": False,
+                      "human_horizon": True},
+    # V2 adaptive gaze lookahead + fixed target speed: the budget anchor
+    # stays; the corridor plan deadline is lead / v_type with one constant
+    # target speed per task type, fitted jointly (as the baseline fits its
+    # reference velocity per type) and initialised at the training data's
+    # mean speed per type. Free space keeps the T0 rule + post-fit scan.
+    "fixed_speed": {"override": {"catchup_mode": "target_speed"},
+                    "drop": [], "add": TARGET_SPEED_SPEC, "skip_t0": False,
+                    "target_speed": True},
 }
+
+
+def human_horizon(letters):
+    """Fixed lead (m) of the fixed_horizon ablation: the participant's mean
+    human gaze lead at fixation onset; for several letters (pooled fit) the
+    mean of their means."""
+    tab = json.load(open(HUMAN_HORIZON_FILE))["participants"]
+    missing = [L for L in letters if L not in tab]
+    if missing:
+        raise SystemExit(f"no human gaze lead for {missing} in {HUMAN_HORIZON_FILE} "
+                         f"(run human_gaze_horizon.py --letters ...)")
+    return float(np.mean([tab[L]["mean_lead_m"] for L in letters]))
+
+
+def human_type_speeds(datas):
+    """Mean human tunnel speed (centerline length / completion time) per
+    steering task type over the TRAINING rounds of one or more participants'
+    load_training() dicts — the starting point of the fixed_speed search."""
+    acc = {}
+    for d in datas:
+        for t, rounds in d["tun_train"].items():
+            cl = np.asarray(d["tasks"][t][1], float)
+            length = float(np.sum(np.linalg.norm(np.diff(cl, axis=0), axis=1)))
+            for h in rounds:
+                ct = (h["timestamps"][-1] - h["timestamps"][0]) / 1000.0
+                if ct > 0:
+                    acc.setdefault(d["types"][t], []).append(length / ct)
+    return {ty: float(np.mean(v)) for ty, v in acc.items()}
+
+
+def init_target_speeds(su, datas):
+    """fixed_speed: replace the prior target speeds (base persona and CMA
+    start) by the training data's per-type mean speed, clipped to the bounds."""
+    if not ABLATIONS.get(su["ablation"], {}).get("target_speed"):
+        return None
+    v = human_type_speeds(datas)
+    used = {}
+    for sp in su["spec"]:
+        if not sp["name"].startswith("target_speed:"):
+            continue
+        ty = sp["name"].split(":", 1)[1]
+        lo, hi = (10.0 ** b for b in sp["bounds"])
+        val = float(np.clip(v.get(ty, TARGET_SPEED_PRIOR), lo * 1.01, hi / 1.01))
+        su["init"][sp["name"]] = val
+        su["base"]["target_speed_by_type"][ty] = val
+        used[ty] = val
+    print(f"  fixed_speed init (training mean speed per type, m/s): "
+          f"{ {k: round(x, 3) for k, x in used.items()} }", flush=True)
+    return used
 
 BASELINE_SPEC = [
     {"name": "jerk", "log_scale": True, "bounds": (-8.0, -4.0)},         # 1e-8 .. 1e-4 (2026-09-08: was 1e-10; unregularised solves diverge under noise)
@@ -413,6 +499,8 @@ def heldout_losses(cfg, data, model, workers=4, w_pt=1.0):
 def _init_val(base, name):
     if name.startswith("desired_speed:"):
         return base["desired_speed_by_type"][name.split(":", 1)[1]]
+    if name.startswith("target_speed:"):
+        return base["target_speed_by_type"][name.split(":", 1)[1]]
     if name in base:
         return base[name]
     if name in (base.get("budget") or {}):
@@ -461,11 +549,13 @@ def resolve_speed_model(sm, pid, pooled=False):
 
 
 def build_setup(model, pid, ablation="none", *, deadline=None, vmax=None,
-                init=None, override=None, fix_budget=False, pooled=False):
+                init=None, override=None, fix_budget=False, pooled=False,
+                letters=None):
     """Base persona + CMA spec for (model, ablation). Returns a dict with
     base, spec, init, skip_t0, model, ablation, tag_model. pooled=True
     (fit_anchor_pooled8) keeps the pooled traversal GAM; a per-participant
-    fit resolves the participant's own GAM artifact."""
+    fit resolves the participant's own GAM artifact. letters: the fitted
+    participants of a pooled fit (fixed_horizon takes their mean lead)."""
     if model not in MODELS:
         raise ValueError(f"model must be one of {MODELS}, got {model!r}")
     if model == "baseline":
@@ -482,6 +572,10 @@ def build_setup(model, pid, ablation="none", *, deadline=None, vmax=None,
         base = pa.load_persona(pid, "anchor")
         for k, v in ab["override"].items():
             base[k] = v
+        if ab.get("human_horizon"):
+            base["fixed_lead_m"] = human_horizon(list(letters) if letters else [pid])
+        if ab.get("target_speed"):
+            base["target_speed_by_type"] = {t: TARGET_SPEED_PRIOR for t in TARGET_SPEED_TYPES}
         spec = [sp for sp in ANCHOR_SPEC if sp["name"] not in ab["drop"]]
         spec = [sp for sp in spec if not (fix_budget and sp["name"] == "D0")]
         spec += [sp for sp in ab["add"] if sp["name"] not in {s["name"] for s in spec}]
@@ -586,6 +680,10 @@ def main():
     base, spec, init, model = su["base"], su["spec"], su["init"], su["model"]
     tag = (a.tag.strip("_") or (su["ablation"] if su["ablation"] != "none" else "base"))
     d = load_training(a.pid, a.quick)
+    init_target_speeds(su, [d])
+    if a.ablation == "fixed_horizon":
+        print(f"  fixed_horizon: fixed_lead_m = {base['fixed_lead_m'] * 1000:.1f} mm "
+              f"(human mean gaze lead, {HUMAN_HORIZON_FILE.name})", flush=True)
     print(f"{a.pid} [{model} / {su['ablation']}] -> stages/{tag}: tunnel train {len(d['tun_train'])} tids, "
           f"test {len(d['tun_test'])}; pointing train {len(d['pt_train'])} tids "
           f"({sum(len(v) for v in d['pt_train'].values())} rounds); stability {len(d['stab'])}; "
@@ -613,6 +711,11 @@ def main():
     save_cfg = restore_stochasticity(copy.deepcopy(base), model, a.pid)
     save_cfg["_fit"] = {"model": model, "ablation": su["ablation"], "pid": a.pid, "seed": a.seed,
                         "tag": tag, "search": [s["name"] for s in spec]}
+    if su["ablation"] == "fixed_horizon":
+        save_cfg["_fit"]["fixed_lead_source"] = f"{HUMAN_HORIZON_FILE.name}:{a.pid}"
+    if su["ablation"] == "fixed_speed":
+        save_cfg["_fit"]["target_speed_init"] = {k.split(":", 1)[1]: init[k] for k in init
+                                                 if k.startswith("target_speed:")}
     with open(cfg_path, "w") as f:
         json.dump(save_cfg, f, indent=2)
     print(f"\nfitted: {json.dumps({k: float(v) for k, v in fitted.items()})}\nbest joint loss {best:.4f}; saved {cfg_path}")

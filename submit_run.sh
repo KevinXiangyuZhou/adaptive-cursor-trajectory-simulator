@@ -1,7 +1,7 @@
 #!/bin/bash
 # Submit one isolated run (fit -> eval -> aggregate) to Great Lakes.
 #
-#   submit_run.sh --model {mpcc,baseline} --variant {full,no_gaze,no_lookahead,no_pace,no_intermittent} \
+#   submit_run.sh --model {mpcc,baseline} --variant {full,no_gaze,no_lookahead,no_pace,no_intermittent,fixed_horizon,fixed_speed} \
 #                 --kind {perpid,pooled8} [--seed 42] [--participants participants_10p.txt] \
 #                 [--time-limit S] [--popsize N] [--min-runs N] [--gamma G] \
 #                 [--wall HH:MM:SS] [--results-root DIR] [--data-root DIR] [--allow-dirty] [--dry-run]
@@ -55,7 +55,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 case "$MODEL" in mpcc|baseline) ;; *) echo "--model must be mpcc or baseline"; exit 2;; esac
-case "$VARIANT" in full|no_gaze|no_lookahead|no_pace|no_intermittent) ;; *) echo "--variant invalid"; exit 2;; esac
+case "$VARIANT" in full|no_gaze|no_lookahead|no_pace|no_intermittent|fixed_horizon|fixed_speed) ;; *) echo "--variant invalid"; exit 2;; esac
 case "$KIND" in perpid|pooled8) ;; *) echo "--kind must be perpid or pooled8"; exit 2;; esac
 if [ "$MODEL" = "baseline" ] && [ "$VARIANT" != "full" ]; then echo "baseline has no ablations (use --variant full)"; exit 2; fi
 [ -f "$PARTICIPANTS_FILE" ] || { echo "missing $PARTICIPANTS_FILE"; exit 2; }

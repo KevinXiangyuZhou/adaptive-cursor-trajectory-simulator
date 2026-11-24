@@ -399,12 +399,19 @@ def build_steering_task_config(cond):
     (numCorners, cornerOffset, radiusRatio) — not the snake_case builder
     *parameter* names.
     """
-    if cond.get("tunnelType") == "corner":
-        return _build_corner_config(cond["tunnelWidth"], cond["numCorners"], cond["cornerOffset"])
     width = cond["tunnelWidth"]
     radius_ratio = cond.get("radiusRatio")
-    target_radius = width * radius_ratio if radius_ratio is not None else None
-    return _build_sigmoidal_config(width, cond.get("curvature", 0.0), target_radius=target_radius)
+    if cond.get("tunnelType") == "corner":
+        tc, cl = _build_corner_config(width, cond["numCorners"], cond["cornerOffset"])
+    else:
+        target_radius = width * radius_ratio if radius_ratio is not None else None
+        tc, cl = _build_sigmoidal_config(width, cond.get("curvature", 0.0), target_radius=target_radius)
+    # Task label for the simulator (same naming as the baseline's per-type
+    # reference velocity, utils.baseline_loader.task_type_of). Read only by
+    # catchup_mode "target_speed" (R1 fixed-speed ablation); inert otherwise.
+    tc = dict(tc)
+    tc["task_type"] = cond.get("tunnelType") or "sinusoidal"
+    return tc, cl
 
 
 def make_width_profile(centerline, w1, w2):

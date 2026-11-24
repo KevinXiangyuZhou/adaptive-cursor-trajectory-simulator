@@ -166,6 +166,19 @@ class CursorSimulator:
             # traversal integral is not used — the "no pace law" ablation.
             # "pace_law" = finalized design.
             "catchup_mode": "pace_law",
+            # R1 ablations (reviewer 1: separate gaze lookahead from pace law):
+            # fixed_lead_speed_floor false — the fixed lead carries no v*T_min
+            # floor; fixed_lead_free_space "target" — the fixed lead applies
+            # in corridors only, free space looks at the target (as the
+            # budget does). catchup_mode "target_speed" — corridor deadline
+            # = lead / target speed, the speed taken from
+            # target_speed_by_type[task type] (task type from the task file's
+            # "task_type", e.g. "straight", "corner", "sinusoidal"), falling
+            # back to the "sinusoidal" entry, then target_speed_mps.
+            "fixed_lead_speed_floor": True,
+            "fixed_lead_free_space": "fixed",
+            "target_speed_by_type": None,
+            "target_speed_mps": None,
             # replan_mode "every_step": re-solve each step (ablation baseline).
             # replan_mode "intermittent": execute the plan open-loop and
             # re-solve on arrival at the planned anchor + a post-arrival
@@ -248,8 +261,23 @@ class CursorSimulator:
         if self.horizon_mode == 'fixed_lead' and self.fixed_lead_m <= 0.0:
             raise ValueError("horizon_mode='fixed_lead' needs fixed_lead_m > 0")
         self.catchup_mode = str(config.get('catchup_mode', 'pace_law'))
-        if self.catchup_mode not in ('pace_law', 'constant'):
-            raise ValueError(f"catchup_mode must be 'pace_law' or 'constant', got {self.catchup_mode!r}")
+        if self.catchup_mode not in ('pace_law', 'constant', 'target_speed'):
+            raise ValueError(f"catchup_mode must be 'pace_law', 'constant' or 'target_speed', got {self.catchup_mode!r}")
+        self.fixed_lead_speed_floor = bool(config.get('fixed_lead_speed_floor', True))
+        self.fixed_lead_free_space = str(config.get('fixed_lead_free_space', 'fixed'))
+        if self.fixed_lead_free_space not in ('fixed', 'target'):
+            raise ValueError(f"fixed_lead_free_space must be 'fixed' or 'target', got {self.fixed_lead_free_space!r}")
+        tsb = config.get('target_speed_by_type')
+        self.target_speed_by_type = ({str(k): float(v) for k, v in tsb.items()} if tsb else None)
+        tsm = config.get('target_speed_mps')
+        self.target_speed_mps = float(tsm) if tsm is not None else None
+        if self.catchup_mode == 'target_speed':
+            speeds = list((self.target_speed_by_type or {}).values())
+            if self.target_speed_mps is not None:
+                speeds.append(self.target_speed_mps)
+            if not speeds or min(speeds) <= 0.0:
+                raise ValueError("catchup_mode='target_speed' needs target_speed_by_type "
+                                 "and/or target_speed_mps with positive speeds")
         budget_cfg = config.get('budget') or {}
         # Fallbacks match the default config above (single source of truth
         # for "unset": the pooled cross-validated refit).
@@ -373,6 +401,21 @@ class CursorSimulator:
             'global_clearance_ref': rp_cfg.get('global_clearance_ref', pw.get('global_clearance_ref', 0.025)),
         }
 
+    def _resolve_target_speed(self, task_type):
+        """(speed, source) for catchup_mode 'target_speed'; (None, None) otherwise.
+        Per-type value, else the 'sinusoidal' entry, else target_speed_mps."""
+        if self.catchup_mode != 'target_speed':
+            return None, None
+        by_type = self.target_speed_by_type or {}
+        if task_type is not None and task_type in by_type:
+            return by_type[task_type], f"type:{task_type}"
+        if 'sinusoidal' in by_type:
+            return by_type['sinusoidal'], "fallback:sinusoidal"
+        if self.target_speed_mps is not None:
+            return self.target_speed_mps, "scalar"
+        raise ValueError(f"no target speed for task type {task_type!r} "
+                         f"(target_speed_by_type has {sorted(by_type)})")
+
     def generate_trajectory_with_waypoints(
         self,
         task_file: Optional[Union[str, Path]] = None,
@@ -384,7 +427,8 @@ class CursorSimulator:
         target_radius: float = 0.01,
         use_optimal_path: bool = True,
         return_timestamps: bool = False,
-        return_reference_path: bool = False
+        return_reference_path: bool = False,
+        task_type: Optional[str] = None,
     ) -> Union[List[Tuple[float, float, float]], Tuple[List[Tuple[float, float, float]], Any]]:
         """
         Generate a trajectory following waypoints with optional constraints.
@@ -408,6 +452,9 @@ class CursorSimulator:
             use_optimal_path: If True, generate optimal reference path from waypoints (default: True)
             return_timestamps: If True, return timestamps instead of delays (default: False)
             return_reference_path: If True, also return the reference path object (default: False)
+            task_type: Optional task label (e.g. "straight", "corner"); read from the
+                      task file's "task_type" when present. Used only by
+                      catchup_mode "target_speed" to pick the per-type target speed.
 
         Returns:
             If return_reference_path is False: List of tuples (x, y, delay) or (x, y, timestamp)
@@ -423,6 +470,9 @@ class CursorSimulator:
 
             if "waypoints" not in task_data:
                 raise ValueError("task.json must contain 'waypoints' key")
+
+            if task_data.get("task_type"):
+                task_type = str(task_data["task_type"])
 
             waypoints = [tuple(wp) for wp in task_data["waypoints"]]
 
@@ -597,6 +647,7 @@ class CursorSimulator:
             min_open_loop_steps=max(0, int(round(self.min_open_loop_s / self.interval))),
             rng=self._replan_rng,
         )
+        target_speed, target_speed_source = self._resolve_target_speed(task_type)
         # The paper's two modules: the gaze module decides WHERE the anchor
         # sits and WHEN to replan; the motor module solves the plan's SHAPE.
         gaze = GazeModule(
@@ -614,6 +665,9 @@ class CursorSimulator:
             horizon_max_steps=self.horizon_max_steps,
             horizon_mode=self.horizon_mode, fixed_lead_m=self.fixed_lead_m,
             catchup_mode=self.catchup_mode,
+            fixed_lead_speed_floor=self.fixed_lead_speed_floor,
+            fixed_lead_free_space=self.fixed_lead_free_space,
+            target_speed=target_speed,
         )
         motor = MotorModule(
             reference_path,
@@ -721,6 +775,11 @@ class CursorSimulator:
             'horizon_mode': self.horizon_mode,
             'fixed_lead_m': self.fixed_lead_m,
             'catchup_mode': self.catchup_mode,
+            'fixed_lead_speed_floor': self.fixed_lead_speed_floor,
+            'fixed_lead_free_space': self.fixed_lead_free_space,
+            'task_type': task_type,
+            'target_speed': target_speed,
+            'target_speed_source': target_speed_source,
             'replan_mode': self.replan_mode,
             'anchor_drive': True,
             'plan_deadline_s': self.plan_deadline_s,

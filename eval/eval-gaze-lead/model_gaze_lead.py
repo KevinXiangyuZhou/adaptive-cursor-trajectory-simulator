@@ -239,7 +239,14 @@ def make_sim(letter, noise_on=True):
             cfg["replan_latency_cv"] = 0.89
     sm = cfg.get("speed_model", {})
     if sm.get("path") and not Path(sm["path"]).is_absolute():
-        sm["path"] = str((cfg_path.parent if CONFIG_OVERRIDE else FIT_DIR) / sm["path"])
+        # A relative artifact name resolves against the persona's own folder
+        # when the file is there (legacy per-fit GAMs); otherwise leave it
+        # relative so the simulator falls back to the package models/ dir,
+        # where the per-participant traversal GAMs live (2026-09-09: making
+        # it absolute unconditionally broke every refit persona).
+        cand = (cfg_path.parent if CONFIG_OVERRIDE else FIT_DIR) / sm["path"]
+        if cand.exists():
+            sm["path"] = str(cand)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
         json.dump(cfg, tf)
         cfg_file = tf.name
