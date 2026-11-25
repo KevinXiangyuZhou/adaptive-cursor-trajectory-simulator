@@ -1,11 +1,21 @@
 #!/bin/bash
 # Submit one isolated run (fit -> eval -> aggregate) to Great Lakes.
 #
-#   submit_run.sh --model {mpcc,baseline} --variant {full,no_gaze,no_lookahead,no_pace,no_intermittent} \
+#   submit_run.sh --model {mpcc,baseline} --variant {full,no_gaze,no_lookahead,no_pace,no_intermittent,fixed_horizon,fixed_horizon_human,fixed_speed} \
 #                 --kind {perpid,pooled8} [--train-all | --holdout] [--seed 42] \
 #                 [--participants participants_10p.txt] \
 #                 [--time-limit S] [--popsize N] [--min-runs N] [--gamma G] \
 #                 [--wall HH:MM:SS] [--results-root DIR] [--data-root DIR] [--allow-dirty] [--dry-run]
+#                 [--gam-holdout] [--no-cycles]
+#
+# --gam-holdout (mpcc, perpid): each participant's pace law (traversal GAM) is
+# fitted on the steering TRAINING widths only, so the held-out widths are
+# unseen by every fitted component (reviewer 1, comment 4). The run carries
+# "gh" in its RUN_ID kind segment (e.g. mpcc-full-perpidgh-s42-...) and
+# "gam_train_only": true in RUN_INFO.json. Without it the pace law uses all
+# five widths, as in the September runs.
+# Cycle statistics (cluster/cycles_job.sh -> <RUN_DIR>/cycles/) are chained
+# after the fit for every mpcc run; --no-cycles skips them.
 #
 # Training set: --train-all fits on EVERY steering width and EVERY pointing
 # condition (no held-out split); --holdout uses fit_speed_model's split
@@ -39,7 +49,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 MODEL=""; VARIANT=""; KIND=""; SEED=42; PARTICIPANTS_FILE="participants_10p.txt"
-TIME_LIMIT=""; WALL=""; POPSIZE=12; MIN_RUNS=0; GAMMA=""; ALLOW_DIRTY=0; DRY=0; TRAIN_ALL=""
+TIME_LIMIT=""; WALL=""; POPSIZE=12; MIN_RUNS=0; GAMMA=""; ALLOW_DIRTY=0; DRY=0; GAM_HOLDOUT=0; CYCLES=1; TRAIN_ALL=""
 RESULTS_ROOT="${RESULTS_ROOT:-/home/xiangyz/ondemand/data/sys/myjobs/projects/chi-27/results}"
 DATA_ROOT="$REPO_ROOT/human_data"
 DATA_DIR="$DATA_ROOT/task_aligned_all"
@@ -62,17 +72,24 @@ while [ $# -gt 0 ]; do
         --data-root) DATA_ROOT="$2"; DATA_DIR="$DATA_ROOT/task_aligned_all"; shift 2;;
         --venv) VENV_DIR="$2"; shift 2;;
         --allow-dirty) ALLOW_DIRTY=1; shift;;
+        --gam-holdout) GAM_HOLDOUT=1; shift;;
+        --no-cycles) CYCLES=0; shift;;
         --dry-run) DRY=1; shift;;
-        -h|--help) sed -n 2,32p "$0"; exit 0;;
+        -h|--help) sed -n 2,42p "$0"; exit 0;;
         *) echo "unknown option $1"; exit 2;;
     esac
 done
 case "$MODEL" in mpcc|baseline) ;; *) echo "--model must be mpcc or baseline"; exit 2;; esac
-case "$VARIANT" in full|no_gaze|no_lookahead|no_pace|no_intermittent) ;; *) echo "--variant invalid"; exit 2;; esac
+case "$VARIANT" in full|no_gaze|no_lookahead|no_pace|no_intermittent|fixed_horizon|fixed_horizon_human|fixed_speed) ;; *) echo "--variant invalid"; exit 2;; esac
 case "$KIND" in perpid|pooled8) ;; *) echo "--kind must be perpid or pooled8"; exit 2;; esac
 if [ "$MODEL" = "baseline" ] && [ "$VARIANT" != "full" ]; then echo "baseline has no ablations (use --variant full)"; exit 2; fi
 [ -z "$TRAIN_ALL" ] && TRAIN_ALL=$([ "$KIND" = pooled8 ] && echo 1 || echo 0)
 KIND_ID="$KIND"; [ "$TRAIN_ALL" = 1 ] && KIND_ID="${KIND}all"
+if [ "$GAM_HOLDOUT" = 1 ] && { [ "$MODEL" != mpcc ] || [ "$KIND" != perpid ]; }; then
+    echo "--gam-holdout applies to --model mpcc --kind perpid (the baseline has no pace law; the pooled protocol trains on all widths)"; exit 2
+fi
+if [ "$GAM_HOLDOUT" = 1 ] && [ "$TRAIN_ALL" = 1 ]; then echo "--gam-holdout contradicts --train-all"; exit 2; fi
+[ "$GAM_HOLDOUT" = 1 ] && KIND_ID="${KIND_ID}gh"
 [ -f "$PARTICIPANTS_FILE" ] || { echo "missing $PARTICIPANTS_FILE"; exit 2; }
 [ -d "$DATA_DIR" ] || { echo "missing data dir $DATA_DIR (rsync human_data/task_aligned_all first)"; exit 2; }
 ls "$DATA_DIR"/p01_task_aligned_analysis*.csv >/dev/null 2>&1 || echo "WARNING: no task-aligned gaze CSVs under $DATA_DIR — the mpcc gaze-lead figures will fail (rsync human_data/task_aligned_all/*.csv up to enable; the eval itself is unaffected)"
@@ -94,10 +111,11 @@ RUN_DIR="$RESULTS_ROOT/runs/$RUN_ID"
 echo "RUN_ID  $RUN_ID"
 echo "RUN_DIR $RUN_DIR"
 echo "TRAIN   $([ "$TRAIN_ALL" = 1 ] && echo 'all conditions (no held-out split)' || echo 'held-out split (steering {10,16.5,50} mm + 3 pointing conditions)')"
+echo "PACE    $([ "$MODEL" != mpcc ] && echo 'n/a (baseline)' || { [ "$GAM_HOLDOUT" = 1 ] && echo 'pace law fitted on the training widths only' || echo 'pace law fitted on ALL widths (pass --gam-holdout for a clean held-out split)'; })"
 [ "$DRY" = 1 ] && { echo "(dry run: nothing created)"; exit 0; }
 
 # --- run tree + code snapshot --------------------------------------------
-mkdir -p "$RUN_DIR"/{code,fit,personas,eval,gaze-lead,logs,tmp}
+mkdir -p "$RUN_DIR"/{code,fit,personas,eval,gaze-lead,cycles,logs,tmp}
 if [ "$DIRTY" = 1 ]; then
     rsync -a --exclude .git --exclude 'results*' --exclude venv --exclude .venv \
           --exclude '__pycache__' --exclude 'human_data' --exclude 'backup' \
@@ -117,7 +135,7 @@ ln -s "$DATA_ROOT" "$RUN_DIR/code/human_data"
 # the legacy default location inside the snapshot point at it as well
 rm -rf "$RUN_DIR/code/eval/eval-anchor-drive/results"; ln -s "$RUN_DIR/fit" "$RUN_DIR/code/eval/eval-anchor-drive/results"
 
-EXPORTS="ALL,RUN_DIR=$RUN_DIR,MODEL=$MODEL,VARIANT=$VARIANT,KIND=$KIND,SEED=$SEED,POPSIZE=$POPSIZE,MIN_RUNS=$MIN_RUNS,PARTICIPANTS_FILE=$PARTICIPANTS_FILE,VENV_DIR=$VENV_DIR,TRAIN_ALL=$TRAIN_ALL"
+EXPORTS="ALL,RUN_DIR=$RUN_DIR,MODEL=$MODEL,VARIANT=$VARIANT,KIND=$KIND,SEED=$SEED,POPSIZE=$POPSIZE,MIN_RUNS=$MIN_RUNS,PARTICIPANTS_FILE=$PARTICIPANTS_FILE,VENV_DIR=$VENV_DIR,TRAIN_ALL=$TRAIN_ALL,GAM_TRAIN_ONLY=$GAM_HOLDOUT"
 [ -n "$TIME_LIMIT" ] && EXPORTS="$EXPORTS,TIME_LIMIT=$TIME_LIMIT"
 [ -n "$GAMMA" ] && EXPORTS="$EXPORTS,GAMMA=$GAMMA"
 
@@ -143,6 +161,15 @@ AGG_JOB=$(sbatch --parsable --job-name "agg-$RUN_ID" \
     --output "$RUN_DIR/logs/agg_%j.out" --error "$RUN_DIR/logs/agg_%j.err" \
     --export="$EXPORTS" "$RUN_DIR/code/cluster/aggregate_job.sh")
 AGG_JOB="${AGG_JOB%%;*}"
+# cycle statistics: needs only the fitted personas, so it follows the fit
+# (independent of the eval array; a failure here never blocks the aggregate)
+CYC_JOB=""
+if [ "$MODEL" = mpcc ] && [ "$CYCLES" = 1 ]; then
+    CYC_JOB=$(sbatch --parsable --job-name "cyc-$RUN_ID" --dependency="afterok:$FIT_JOB" \
+        --output "$RUN_DIR/logs/cycles_%j.out" --error "$RUN_DIR/logs/cycles_%j.err" \
+        --export="$EXPORTS" "$RUN_DIR/code/cluster/cycles_job.sh")
+    CYC_JOB="${CYC_JOB%%;*}"
+fi
 
 # --- record ---------------------------------------------------------------
 python3 - "$RUN_DIR" <<EOF
@@ -156,7 +183,8 @@ info = {
   "participants_file": "$PARTICIPANTS_FILE", "n_participants": $N_PIDS,
   "time_limit": "${TIME_LIMIT:-default}", "wall": "${WALL:-default}", "popsize": $POPSIZE, "min_runs": $MIN_RUNS, "gamma": "${GAMMA:-default}",
   "data_root": "$DATA_ROOT", "data_dir": "$DATA_DIR", "venv": "$VENV_DIR",
-  "jobs": {"fit": "$FIT_JOB", "eval": "$EVAL_JOB", "aggregate": "$AGG_JOB"},
+  "jobs": {"fit": "$FIT_JOB", "eval": "$EVAL_JOB", "aggregate": "$AGG_JOB", "cycles": "$CYC_JOB"},
+  "gam_train_only": bool($GAM_HOLDOUT),
   "cmdline": "$0 --model $MODEL --variant $VARIANT --kind $KIND $([ "$TRAIN_ALL" = 1 ] && echo --train-all || echo --holdout) --seed $SEED",
 }
 json.dump(info, open(os.path.join(d, "RUN_INFO.json"), "w"), indent=2)
@@ -164,5 +192,5 @@ EOF
 INDEX="$RESULTS_ROOT/runs/INDEX.tsv"
 [ -f "$INDEX" ] || printf 'run_id\tmodel\tvariant\tkind\tseed\tcommit\tdirty\tsubmitted\tfit_job\teval_job\tagg_job\n' > "$INDEX"
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$RUN_ID" "$MODEL" "$VARIANT" "$KIND" "$SEED" "$SHA" "$DIRTY" "$STAMP" "$FIT_JOB" "$EVAL_JOB" "$AGG_JOB" >> "$INDEX"
-echo "submitted: fit $FIT_JOB -> eval $EVAL_JOB -> aggregate $AGG_JOB"
+echo "submitted: fit $FIT_JOB -> eval $EVAL_JOB -> aggregate $AGG_JOB${CYC_JOB:+ ; cycles $CYC_JOB (after the fit)}"
 echo "logs:      $RUN_DIR/logs/"

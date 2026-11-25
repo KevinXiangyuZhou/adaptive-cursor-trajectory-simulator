@@ -197,7 +197,7 @@ def main():
     # pooled=True: the pooled traversal GAM, never a.letters[0]'s own.
     su = fa.build_setup(a.model, a.letters[0], a.ablation,
                         override=(json.loads(a.override) if a.override else None),
-                        pooled=True)
+                        pooled=True, letters=a.letters)
     base, spec, init, model = su["base"], su["spec"], su["init"], su["model"]
     base.pop("_description", None)
     if a.gamma is not None:
@@ -211,6 +211,10 @@ def main():
           f"popsize {a.popsize} on {a.workers} workers | search {[s['name'] for s in spec]} | "
           f"{'ALL conditions train (no held-out split)' if a.train_all else 'train/test split'}", flush=True)
     _load_all(a.letters, a.quick, a.train_all)
+    fa.init_target_speeds(su, [_DATA[L] for L in a.letters])
+    if su["ablation"] in ("fixed_horizon", "fixed_horizon_human"):
+        print(f"  {su['ablation']}: fixed_lead_m {'starts at' if su['ablation'] == 'fixed_horizon' else 'pinned to'} "
+              f"{base['fixed_lead_m'] * 1000:.1f} mm (mean of the participants' human mean gaze leads)", flush=True)
 
     t_all = time.time()
     fitted, best, hist = pooled_cmaes(spec, init, base, a.letters, a.w_point,
@@ -245,6 +249,13 @@ def main():
     save_cfg["_fit"] = {"model": model, "ablation": su["ablation"], "pooled": a.letters,
                         "seed": a.seed, "tag": tag, "search": [s["name"] for s in spec],
                         "train_all": a.train_all}
+    if su["ablation"] == "fixed_horizon":
+        save_cfg["_fit"]["fixed_lead_init"] = init.get("fixed_lead_m")
+    if su["ablation"] == "fixed_horizon_human":
+        save_cfg["_fit"]["fixed_lead_source"] = f"{fa.HUMAN_HORIZON_FILE.name}:mean({','.join(a.letters)})"
+    if su["ablation"] == "fixed_speed":
+        save_cfg["_fit"]["target_speed_init"] = {k.split(":", 1)[1]: init[k] for k in init
+                                                 if k.startswith("target_speed:")}
     with open(cfg_path, "w") as f:
         json.dump(save_cfg, f, indent=2)
     print(f"saved {cfg_path}", flush=True)

@@ -426,10 +426,17 @@ def build_steering_task_config(cond):
     # fitted with — the goal-radius override changes ONLY the stop rule.
     density = 0.5 * protocol_radius
     if cond.get("tunnelType") == "corner":
-        return _build_corner_config(width, cond["numCorners"], cond["cornerOffset"],
-                                    target_radius=target_radius, waypoint_density=density)
-    return _build_sigmoidal_config(width, cond.get("curvature", 0.0),
-                                   target_radius=target_radius, waypoint_density=density)
+        tc, cl = _build_corner_config(width, cond["numCorners"], cond["cornerOffset"],
+                                      target_radius=target_radius, waypoint_density=density)
+    else:
+        tc, cl = _build_sigmoidal_config(width, cond.get("curvature", 0.0),
+                                         target_radius=target_radius, waypoint_density=density)
+    # Task label for the simulator (same naming as the baseline's per-type
+    # reference velocity, utils.baseline_loader.task_type_of). Read only by
+    # catchup_mode "target_speed" (R1 fixed-speed ablation); inert otherwise.
+    tc = dict(tc)
+    tc["task_type"] = cond.get("tunnelType") or "sinusoidal"
+    return tc, cl
 
 
 def make_width_profile(centerline, w1, w2):

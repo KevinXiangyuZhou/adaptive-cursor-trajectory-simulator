@@ -1,0 +1,1902 @@
+From dc1889c8a9d52393a8211fb55180e5abbf310e29 Mon Sep 17 00:00:00 2001
+From: xiangyz <xiangyz@umich.edu>
+Date: Tue, 24 Nov 2026 08:26:59 +0000
+Subject: [PATCH 1/2] R1 ablations: fixed_horizon (V1) and fixed_speed (V2) on
+ the Study 1 protocol
+
+Reviewer 1 asked to separate the adaptive gaze lookahead from the pace law.
+Two new mpcc variants complete the 2x2 with the full model and the baseline:
+
+- fixed_horizon: constant corridor lead fixed (not fitted) at the
+  participant's mean human gaze lead at fixation onset
+  (eval/eval-anchor-drive/human_gaze_horizon_10p.json), no v*T_min floor,
+  free space looks at the target; pace law, replanning, T0 scan unchanged.
+- fixed_speed: budget lookahead kept; corridor deadline = lead / v_type with
+  one constant target speed per steering task type (the baseline's
+  per-type reference-velocity parameterisation, no curvature term), fitted
+  jointly, initialised at the training mean speed per type.
+
+Simulator switches are gated (fixed_lead_speed_floor, fixed_lead_free_space,
+catchup_mode target_speed, target_speed_by_type); defaults reproduce the
+paper personas bit-identically. Steering task configs carry task_type.
+Also carries the model_gaze_lead GAM-path fix from 8385105 so the
+ablations' gaze-lead events step runs. Based on 22c349c so the fit protocol
+matches the paper's Study 1 runs. See docs/r1_ablation.md.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015YyE3e7jUttkVKxxM823mV
+---
+ docs/r1_ablation.md                           | 144 ++++++++++++++++
+ eval/eval-anchor-drive/fit_anchor.py          | 107 +++++++++++-
+ eval/eval-anchor-drive/fit_anchor_pooled8.py  |  11 +-
+ eval/eval-anchor-drive/human_gaze_horizon.py  |  83 +++++++++
+ .../human_gaze_horizon_10p.json               |  79 +++++++++
+ eval/eval-gaze-lead/model_gaze_lead.py        |   9 +-
+ eval/eval-main/run_eval.py                    |  15 +-
+ eval/model_fitting/fit_speed_model.py         |   3 +
+ .../src/hcs_package/cursor_simulator.py       |  65 ++++++-
+ hcs_package/src/hcs_package/gaze_module.py    |  41 ++++-
+ hcs_package/tests/test_ablation_switches.py   |  82 +++++++++
+ paper/r1_ablation_table.py                    | 162 ++++++++++++++++++
+ submit_run.sh                                 |   4 +-
+ 13 files changed, 790 insertions(+), 15 deletions(-)
+ create mode 100644 docs/r1_ablation.md
+ create mode 100644 eval/eval-anchor-drive/human_gaze_horizon.py
+ create mode 100644 eval/eval-anchor-drive/human_gaze_horizon_10p.json
+ create mode 100644 paper/r1_ablation_table.py
+
+diff --git a/docs/r1_ablation.md b/docs/r1_ablation.md
+new file mode 100644
+index 00000000..23a682a9
+--- /dev/null
++++ b/docs/r1_ablation.md
+@@ -0,0 +1,144 @@
++# R1 ablation: adaptive gaze lookahead vs. pace law
++
++Reviewer 1: the baseline differs from our model in both the lookahead and
++the speed mechanism, so the comparison does not separate them. The two new
++variants complete a 2 x 2 design:
++
++| lookahead \ catch-up time | pace law (GAM traversal time) | fixed target speed |
++|---|---|---|
++| adaptive gaze budget | full model (`--variant full`) | **V2** `--variant fixed_speed` |
++| fixed horizon | **V1** `--variant fixed_horizon` | CHI-26-EA baseline (`--model baseline`) |
++
++Both are ordinary `submit_run.sh` variants: same fit protocol (CMA-ES joint
++loss, noise-on stability, post-fit T0 scan), same eval (`run_eval.py`
++steering + Fitts, aggregate) and the same gaze-lead "events" step as the
++other ablations.
++
++## What each variant changes
++
++**V1 `fixed_horizon`** (fixed horizon + pace law)
++- `horizon_mode: fixed_lead`. Every planning event puts the anchor at a
++  constant arc lead `fixed_lead_m` ahead of the cursor.
++- `fixed_lead_m` is not fitted. It is set to the participant's mean human
++  gaze lead at fixation onset (`eval/eval-anchor-drive/human_gaze_horizon_10p.json`,
++  made by `human_gaze_horizon.py`: canonical merged fixation events, the
++  25 constant-width steering conditions). A pooled fit uses the mean of
++  the fitted participants' means (41.7 mm for the 8).
++  - Per participant (mm): p01 34.3, p02 39.7, p03 30.2, p04 49.4,
++    p06 46.5, p07 38.3, p08 38.2, p10 56.9.
++  - The model's horizon is the anchor lead at a planning event, so the
++    matching human quantity is the lead at fixation onset. The
++    time-averaged continuous lead is about 0 for every participant, because
++    the cursor catches up to and passes each anchor, so it would not work.
++- `fixed_lead_speed_floor: false`: no `v*T_min` floor, so the lead is the
++  same constant at every speed. The old `no_lookahead` ablation kept the
++  floor.
++- `fixed_lead_free_space: target`: in unconstrained space the anchor is the
++  target, which is also where the budget puts it. Only the corridor
++  lookahead is fixed. With a fixed lead in free space, pointing breaks into
++  short hops. The old `no_lookahead` did this, and its Fitts slope rose to
++  0.28 against 0.21 for the model and 0.23 for humans.
++- Search: jerk, contour, constraint, goal. D0 is dropped and nothing is
++  added. The pace law, replanning and the T0 scan are the same as in the
++  full model.
++
++**V2 `fixed_speed`** (adaptive gaze lookahead + fixed target speed)
++- `catchup_mode: target_speed`. In a corridor the plan deadline is
++  `lead / v_type`, which replaces the pace-law traversal time. The same
++  `lead/v_max` and acceleration floors apply. Free space keeps the T0 rule
++  and its post-fit scan.
++- One constant speed per steering task type (straight, corner, sinusoidal,
++  gentle and sharp sinusoidal). This is the baseline's reference-velocity
++  parameterisation (`desired_speed:<type>`, same bounds 0.03–1.26 m/s),
++  fitted jointly by CMA-ES on the same training data, but without the
++  baseline's curvature slowdown.
++- The starting value is the training rounds' mean speed per type
++  (centerline length / completion time).
++- Search: jerk, contour, constraint, goal, D0 and the 5 `target_speed:<type>`.
++- The task type reaches the simulator through a `task_type` key that
++  `run_eval.build_steering_task_config` now writes into every steering task
++  config. Every other mode ignores it.
++
++Defaults are unchanged. Personas without the new keys produce bit-identical
++trajectories. This was checked on the paper's fitted p01 personas (full,
++no_lookahead, no_pace; 4 tunnels + 1 pointing round, noise on), and
++`hcs_package/tests/test_ablation_switches.py` has a test for it.
++
++## Protocol parity: which code to run
++
++The Study 1 numbers (Figure 3, Tables 1–2) come from runs fitted at
++`22c349c`:
++- `mpcc-full-perpid-s42-20260909-1257-22c349c`
++- `baseline-full-perpid-s42-20260908-1800-c96338d`
++
++The fit protocol changed after that commit (`45e1b97`, `6881cda`,
++`74ea011`):
++- train widths are now {10, 16.5, 50} mm instead of {10, 50};
++- pointing trains on 3 conditions instead of R = 5 mm only;
++- there are 3 stability trials instead of 2;
++- the CMA budget is 7.5 h instead of 6.5 h.
++
++So:
++
++- **Study 1 (per participant, 8p):** run from branch `r1-ablation-s1`.
++  This is `22c349c` plus one commit
++  (`docs/r1_ablation_s1_22c349c.patch`) that carries the two variants and
++  the `model_gaze_lead.py` GAM-path fix from `8385105`. Without that fix,
++  every 22c349c ablation's gaze-lead step failed with
++  `FAILED_model_gaze_lead_*`. The fix touches no fit or eval code. On this
++  branch the paper personas still reproduce bit-identically.
++- **Study 2 (pooled train-all, 14p):** run from `precision` with these
++  changes. The pooled fitting code there is the same as `c70a5dd`, the
++  commit behind the paper's pooled runs.
++
++## Cluster commands (Great Lakes login node)
++
++```bash
++cd /home/xiangyz/ondemand/data/sys/myjobs/projects/chi-27/adaptive-cursor-trajectory-simulator
++
++# --- Study 1: per-participant fits, 22c349c protocol -------------------------
++git show precision:docs/r1_ablation_s1_22c349c.patch > /tmp/r1_s1.patch   # after pushing precision
++git checkout -b r1-ablation-s1 22c349c && git am /tmp/r1_s1.patch
++./submit_run.sh --model mpcc --variant fixed_horizon --kind perpid --dry-run
++./submit_run.sh --model mpcc --variant fixed_horizon --kind perpid
++./submit_run.sh --model mpcc --variant fixed_speed   --kind perpid
++# 8 x (8 h fit) -> 8 x eval (+ gaze-lead events) -> aggregate, per variant
++
++# --- Study 2: pooled train-all fits on 8p, evaluated on the 14 new participants
++git checkout precision
++./submit_run.sh --model mpcc --variant fixed_horizon --kind pooled8   # train-all, 12 h budget
++./submit_run.sh --model mpcc --variant fixed_speed   --kind pooled8
++eval-14p/submit_eval_14p.sh --source-run <mpcc-fixed_horizon-pooled8all-...>   # waits on the fit job
++eval-14p/submit_eval_14p.sh --source-run <mpcc-fixed_speed-pooled8all-...>
++```
++
++## Analysis (after mirroring the runs into results-cluster-10p/)
++
++```bash
++# Study 1: laws, trajectory metrics, time ratio by width; paper aggregation
++python paper/r1_ablation_table.py --train-widths 10,50 \
++  --run Ours=results-cluster-10p/runs/mpcc-full-perpid-s42-20260909-1257-22c349c \
++  --run Baseline=results-cluster-10p/runs/baseline-full-perpid-s42-20260908-1800-c96338d \
++  --run V1_fixed_horizon=results-cluster-10p/runs/<mpcc-fixed_horizon-perpid-...> \
++  --run V2_fixed_speed=results-cluster-10p/runs/<mpcc-fixed_speed-perpid-...>
++
++# Study 1: saccade-fixate-catch-up cycle statistics (Sec. eval_cycle), the
++# human side reused from the paper's quant_refit
++for v in fixed_horizon fixed_speed; do
++  mkdir -p paper/quant_r1_$v && cp paper/quant_refit/{cycles_human,curv_human}.csv paper/quant_r1_$v/
++  python paper/quantify_gaze_cycles.py --stage model --config-dir results-cluster-10p/runs/<mpcc-$v-perpid-...>/fit/stages/base --quant-dir paper/quant_r1_$v
++  python paper/quantify_gaze_cycles.py --stage stats --quant-dir paper/quant_r1_$v
++done
++
++# Study 2: Section 5.4 numbers with the ablation in the model slot
++python paper/stats_study2.py --s2-model results-cluster-10p/runs-14p/<eval14p-mpcc-fixed_speed-pooled8all-...> \
++  --out paper/quant_study2_fixed_speed
++```
++
++The cycle statistics are where V1 and the full model should differ:
++- saccade amplitude vs width exponent (human b = 0.55, model 0.68);
++- catch-up duration vs width;
++- overrun.
++
++A fixed horizon predicts no width scaling of the anchor lead, so the cycle
++statistics measure what the gaze mechanism explains beyond the pace law.
+diff --git a/eval/eval-anchor-drive/fit_anchor.py b/eval/eval-anchor-drive/fit_anchor.py
+index 1194b37c..ab426b27 100644
+--- a/eval/eval-anchor-drive/fit_anchor.py
++++ b/eval/eval-anchor-drive/fit_anchor.py
+@@ -9,6 +9,10 @@ baseline, under ONE protocol.
+                       and plan_deadline_s (free-space plan-time floor) is
+                       calibrated post-fit by a 1-D scan on the pointing loss.
+     --ablation NAME   (mpcc only) removes one gaze mechanism; see ABLATIONS.
++                      fixed_horizon / fixed_speed are the reviewer-1 pair that
++                      separates the adaptive gaze lookahead from the pace law
++                      (each swaps exactly one of the two for the baseline's
++                      kind of mechanism; see ABLATIONS).
+     --model baseline  the CHI-26-EA MPCC (eval/chi-26-ea_baseline_pacakage):
+                       fixed horizon Th, per-step replanning, tracked reference
+                       velocity v_des/(1+c|kappa|). CMA-ES fits eight
+@@ -89,6 +93,17 @@ ANCHOR_SPEC = [
+ # Ablation-only search entries.
+ FIXED_LEAD_SPEC = {"name": "fixed_lead_m", "bounds": (0.01, 0.15)}
+ T0_SPEC = {"name": "plan_deadline_s", "bounds": (0.08, 0.40)}
++# fixed_speed: one constant corridor target speed per steering task type —
++# the baseline's reference-velocity parameterisation (BASELINE_SPEC
++# desired_speed:<type>, same bounds 0.03 .. 1.26 m/s), without its curvature
++# slow-down. Pointing keeps the full model's free-space T0 rule, so there is
++# no pointing entry.
++TARGET_SPEED_TYPES = tuple(t for t in bl.TASK_TYPES if t != bl.POINTING_TYPE)
++TARGET_SPEED_SPEC = [{"name": f"target_speed:{t}", "log_scale": True, "bounds": (-1.5, 0.1)}
++                     for t in TARGET_SPEED_TYPES]
++TARGET_SPEED_PRIOR = 0.15   # m/s; replaced by the training data's mean speed per type
++# fixed_horizon: the per-participant human gaze lead (human_gaze_horizon.py).
++HUMAN_HORIZON_FILE = HERE / "human_gaze_horizon_10p.json"
+ 
+ # Ablations of the current model (paper §Evaluation). Each removes one of
+ # the three gaze mechanisms; parameters that the removed mechanism owned
+@@ -111,8 +126,79 @@ ABLATIONS = {
+     # C4: no intermittency — budget + pace law kept; replan every step.
+     "no_intermittent": {"override": {"replan_mode": "every_step"},
+                         "drop": [], "add": [], "skip_t0": False},
++    # Reviewer-1 pair (2x2 with the full model and the baseline: lookahead
++    # {adaptive gaze, fixed} x catch-up {pace law, fixed target speed}).
++    # V1 fixed horizon + pace law: the anchor sits a constant lead ahead of
++    # the cursor in corridors, the lead FIXED (not fitted) at the
++    # participant's mean human gaze lead at fixation onset (pooled fits: the
++    # mean over the fitted participants). No speed floor on the lead; free
++    # space looks at the target as the budget does. D0 leaves the search,
++    # nothing enters it; pace law, replanning and the post-fit T0 scan as in
++    # the full model.
++    "fixed_horizon": {"override": {"horizon_mode": "fixed_lead",
++                                   "fixed_lead_speed_floor": False,
++                                   "fixed_lead_free_space": "target"},
++                      "drop": ["D0"], "add": [], "skip_t0": False,
++                      "human_horizon": True},
++    # V2 adaptive gaze lookahead + fixed target speed: the budget anchor
++    # stays; the corridor plan deadline is lead / v_type with one constant
++    # target speed per task type, fitted jointly (as the baseline fits its
++    # reference velocity per type) and initialised at the training data's
++    # mean speed per type. Free space keeps the T0 rule + post-fit scan.
++    "fixed_speed": {"override": {"catchup_mode": "target_speed"},
++                    "drop": [], "add": TARGET_SPEED_SPEC, "skip_t0": False,
++                    "target_speed": True},
+ }
+ 
++
++def human_horizon(letters):
++    """Fixed lead (m) of the fixed_horizon ablation: the participant's mean
++    human gaze lead at fixation onset; for several letters (pooled fit) the
++    mean of their means."""
++    tab = json.load(open(HUMAN_HORIZON_FILE))["participants"]
++    missing = [L for L in letters if L not in tab]
++    if missing:
++        raise SystemExit(f"no human gaze lead for {missing} in {HUMAN_HORIZON_FILE} "
++                         f"(run human_gaze_horizon.py --letters ...)")
++    return float(np.mean([tab[L]["mean_lead_m"] for L in letters]))
++
++
++def human_type_speeds(datas):
++    """Mean human tunnel speed (centerline length / completion time) per
++    steering task type over the TRAINING rounds of one or more participants'
++    load_training() dicts — the starting point of the fixed_speed search."""
++    acc = {}
++    for d in datas:
++        for t, rounds in d["tun_train"].items():
++            cl = np.asarray(d["tasks"][t][1], float)
++            length = float(np.sum(np.linalg.norm(np.diff(cl, axis=0), axis=1)))
++            for h in rounds:
++                ct = (h["timestamps"][-1] - h["timestamps"][0]) / 1000.0
++                if ct > 0:
++                    acc.setdefault(d["types"][t], []).append(length / ct)
++    return {ty: float(np.mean(v)) for ty, v in acc.items()}
++
++
++def init_target_speeds(su, datas):
++    """fixed_speed: replace the prior target speeds (base persona and CMA
++    start) by the training data's per-type mean speed, clipped to the bounds."""
++    if not ABLATIONS.get(su["ablation"], {}).get("target_speed"):
++        return None
++    v = human_type_speeds(datas)
++    used = {}
++    for sp in su["spec"]:
++        if not sp["name"].startswith("target_speed:"):
++            continue
++        ty = sp["name"].split(":", 1)[1]
++        lo, hi = (10.0 ** b for b in sp["bounds"])
++        val = float(np.clip(v.get(ty, TARGET_SPEED_PRIOR), lo * 1.01, hi / 1.01))
++        su["init"][sp["name"]] = val
++        su["base"]["target_speed_by_type"][ty] = val
++        used[ty] = val
++    print(f"  fixed_speed init (training mean speed per type, m/s): "
++          f"{ {k: round(x, 3) for k, x in used.items()} }", flush=True)
++    return used
++
+ BASELINE_SPEC = [
+     {"name": "jerk", "log_scale": True, "bounds": (-8.0, -4.0)},         # 1e-8 .. 1e-4 (2026-09-08: was 1e-10; unregularised solves diverge under noise)
+     {"name": "progress", "log_scale": True, "bounds": (-8.0, -4.0)},     # 1e-8 .. 1e-4
+@@ -413,6 +499,8 @@ def heldout_losses(cfg, data, model, workers=4, w_pt=1.0):
+ def _init_val(base, name):
+     if name.startswith("desired_speed:"):
+         return base["desired_speed_by_type"][name.split(":", 1)[1]]
++    if name.startswith("target_speed:"):
++        return base["target_speed_by_type"][name.split(":", 1)[1]]
+     if name in base:
+         return base[name]
+     if name in (base.get("budget") or {}):
+@@ -461,11 +549,13 @@ def resolve_speed_model(sm, pid, pooled=False):
+ 
+ 
+ def build_setup(model, pid, ablation="none", *, deadline=None, vmax=None,
+-                init=None, override=None, fix_budget=False, pooled=False):
++                init=None, override=None, fix_budget=False, pooled=False,
++                letters=None):
+     """Base persona + CMA spec for (model, ablation). Returns a dict with
+     base, spec, init, skip_t0, model, ablation, tag_model. pooled=True
+     (fit_anchor_pooled8) keeps the pooled traversal GAM; a per-participant
+-    fit resolves the participant's own GAM artifact."""
++    fit resolves the participant's own GAM artifact. letters: the fitted
++    participants of a pooled fit (fixed_horizon takes their mean lead)."""
+     if model not in MODELS:
+         raise ValueError(f"model must be one of {MODELS}, got {model!r}")
+     if model == "baseline":
+@@ -482,6 +572,10 @@ def build_setup(model, pid, ablation="none", *, deadline=None, vmax=None,
+         base = pa.load_persona(pid, "anchor")
+         for k, v in ab["override"].items():
+             base[k] = v
++        if ab.get("human_horizon"):
++            base["fixed_lead_m"] = human_horizon(list(letters) if letters else [pid])
++        if ab.get("target_speed"):
++            base["target_speed_by_type"] = {t: TARGET_SPEED_PRIOR for t in TARGET_SPEED_TYPES}
+         spec = [sp for sp in ANCHOR_SPEC if sp["name"] not in ab["drop"]]
+         spec = [sp for sp in spec if not (fix_budget and sp["name"] == "D0")]
+         spec += [sp for sp in ab["add"] if sp["name"] not in {s["name"] for s in spec}]
+@@ -586,6 +680,10 @@ def main():
+     base, spec, init, model = su["base"], su["spec"], su["init"], su["model"]
+     tag = (a.tag.strip("_") or (su["ablation"] if su["ablation"] != "none" else "base"))
+     d = load_training(a.pid, a.quick)
++    init_target_speeds(su, [d])
++    if a.ablation == "fixed_horizon":
++        print(f"  fixed_horizon: fixed_lead_m = {base['fixed_lead_m'] * 1000:.1f} mm "
++              f"(human mean gaze lead, {HUMAN_HORIZON_FILE.name})", flush=True)
+     print(f"{a.pid} [{model} / {su['ablation']}] -> stages/{tag}: tunnel train {len(d['tun_train'])} tids, "
+           f"test {len(d['tun_test'])}; pointing train {len(d['pt_train'])} tids "
+           f"({sum(len(v) for v in d['pt_train'].values())} rounds); stability {len(d['stab'])}; "
+@@ -613,6 +711,11 @@ def main():
+     save_cfg = restore_stochasticity(copy.deepcopy(base), model, a.pid)
+     save_cfg["_fit"] = {"model": model, "ablation": su["ablation"], "pid": a.pid, "seed": a.seed,
+                         "tag": tag, "search": [s["name"] for s in spec]}
++    if su["ablation"] == "fixed_horizon":
++        save_cfg["_fit"]["fixed_lead_source"] = f"{HUMAN_HORIZON_FILE.name}:{a.pid}"
++    if su["ablation"] == "fixed_speed":
++        save_cfg["_fit"]["target_speed_init"] = {k.split(":", 1)[1]: init[k] for k in init
++                                                 if k.startswith("target_speed:")}
+     with open(cfg_path, "w") as f:
+         json.dump(save_cfg, f, indent=2)
+     print(f"\nfitted: {json.dumps({k: float(v) for k, v in fitted.items()})}\nbest joint loss {best:.4f}; saved {cfg_path}")
+diff --git a/eval/eval-anchor-drive/fit_anchor_pooled8.py b/eval/eval-anchor-drive/fit_anchor_pooled8.py
+index 79d21393..77fb79cf 100644
+--- a/eval/eval-anchor-drive/fit_anchor_pooled8.py
++++ b/eval/eval-anchor-drive/fit_anchor_pooled8.py
+@@ -184,7 +184,7 @@ def main():
+     # pooled=True: the pooled traversal GAM, never a.letters[0]'s own.
+     su = fa.build_setup(a.model, a.letters[0], a.ablation,
+                         override=(json.loads(a.override) if a.override else None),
+-                        pooled=True)
++                        pooled=True, letters=a.letters)
+     base, spec, init, model = su["base"], su["spec"], su["init"], su["model"]
+     base.pop("_description", None)
+     if a.gamma is not None:
+@@ -197,6 +197,10 @@ def main():
+     print(f"pooled fit [{model} / {su['ablation']}] over {a.letters} | budget {a.time_limit}s | "
+           f"popsize {a.popsize} on {a.workers} workers | search {[s['name'] for s in spec]}", flush=True)
+     _load_all(a.letters, a.quick)
++    fa.init_target_speeds(su, [_DATA[L] for L in a.letters])
++    if su["ablation"] == "fixed_horizon":
++        print(f"  fixed_horizon: fixed_lead_m = {base['fixed_lead_m'] * 1000:.1f} mm "
++              f"(mean of the participants' human mean gaze leads)", flush=True)
+ 
+     t_all = time.time()
+     fitted, best, hist = pooled_cmaes(spec, init, base, a.letters, a.w_point,
+@@ -230,6 +234,11 @@ def main():
+         f"(seed {a.seed}); one parameter set. See pooled8_{su['tag_model']}_fit_s{a.seed}.json")
+     save_cfg["_fit"] = {"model": model, "ablation": su["ablation"], "pooled": a.letters,
+                         "seed": a.seed, "tag": tag, "search": [s["name"] for s in spec]}
++    if su["ablation"] == "fixed_horizon":
++        save_cfg["_fit"]["fixed_lead_source"] = f"{fa.HUMAN_HORIZON_FILE.name}:mean({','.join(a.letters)})"
++    if su["ablation"] == "fixed_speed":
++        save_cfg["_fit"]["target_speed_init"] = {k.split(":", 1)[1]: init[k] for k in init
++                                                 if k.startswith("target_speed:")}
+     with open(cfg_path, "w") as f:
+         json.dump(save_cfg, f, indent=2)
+     print(f"saved {cfg_path}", flush=True)
+diff --git a/eval/eval-anchor-drive/human_gaze_horizon.py b/eval/eval-anchor-drive/human_gaze_horizon.py
+new file mode 100644
+index 00000000..78134d63
+--- /dev/null
++++ b/eval/eval-anchor-drive/human_gaze_horizon.py
+@@ -0,0 +1,83 @@
++"""Per-participant mean human gaze lead -> the fixed planning horizon of the
++R1 "fixed_horizon" ablation (fit_anchor.ABLATIONS).
++
++The model's planning horizon is the anchor's arc-length lead over the cursor
++at a planning event, so its human counterpart is the gaze lead at FIXATION
++ONSET (not the time-averaged continuous lead, which sits near zero because
++the cursor catches up to and passes each anchor). Events are the canonical
++table the gaze constants were calibrated on (fit_gaze_pooled.build_pool:
++merged keep=True fixations, round-quality pruned, lead > 3 mm, end-capped
++excluded), restricted to the constant-width steering battery the evaluation
++uses (bucket "steering": sinusoidal, corner, straight, gentle and sharp
++sinusoidal x 10 / 12.5 / 16.5 / 25 / 50 mm).
++
++Writes human_gaze_horizon_10p.json next to this file (committed, so cluster
++snapshots need no raw gaze data):
++    {"participants": {"p01": {"mean_lead_m", "median_lead_m", "n_events"}, ...},
++     "pooled": {"mean_of_participant_means_m", "event_mean_m", "n_events"}, ...}
++
++Usage: python eval/eval-anchor-drive/human_gaze_horizon.py [--letters p01 ...]
++"""
++import argparse
++import datetime
++import json
++import sys
++from pathlib import Path
++
++import numpy as np
++
++HERE = Path(__file__).resolve().parent
++ROOT = HERE.parents[1]
++sys.path.insert(0, str(ROOT / "eval" / "eval-gaze-cursor"))
++sys.path.insert(0, str(ROOT / "eval" / "eval-main"))
++sys.path.insert(0, str(ROOT / "hcs_package" / "src"))
++sys.path.insert(0, str(ROOT))
++
++LETTERS = ["p01", "p02", "p03", "p04", "p06", "p07", "p08", "p10"]
++OUT = HERE / "human_gaze_horizon_10p.json"
++
++
++def steering_tids():
++    import run_eval as em
++    t2c, t2b = em.scan_conditions(ROOT / "human_data" / "task_aligned_all")
++    return sorted(int(t) for t, b in t2b.items() if b == "steering")
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--letters", nargs="+", default=LETTERS)
++    ap.add_argument("--out", default=str(OUT))
++    a = ap.parse_args()
++    import fit_gaze_pooled as fgp
++    tids = steering_tids()
++    ev, _ = fgp.build_pool(a.letters)
++    ev = ev[ev["tid"].astype(int).isin(tids)]
++    per = {}
++    for L in a.letters:
++        g = ev.loc[ev["L"] == L, "lead"].to_numpy(float)
++        per[L] = {"mean_lead_m": round(float(np.mean(g)), 6),
++                  "median_lead_m": round(float(np.median(g)), 6),
++                  "n_events": int(len(g))}
++    means = [per[L]["mean_lead_m"] for L in a.letters]
++    out = {
++        "description": "mean gaze lead at fixation onset (arc length, m) over the "
++                       "constant-width steering battery; fixed planning horizon of "
++                       "the fixed_horizon ablation",
++        "events": "fit_gaze_pooled.build_pool (merged keep=True, round-quality pruned, "
++                  "lead > 3 mm, end-capped excluded), steering-bucket trial ids only",
++        "steering_tids": tids,
++        "participants": per,
++        "pooled": {"mean_of_participant_means_m": round(float(np.mean(means)), 6),
++                   "event_mean_m": round(float(ev["lead"].mean()), 6),
++                   "n_events": int(len(ev))},
++        "generated": datetime.date.today().isoformat(),
++    }
++    json.dump(out, open(a.out, "w"), indent=2)
++    for L in a.letters:
++        print(f"  {L}: mean {per[L]['mean_lead_m'] * 1000:.1f} mm  median "
++              f"{per[L]['median_lead_m'] * 1000:.1f} mm  (n={per[L]['n_events']})")
++    print(f"  pooled mean of means {out['pooled']['mean_of_participant_means_m'] * 1000:.1f} mm -> {a.out}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/eval/eval-anchor-drive/human_gaze_horizon_10p.json b/eval/eval-anchor-drive/human_gaze_horizon_10p.json
+new file mode 100644
+index 00000000..0b0c4606
+--- /dev/null
++++ b/eval/eval-anchor-drive/human_gaze_horizon_10p.json
+@@ -0,0 +1,79 @@
++{
++  "description": "mean gaze lead at fixation onset (arc length, m) over the constant-width steering battery; fixed planning horizon of the fixed_horizon ablation",
++  "events": "fit_gaze_pooled.build_pool (merged keep=True, round-quality pruned, lead > 3 mm, end-capped excluded), steering-bucket trial ids only",
++  "steering_tids": [
++    1,
++    2,
++    3,
++    4,
++    5,
++    6,
++    7,
++    8,
++    9,
++    10,
++    11,
++    12,
++    13,
++    14,
++    15,
++    26,
++    27,
++    28,
++    29,
++    30,
++    31,
++    32,
++    33,
++    34,
++    35
++  ],
++  "participants": {
++    "p01": {
++      "mean_lead_m": 0.034338,
++      "median_lead_m": 0.023891,
++      "n_events": 390
++    },
++    "p02": {
++      "mean_lead_m": 0.039701,
++      "median_lead_m": 0.031628,
++      "n_events": 273
++    },
++    "p03": {
++      "mean_lead_m": 0.030207,
++      "median_lead_m": 0.019671,
++      "n_events": 305
++    },
++    "p04": {
++      "mean_lead_m": 0.049426,
++      "median_lead_m": 0.042236,
++      "n_events": 391
++    },
++    "p06": {
++      "mean_lead_m": 0.046493,
++      "median_lead_m": 0.036445,
++      "n_events": 469
++    },
++    "p07": {
++      "mean_lead_m": 0.0383,
++      "median_lead_m": 0.028666,
++      "n_events": 225
++    },
++    "p08": {
++      "mean_lead_m": 0.038178,
++      "median_lead_m": 0.032616,
++      "n_events": 357
++    },
++    "p10": {
++      "mean_lead_m": 0.056884,
++      "median_lead_m": 0.053753,
++      "n_events": 370
++    }
++  },
++  "pooled": {
++    "mean_of_participant_means_m": 0.041691,
++    "event_mean_m": 0.042399,
++    "n_events": 2780
++  },
++  "generated": "2026-11-24"
++}
+\ No newline at end of file
+diff --git a/eval/eval-gaze-lead/model_gaze_lead.py b/eval/eval-gaze-lead/model_gaze_lead.py
+index 48750471..e415c40e 100644
+--- a/eval/eval-gaze-lead/model_gaze_lead.py
++++ b/eval/eval-gaze-lead/model_gaze_lead.py
+@@ -239,7 +239,14 @@ def make_sim(letter, noise_on=True):
+             cfg["replan_latency_cv"] = 0.89
+     sm = cfg.get("speed_model", {})
+     if sm.get("path") and not Path(sm["path"]).is_absolute():
+-        sm["path"] = str((cfg_path.parent if CONFIG_OVERRIDE else FIT_DIR) / sm["path"])
++        # A relative artifact name resolves against the persona's own folder
++        # when the file is there (legacy per-fit GAMs); otherwise leave it
++        # relative so the simulator falls back to the package models/ dir,
++        # where the per-participant traversal GAMs live (2026-09-09: making
++        # it absolute unconditionally broke every refit persona).
++        cand = (cfg_path.parent if CONFIG_OVERRIDE else FIT_DIR) / sm["path"]
++        if cand.exists():
++            sm["path"] = str(cand)
+     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
+         json.dump(cfg, tf)
+         cfg_file = tf.name
+diff --git a/eval/eval-main/run_eval.py b/eval/eval-main/run_eval.py
+index 2ddf3458..9442db59 100644
+--- a/eval/eval-main/run_eval.py
++++ b/eval/eval-main/run_eval.py
+@@ -399,12 +399,19 @@ def build_steering_task_config(cond):
+     (numCorners, cornerOffset, radiusRatio) — not the snake_case builder
+     *parameter* names.
+     """
+-    if cond.get("tunnelType") == "corner":
+-        return _build_corner_config(cond["tunnelWidth"], cond["numCorners"], cond["cornerOffset"])
+     width = cond["tunnelWidth"]
+     radius_ratio = cond.get("radiusRatio")
+-    target_radius = width * radius_ratio if radius_ratio is not None else None
+-    return _build_sigmoidal_config(width, cond.get("curvature", 0.0), target_radius=target_radius)
++    if cond.get("tunnelType") == "corner":
++        tc, cl = _build_corner_config(width, cond["numCorners"], cond["cornerOffset"])
++    else:
++        target_radius = width * radius_ratio if radius_ratio is not None else None
++        tc, cl = _build_sigmoidal_config(width, cond.get("curvature", 0.0), target_radius=target_radius)
++    # Task label for the simulator (same naming as the baseline's per-type
++    # reference velocity, utils.baseline_loader.task_type_of). Read only by
++    # catchup_mode "target_speed" (R1 fixed-speed ablation); inert otherwise.
++    tc = dict(tc)
++    tc["task_type"] = cond.get("tunnelType") or "sinusoidal"
++    return tc, cl
+ 
+ 
+ def make_width_profile(centerline, w1, w2):
+diff --git a/eval/model_fitting/fit_speed_model.py b/eval/model_fitting/fit_speed_model.py
+index cdfbcf80..10ba6991 100644
+--- a/eval/model_fitting/fit_speed_model.py
++++ b/eval/model_fitting/fit_speed_model.py
+@@ -195,6 +195,9 @@ def apply_params(cfg, params):
+         elif k.startswith("desired_speed:"):
+             # baseline: reference velocity fitted per task type
+             cfg.setdefault("desired_speed_by_type", {})[k.split(":", 1)[1]] = v
++        elif k.startswith("target_speed:"):
++            # mpcc fixed_speed ablation: corridor target speed per task type
++            cfg.setdefault("target_speed_by_type", {})[k.split(":", 1)[1]] = v
+         elif k in REF_PATH_KEYS:
+             cfg.setdefault("reference_path", {})[k] = v
+         else:
+diff --git a/hcs_package/src/hcs_package/cursor_simulator.py b/hcs_package/src/hcs_package/cursor_simulator.py
+index 50e90fb3..d50ac58a 100644
+--- a/hcs_package/src/hcs_package/cursor_simulator.py
++++ b/hcs_package/src/hcs_package/cursor_simulator.py
+@@ -166,6 +166,19 @@ class CursorSimulator:
+             # traversal integral is not used — the "no pace law" ablation.
+             # "pace_law" = finalized design.
+             "catchup_mode": "pace_law",
++            # R1 ablations (reviewer 1: separate gaze lookahead from pace law):
++            # fixed_lead_speed_floor false — the fixed lead carries no v*T_min
++            # floor; fixed_lead_free_space "target" — the fixed lead applies
++            # in corridors only, free space looks at the target (as the
++            # budget does). catchup_mode "target_speed" — corridor deadline
++            # = lead / target speed, the speed taken from
++            # target_speed_by_type[task type] (task type from the task file's
++            # "task_type", e.g. "straight", "corner", "sinusoidal"), falling
++            # back to the "sinusoidal" entry, then target_speed_mps.
++            "fixed_lead_speed_floor": True,
++            "fixed_lead_free_space": "fixed",
++            "target_speed_by_type": None,
++            "target_speed_mps": None,
+             # replan_mode "every_step": re-solve each step (ablation baseline).
+             # replan_mode "intermittent": execute the plan open-loop and
+             # re-solve on arrival at the planned anchor + a post-arrival
+@@ -248,8 +261,23 @@ class CursorSimulator:
+         if self.horizon_mode == 'fixed_lead' and self.fixed_lead_m <= 0.0:
+             raise ValueError("horizon_mode='fixed_lead' needs fixed_lead_m > 0")
+         self.catchup_mode = str(config.get('catchup_mode', 'pace_law'))
+-        if self.catchup_mode not in ('pace_law', 'constant'):
+-            raise ValueError(f"catchup_mode must be 'pace_law' or 'constant', got {self.catchup_mode!r}")
++        if self.catchup_mode not in ('pace_law', 'constant', 'target_speed'):
++            raise ValueError(f"catchup_mode must be 'pace_law', 'constant' or 'target_speed', got {self.catchup_mode!r}")
++        self.fixed_lead_speed_floor = bool(config.get('fixed_lead_speed_floor', True))
++        self.fixed_lead_free_space = str(config.get('fixed_lead_free_space', 'fixed'))
++        if self.fixed_lead_free_space not in ('fixed', 'target'):
++            raise ValueError(f"fixed_lead_free_space must be 'fixed' or 'target', got {self.fixed_lead_free_space!r}")
++        tsb = config.get('target_speed_by_type')
++        self.target_speed_by_type = ({str(k): float(v) for k, v in tsb.items()} if tsb else None)
++        tsm = config.get('target_speed_mps')
++        self.target_speed_mps = float(tsm) if tsm is not None else None
++        if self.catchup_mode == 'target_speed':
++            speeds = list((self.target_speed_by_type or {}).values())
++            if self.target_speed_mps is not None:
++                speeds.append(self.target_speed_mps)
++            if not speeds or min(speeds) <= 0.0:
++                raise ValueError("catchup_mode='target_speed' needs target_speed_by_type "
++                                 "and/or target_speed_mps with positive speeds")
+         budget_cfg = config.get('budget') or {}
+         # Fallbacks match the default config above (single source of truth
+         # for "unset": the pooled cross-validated refit).
+@@ -373,6 +401,21 @@ class CursorSimulator:
+             'global_clearance_ref': rp_cfg.get('global_clearance_ref', pw.get('global_clearance_ref', 0.025)),
+         }
+ 
++    def _resolve_target_speed(self, task_type):
++        """(speed, source) for catchup_mode 'target_speed'; (None, None) otherwise.
++        Per-type value, else the 'sinusoidal' entry, else target_speed_mps."""
++        if self.catchup_mode != 'target_speed':
++            return None, None
++        by_type = self.target_speed_by_type or {}
++        if task_type is not None and task_type in by_type:
++            return by_type[task_type], f"type:{task_type}"
++        if 'sinusoidal' in by_type:
++            return by_type['sinusoidal'], "fallback:sinusoidal"
++        if self.target_speed_mps is not None:
++            return self.target_speed_mps, "scalar"
++        raise ValueError(f"no target speed for task type {task_type!r} "
++                         f"(target_speed_by_type has {sorted(by_type)})")
++
+     def generate_trajectory_with_waypoints(
+         self,
+         task_file: Optional[Union[str, Path]] = None,
+@@ -384,7 +427,8 @@ class CursorSimulator:
+         target_radius: float = 0.01,
+         use_optimal_path: bool = True,
+         return_timestamps: bool = False,
+-        return_reference_path: bool = False
++        return_reference_path: bool = False,
++        task_type: Optional[str] = None,
+     ) -> Union[List[Tuple[float, float, float]], Tuple[List[Tuple[float, float, float]], Any]]:
+         """
+         Generate a trajectory following waypoints with optional constraints.
+@@ -408,6 +452,9 @@ class CursorSimulator:
+             use_optimal_path: If True, generate optimal reference path from waypoints (default: True)
+             return_timestamps: If True, return timestamps instead of delays (default: False)
+             return_reference_path: If True, also return the reference path object (default: False)
++            task_type: Optional task label (e.g. "straight", "corner"); read from the
++                      task file's "task_type" when present. Used only by
++                      catchup_mode "target_speed" to pick the per-type target speed.
+ 
+         Returns:
+             If return_reference_path is False: List of tuples (x, y, delay) or (x, y, timestamp)
+@@ -424,6 +471,9 @@ class CursorSimulator:
+             if "waypoints" not in task_data:
+                 raise ValueError("task.json must contain 'waypoints' key")
+ 
++            if task_data.get("task_type"):
++                task_type = str(task_data["task_type"])
++
+             waypoints = [tuple(wp) for wp in task_data["waypoints"]]
+ 
+             if "constraints" in task_data:
+@@ -597,6 +647,7 @@ class CursorSimulator:
+             min_open_loop_steps=max(0, int(round(self.min_open_loop_s / self.interval))),
+             rng=self._replan_rng,
+         )
++        target_speed, target_speed_source = self._resolve_target_speed(task_type)
+         # The paper's two modules: the gaze module decides WHERE the anchor
+         # sits and WHEN to replan; the motor module solves the plan's SHAPE.
+         gaze = GazeModule(
+@@ -614,6 +665,9 @@ class CursorSimulator:
+             horizon_max_steps=self.horizon_max_steps,
+             horizon_mode=self.horizon_mode, fixed_lead_m=self.fixed_lead_m,
+             catchup_mode=self.catchup_mode,
++            fixed_lead_speed_floor=self.fixed_lead_speed_floor,
++            fixed_lead_free_space=self.fixed_lead_free_space,
++            target_speed=target_speed,
+         )
+         motor = MotorModule(
+             reference_path,
+@@ -721,6 +775,11 @@ class CursorSimulator:
+             'horizon_mode': self.horizon_mode,
+             'fixed_lead_m': self.fixed_lead_m,
+             'catchup_mode': self.catchup_mode,
++            'fixed_lead_speed_floor': self.fixed_lead_speed_floor,
++            'fixed_lead_free_space': self.fixed_lead_free_space,
++            'task_type': task_type,
++            'target_speed': target_speed,
++            'target_speed_source': target_speed_source,
+             'replan_mode': self.replan_mode,
+             'anchor_drive': True,
+             'plan_deadline_s': self.plan_deadline_s,
+diff --git a/hcs_package/src/hcs_package/gaze_module.py b/hcs_package/src/hcs_package/gaze_module.py
+index e8202d4b..1ebd71ea 100644
+--- a/hcs_package/src/hcs_package/gaze_module.py
++++ b/hcs_package/src/hcs_package/gaze_module.py
+@@ -77,6 +77,9 @@ class GazeModule:
+         horizon_mode: str = 'budget',
+         fixed_lead_m: float = 0.03,
+         catchup_mode: str = 'pace_law',
++        fixed_lead_speed_floor: bool = True,
++        fixed_lead_free_space: str = 'fixed',
++        target_speed: Optional[float] = None,
+     ):
+         # Ablation switches (paper evaluation). Defaults reproduce the
+         # finalized design exactly: 'budget' anchor placement and the
+@@ -84,6 +87,24 @@ class GazeModule:
+         self.horizon_mode = str(horizon_mode)
+         self.fixed_lead_m = float(fixed_lead_m)
+         self.catchup_mode = str(catchup_mode)
++        # fixed_lead refinements (R1 "fixed horizon" ablation). Defaults keep
++        # the original no_lookahead behaviour: reaction-time floor on, the
++        # constant lead applied in free space too.
++        #   fixed_lead_speed_floor False: no v*T_min floor — the lead is the
++        #     same constant at every speed (a truly fixed horizon).
++        #   fixed_lead_free_space 'target': where the task is unconstrained
++        #     the anchor is the path end (the target), as the budget places
++        #     it (its density is zero there) — only the corridor lookahead
++        #     is fixed, so pointing is not split into short hops.
++        self.fixed_lead_speed_floor = bool(fixed_lead_speed_floor)
++        self.fixed_lead_free_space = str(fixed_lead_free_space)
++        # catchup_mode 'target_speed' (R1 "fixed target speed" ablation): in
++        # a corridor the plan deadline is lead / target_speed — a constant
++        # cruise speed (one per task type, resolved by the simulator) instead
++        # of the pace-law traversal time. Free space keeps the T0 rule.
++        self.target_speed = (float(target_speed) if target_speed is not None else None)
++        if self.catchup_mode == 'target_speed' and not (self.target_speed and self.target_speed > 0.0):
++            raise ValueError("catchup_mode='target_speed' needs a target speed > 0")
+         self.reference_path = reference_path
+         self.budget_horizon = budget_horizon
+         self.scheduler = scheduler
+@@ -217,11 +238,20 @@ class GazeModule:
+         solve_anchor_s = None
+         s_from = min(theta0, total)
+         v_now0 = float(np.hypot(cursor_vel[0], cursor_vel[1]))
+-        if self.horizon_mode == 'fixed_lead':
++        in_free_space = False
++        if self.clearance_profile is not None:
++            s_fs, c_fs = self.clearance_profile
++            in_free_space = float(np.interp(theta0, s_fs, c_fs)) >= FREE_SPACE_CLEARANCE_M
++        if self.horizon_mode == 'fixed_lead' and in_free_space and self.fixed_lead_free_space == 'target':
++            # R1 fixed horizon: unconstrained space looks at the target.
++            anchor_s = total
++        elif self.horizon_mode == 'fixed_lead':
+             # Ablation "no adaptive lookahead": a constant arc-length lead,
+             # with the same reaction-time floor (v * T_min) and path-end cap
+             # the budget applies, so only the width dependence is removed.
+-            s_floor = s_from + max(0.0, v_now0) * self.budget_horizon.T_min
++            # fixed_lead_speed_floor False drops the floor (R1 fixed horizon).
++            s_floor = (s_from + max(0.0, v_now0) * self.budget_horizon.T_min
++                       if self.fixed_lead_speed_floor else s_from)
+             anchor_s = min(max(s_from + self.fixed_lead_m, s_floor), total)
+         else:
+             anchor_s = self.budget_horizon.anchor(s_from, v_now=v_now0)
+@@ -254,6 +284,13 @@ class GazeModule:
+         if (self.catchup_mode == 'pace_law'
+                 and w_loc0 is not None and 0.0 < w_loc0 < FREE_SPACE_CLEARANCE_M):
+             t_gam = self._traversal_time(theta0, float(anchor_s))
++        # Ablation "fixed target speed" (catchup_mode 'target_speed'): the
++        # corridor deadline covers the lead at a constant speed; it takes
++        # the place of the pace-law traversal time and nothing else changes
++        # (same v_max and acceleration floors, same free-space T0 rule).
++        if (self.catchup_mode == 'target_speed'
++                and w_loc0 is not None and 0.0 < w_loc0 < FREE_SPACE_CLEARANCE_M):
++            t_gam = lead_now / self.target_speed
+         if t_gam is not None:
+             t_plan = max(t_gam, lead_now / max(self.plan_vmax, 1e-6))
+         else:
+diff --git a/hcs_package/tests/test_ablation_switches.py b/hcs_package/tests/test_ablation_switches.py
+index eef467e5..8b70c8cc 100644
+--- a/hcs_package/tests/test_ablation_switches.py
++++ b/hcs_package/tests/test_ablation_switches.py
+@@ -102,3 +102,85 @@ def test_constant_catchup_ignores_pace_law(sinusoidal_task):
+     assert d_const["catchup_mode"] == "constant"
+     assert d_const["traversal_speed_model"] == "gam_traversal"   # loaded, just unused
+     assert not (t_pace.shape == t_const.shape and np.array_equal(t_pace, t_const))
++
++
++# --- R1 ablations: fixed_horizon (V1) and fixed_speed (V2) ----------------
++
++def _task_with_type(task_file, task_type):
++    task = json.load(open(task_file))
++    task["task_type"] = task_type
++    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
++        json.dump(task, f)
++    return f.name
++
++
++def test_r1_keys_at_defaults_are_bit_identical(sinusoidal_task):
++    # the new keys spelled out at their defaults, plus a task_type label in
++    # the task file, change nothing for the full model
++    base = {"add_noise": False, "replan_latency_cv": 0.0}
++    t_absent, d_absent = _run(_make_sim(base), sinusoidal_task)
++    typed = _task_with_type(sinusoidal_task, "sinusoidal")
++    t_explicit, d_explicit = _run(_make_sim({**base, "fixed_lead_speed_floor": True,
++                                             "fixed_lead_free_space": "fixed",
++                                             "target_speed_by_type": None,
++                                             "target_speed_mps": None}), typed)
++    assert np.array_equal(t_absent, t_explicit)
++    assert d_absent["n_solves"] == d_explicit["n_solves"]
++    assert d_explicit["target_speed"] is None
++
++
++def test_fixed_horizon_without_speed_floor_is_constant(sinusoidal_task):
++    # T_min large enough that the v*T_min floor would bind: with the floor
++    # off every corridor lead equals the fixed lead exactly.
++    lead = 0.02
++    cfg = {"add_noise": False, "replan_latency_cv": 0.0,
++           "horizon_mode": "fixed_lead", "fixed_lead_m": lead,
++           "fixed_lead_speed_floor": False, "fixed_lead_free_space": "target",
++           "budget": {"D0": 1.0, "T_min": 0.5, "gamma": 0.66, "W_ref": 0.026}}
++    _, d = _run(_make_sim(cfg), sinusoidal_task)
++    leads = np.array([e["anchor"] - e["theta"] for e in d["replan_events"][:-1]])
++    assert len(leads) >= 3
++    assert np.allclose(leads, lead, atol=1e-9)
++    # with the floor on (the no_lookahead behaviour) some leads exceed it
++    _, d_floor = _run(_make_sim({**cfg, "fixed_lead_speed_floor": True}), sinusoidal_task)
++    leads_floor = np.array([e["anchor"] - e["theta"] for e in d_floor["replan_events"][:-1]])
++    assert np.any(leads_floor > lead + 1e-6)
++
++
++def test_fixed_horizon_free_space_looks_at_target():
++    from hcs_package.cursor_simulator import CursorSimulator  # noqa: F401
++    cfg = {"add_noise": False, "replan_latency_cv": 0.0,
++           "horizon_mode": "fixed_lead", "fixed_lead_m": 0.02,
++           "fixed_lead_speed_floor": False}
++    wps = [(300, 540), (1300, 540)]          # ~0.24 m pointing, no constraints
++    sim_t = _make_sim({**cfg, "fixed_lead_free_space": "target"})
++    sim_t.generate_trajectory_with_waypoints(waypoints=wps, max_steps=200, target_radius=0.01)
++    d_t = sim_t.last_diagnostics
++    assert np.isclose(d_t["replan_events"][0]["anchor"], d_t["total_length"])
++    sim_f = _make_sim({**cfg, "fixed_lead_free_space": "fixed"})
++    sim_f.generate_trajectory_with_waypoints(waypoints=wps, max_steps=200, target_radius=0.01)
++    ev = sim_f.last_diagnostics["replan_events"][0]
++    assert np.isclose(ev["anchor"] - ev["theta"], 0.02)
++
++
++def test_target_speed_resolves_type_and_sets_pace(sinusoidal_task):
++    base = {"add_noise": False, "replan_latency_cv": 0.0, "catchup_mode": "target_speed"}
++    corner = _task_with_type(sinusoidal_task, "corner")
++    slow, d_slow = _run(_make_sim({**base, "target_speed_by_type": {"corner": 0.08, "sinusoidal": 0.3}}),
++                        corner, max_steps=600)
++    fast, d_fast = _run(_make_sim({**base, "target_speed_by_type": {"corner": 0.3, "sinusoidal": 0.08}}),
++                        corner, max_steps=600)
++    assert d_slow["target_speed"] == 0.08 and d_slow["target_speed_source"] == "type:corner"
++    assert d_fast["target_speed"] == 0.3
++    assert len(slow) > len(fast)            # slower target speed -> longer trial
++    # unknown type falls back to the sinusoidal entry
++    untyped = _task_with_type(sinusoidal_task, "lasso")
++    _, d_fb = _run(_make_sim({**base, "target_speed_by_type": {"sinusoidal": 0.2}}), untyped)
++    assert d_fb["target_speed_source"] == "fallback:sinusoidal"
++
++
++def test_target_speed_needs_a_speed():
++    with pytest.raises(ValueError, match="target_speed"):
++        _make_sim({"catchup_mode": "target_speed"})
++    with pytest.raises(ValueError):
++        _make_sim({"fixed_lead_free_space": "banana"})
+diff --git a/paper/r1_ablation_table.py b/paper/r1_ablation_table.py
+new file mode 100644
+index 00000000..a9510717
+--- /dev/null
++++ b/paper/r1_ablation_table.py
+@@ -0,0 +1,162 @@
++"""Reviewer-1 ablation table: full model vs baseline vs the two crossed
++ablations, with the paper's own aggregation.
++
++    lookahead \\ catch-up | pace law            | fixed target speed
++    ----------------------+---------------------+---------------------
++    adaptive gaze budget  | full model (Ours)   | V2 fixed_speed
++    fixed horizon         | V1 fixed_horizon    | baseline (CHI-26-EA)
++
++For every run: steering law MT = a + b ID (ID = L/W) and the
++curvature-aware ID_k law (lambda fit on the human condition means, as in
++plot_laws.py), Fitts law on the aligned movement time, the steering
++agreement metrics of table_steering_metrics.py (all tunnel types pooled,
++Train / Test widths), and the model/human completion-time ratio per width
++(where a mechanism that cannot scale speed with width shows up first).
++Aggregation is plot_laws.py's: one point per condition, flat pooled mean
++over participants and rounds; timed-out runs excluded.
++
++Usage:
++  python paper/r1_ablation_table.py \\
++      --run Ours=results-cluster-10p/runs/mpcc-full-perpid-s42-20260909-1257-22c349c \\
++      --run Baseline=results-cluster-10p/runs/baseline-full-perpid-s42-20260908-1800-c96338d \\
++      --run V1_fixed_horizon=results-cluster-10p/runs/<mpcc-fixed_horizon-perpid-...> \\
++      --run V2_fixed_speed=results-cluster-10p/runs/<mpcc-fixed_speed-perpid-...> \\
++      [--train-widths 10,50] [--out paper/quant_r1/r1_ablation_table.csv]
++
++--train-widths: the fitted steering widths in mm. The paper's Study-1 runs
++(fitted at 22c349c, before the 2026-09-10 split change) trained on 10,50;
++runs fitted at HEAD train on 10,16.5,50. Pass a run directory (with eval/)
++or an eval directory itself. The Human rows are taken from the first run.
++"""
++import argparse
++import csv
++from collections import defaultdict
++from pathlib import Path
++
++import numpy as np
++
++import plot_laws as pl   # same folder; aggregation + geometry helpers
++
++REPO = Path(__file__).resolve().parent.parent
++TYPE_BY_TID = {}
++for lo, name in ((1, "sinusoidal"), (6, "corner"), (11, "straight"),
++                 (26, "gentle_sinusoidal"), (31, "sharp_sinusoidal")):
++    for t in range(lo, lo + 5):
++        TYPE_BY_TID[t] = name
++
++
++def eval_dir(p):
++    p = Path(p)
++    if not p.is_absolute():
++        p = REPO / p
++    return p / "eval" if (p / "eval").is_dir() else p
++
++
++def mt_by_tid(csv_path, mt_col, want_human):
++    """{tid: mean MT} for the Simulator (or Human) rows of one results CSV."""
++    per = defaultdict(list)
++    ids = {}
++    for src, tid, id_, mt in pl._iter_rows(csv_path, mt_col, "Sim"):
++        if (src == "Human") == want_human:
++            per[tid].append(mt)
++            ids[tid] = id_
++    return {t: float(np.mean(v)) for t, v in per.items()}, ids
++
++
++def law(mt, ids):
++    tids = sorted(mt, key=int)
++    x = np.array([ids[t] for t in tids]); y = np.array([mt[t] for t in tids])
++    a, b, r2 = pl.fit_line(x, y)
++    return a, b, r2
++
++
++def budget_law(mt, geoms, lam):
++    tids = sorted(mt, key=int)
++    w = np.array([geoms[t][0] for t in tids]); L = np.array([geoms[t][1] for t in tids])
++    phi = np.array([geoms[t][2] for t in tids]); y = np.array([mt[t] for t in tids])
++    return pl.fit_line((L + lam * phi) / w, y)
++
++
++def steering_metrics(summary_csv, train_widths):
++    g = defaultdict(lambda: defaultdict(list))
++    ratio_w = defaultdict(list)
++    with open(summary_csv) as f:
++        for r in csv.DictReader(f):
++            split = "Train" if float(r["width_mm"]) in train_widths else "Test"
++            ratio = float(r["model_time_mean_s"]) / float(r["human_time_mean_s"])
++            vals = {"lat_mm": float(r["lateral_rmse"]) * 1000.0, "spd": float(r["speed_rmse"]),
++                    "corr": float(r["speed_corr"]), "ratio": ratio}
++            for m, v in vals.items():
++                g[split][m].append(v)
++            ratio_w[float(r["width_mm"])].append(ratio)
++    return g, {w: float(np.mean(v)) for w, v in sorted(ratio_w.items())}
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--run", action="append", required=True, metavar="LABEL=DIR")
++    ap.add_argument("--train-widths", default="10,50")
++    ap.add_argument("--out", default=str(REPO / "paper" / "quant_r1" / "r1_ablation_table.csv"))
++    a = ap.parse_args()
++    train_w = {float(w) for w in a.train_widths.split(",")}
++    runs = [(s.split("=", 1)[0], eval_dir(s.split("=", 1)[1])) for s in a.run]
++    geoms = pl.steering_geometry()
++
++    first = runs[0][1]
++    h_steer, ids = mt_by_tid(first / "Steering" / "steering_results.csv", "MT_s", True)
++    fcsv = first / "Fitts" / "fitts_results.csv"
++    h_fitts, fids = mt_by_tid(fcsv, "MT_kin_s", True) if fcsv.exists() else ({}, {})
++    if any(t not in geoms for t in h_steer):
++        raise SystemExit("steering conditions not in the 8-participant battery: this table is "
++                         "for Study 1 runs; use stats_study2.py --s2-model for eval14p runs")
++    _, lam = pl.budget_id_data({"Human": h_steer}, geoms)
++
++    rows = []
++    def add(label, steer, fitts, summary):
++        row = {"source": label}
++        row["steer_a"], row["steer_b"], row["steer_r2"] = law(steer, ids)
++        row["steerK_a"], row["steerK_b"], row["steerK_r2"] = budget_law(steer, geoms, lam)
++        if fitts:
++            row["fitts_a"], row["fitts_b"], row["fitts_r2"] = law(fitts, fids)
++        if summary is not None:
++            g, rw = steering_metrics(summary, train_w)
++            for split in ("Train", "Test"):
++                for m in ("lat_mm", "spd", "corr", "ratio"):
++                    v = np.array(g[split][m]) if g[split][m] else np.array([np.nan])
++                    row[f"{split}_{m}_mean"] = float(np.mean(v)); row[f"{split}_{m}_sd"] = float(np.std(v))
++            for w, r in rw.items():
++                row[f"ratio_W{w:g}"] = r
++        rows.append(row)
++
++    add("Human", h_steer, h_fitts, None)
++    for label, ed in runs:
++        steer, _ = mt_by_tid(ed / "Steering" / "steering_results.csv", "MT_s", False)
++        fp = ed / "Fitts" / "fitts_results.csv"
++        fitts = mt_by_tid(fp, "MT_kin_s", False)[0] if fp.exists() else {}
++        add(label, steer, fitts, ed / "Steering" / "steering_condition_summary.csv")
++
++    print(f"curvature-aware ID: lambda = {lam:.3f} m/rad (fit on human); train widths {sorted(train_w)} mm\n")
++    print(f"{'source':<20} {'steer b':>8} {'R2':>5} {'ID_k b':>8} {'R2':>5} {'Fitts b':>8} {'R2':>5}")
++    for r in rows:
++        print(f"{r['source']:<20} {r['steer_b']:8.4f} {r['steer_r2']:5.2f} {r['steerK_b']:8.4f} "
++              f"{r['steerK_r2']:5.2f} {r.get('fitts_b', np.nan):8.4f} {r.get('fitts_r2', np.nan):5.2f}")
++    print(f"\n{'source':<20} {'split':<5} {'lat RMSE mm':>13} {'speed RMSE':>13} {'speed corr':>12} {'time ratio':>12}")
++    for r in rows[1:]:
++        for s in ("Train", "Test"):
++            print(f"{r['source']:<20} {s:<5} "
++                  + " ".join(f"{r[f'{s}_{m}_mean']:{p}} ±{r[f'{s}_{m}_sd']:{q}}"
++                             for m, p, q in (("lat_mm", "6.2f", "5.2f"), ("spd", "6.3f", "5.3f"),
++                                             ("corr", "5.2f", "5.2f"), ("ratio", "5.2f", "5.2f"))))
++    wcols = sorted({k for r in rows for k in r if k.startswith("ratio_W")}, key=lambda k: float(k[7:]))
++    print(f"\nmodel/human time ratio by width: " + "  ".join(k[7:] + " mm" for k in wcols))
++    for r in rows[1:]:
++        print(f"  {r['source']:<20} " + "  ".join(f"{r.get(k, np.nan):5.2f}" for k in wcols))
++    out = Path(a.out); out.parent.mkdir(parents=True, exist_ok=True)
++    keys = list(dict.fromkeys(k for r in rows for k in r))
++    with open(out, "w", newline="") as f:
++        w = csv.DictWriter(f, fieldnames=keys); w.writeheader(); w.writerows(rows)
++    print(f"\nwrote {out}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/submit_run.sh b/submit_run.sh
+index 2d025309..55b58ed2 100755
+--- a/submit_run.sh
++++ b/submit_run.sh
+@@ -1,7 +1,7 @@
+ #!/bin/bash
+ # Submit one isolated run (fit -> eval -> aggregate) to Great Lakes.
+ #
+-#   submit_run.sh --model {mpcc,baseline} --variant {full,no_gaze,no_lookahead,no_pace,no_intermittent} \
++#   submit_run.sh --model {mpcc,baseline} --variant {full,no_gaze,no_lookahead,no_pace,no_intermittent,fixed_horizon,fixed_speed} \
+ #                 --kind {perpid,pooled8} [--seed 42] [--participants participants_10p.txt] \
+ #                 [--time-limit S] [--popsize N] [--min-runs N] [--gamma G] \
+ #                 [--wall HH:MM:SS] [--results-root DIR] [--data-root DIR] [--allow-dirty] [--dry-run]
+@@ -55,7 +55,7 @@ while [ $# -gt 0 ]; do
+     esac
+ done
+ case "$MODEL" in mpcc|baseline) ;; *) echo "--model must be mpcc or baseline"; exit 2;; esac
+-case "$VARIANT" in full|no_gaze|no_lookahead|no_pace|no_intermittent) ;; *) echo "--variant invalid"; exit 2;; esac
++case "$VARIANT" in full|no_gaze|no_lookahead|no_pace|no_intermittent|fixed_horizon|fixed_speed) ;; *) echo "--variant invalid"; exit 2;; esac
+ case "$KIND" in perpid|pooled8) ;; *) echo "--kind must be perpid or pooled8"; exit 2;; esac
+ if [ "$MODEL" = "baseline" ] && [ "$VARIANT" != "full" ]; then echo "baseline has no ablations (use --variant full)"; exit 2; fi
+ [ -f "$PARTICIPANTS_FILE" ] || { echo "missing $PARTICIPANTS_FILE"; exit 2; }
+-- 
+2.34.1
+
+
+From 27930255c127d8d988d439b67edd7d2fcb903af1 Mon Sep 17 00:00:00 2001
+From: xiangyz <xiangyz@umich.edu>
+Date: Tue, 24 Nov 2026 23:13:19 +0000
+Subject: [PATCH 2/2] R1 runs revised: pace law on training widths, fitted
+ fixed horizon, cycle statistics per run
+
+- --gam-holdout (submit_run.sh / fit_job.sh / fit_anchor --gam-train-only):
+  the per-participant pace law is fitted on the steering training widths
+  only, so held-out widths are unseen by every fitted component (reviewer 1,
+  comment 4). RUN_ID kind segment carries "gh"; artifact copied to fit/gam/.
+- fixed_horizon now fits its lead in place of D0 (parameter parity with the
+  full model), starting at the human mean gaze lead; the pinned version is
+  kept as fixed_horizon_human.
+- cluster/cycles_job.sh chained after the fit for every mpcc run;
+  submit_cycles.sh runs it on finished runs. quantify_gaze_cycles.py:
+  --config-dir/--quant-dir/--config/--letters/--workers (parallel by
+  participant, identical rows) and two lookahead-specific sections in the
+  stats (fixation-onset lead vs width, saccades per trial vs width).
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015YyE3e7jUttkVKxxM823mV
+---
+ cluster/cycles_job.sh                        | 61 ++++++++++++
+ cluster/fit_job.sh                           | 11 ++-
+ docs/r1_ablation.md                          | 97 ++++++++++++++------
+ eval/eval-anchor-drive/fit_anchor.py         | 87 ++++++++++++++----
+ eval/eval-anchor-drive/fit_anchor_pooled8.py |  8 +-
+ paper/quantify_gaze_cycles.py                | 71 +++++++++++++-
+ submit_cycles.sh                             | 60 ++++++++++++
+ submit_run.sh                                | 45 +++++++--
+ 8 files changed, 377 insertions(+), 63 deletions(-)
+ create mode 100644 cluster/cycles_job.sh
+ create mode 100755 submit_cycles.sh
+
+diff --git a/cluster/cycles_job.sh b/cluster/cycles_job.sh
+new file mode 100644
+index 00000000..c931c4c0
+--- /dev/null
++++ b/cluster/cycles_job.sh
+@@ -0,0 +1,61 @@
++#!/bin/bash
++#SBATCH --account=soney0
++#SBATCH --partition=standard
++#SBATCH --nodes=1
++#SBATCH --ntasks=1
++#SBATCH --cpus-per-task=8
++#SBATCH --mem-per-cpu=1500M
++#SBATCH --time=03:00:00
++#SBATCH --mail-type=END,FAIL
++#SBATCH --mail-user=xiangyz@umich.edu
++
++# Saccade-fixate-catch-up cycle statistics of one mpcc run (paper Sec. 5.1):
++# every participant's fitted persona is re-simulated on all steering trials
++# (noise on, 3 runs) and the cycle measures — saccade distance and onset
++# lead vs width, catch-up duration vs width and curvature, overrun, speed ->
++# lead — are compared with the human ones (paper/quantify_gaze_cycles.py,
++# stages model + stats). Outputs in $RUN_DIR/cycles/: cycles_model.csv,
++# stats.txt. One core per participant; the rows do not depend on the worker
++# count. Never sbatch directly: submit_run.sh chains it after the fit, and
++# submit_cycles.sh runs it on a finished run. Exports: RUN_DIR / KIND / SEED /
++# PARTICIPANTS_FILE / VENV_DIR.
++
++set -euo pipefail
++: "${RUN_DIR:?set by submit_run.sh / submit_cycles.sh}" "${KIND:?}" "${SEED:?}"
++cd "$RUN_DIR/code"
++module load python3.11-anaconda/2024.02 2>/dev/null || true
++source "${VENV_DIR:-$RUN_DIR/code/venv}/bin/activate"
++export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 MPLBACKEND=Agg
++export TMPDIR="$RUN_DIR/tmp/job_${SLURM_JOB_ID:-local}_cycles"
++mkdir -p "$TMPDIR"; trap 'rm -rf "$TMPDIR"' EXIT
++
++QUANT="$RUN_DIR/cycles"
++PARTICIPANTS_FILE="${PARTICIPANTS_FILE:-participants_10p.txt}"
++LETTERS=$(tr '\n' ' ' < "$PARTICIPANTS_FILE")
++mkdir -p "$QUANT"
++# human side of the comparison: the cycle tables behind the paper's numbers
++for f in cycles_human.csv curv_human.csv; do
++    if [ ! -f "$QUANT/$f" ]; then
++        for q in paper/quant_refit paper/quant; do
++            [ -f "$q/$f" ] && { cp "$q/$f" "$QUANT/$f"; break; }
++        done
++    fi
++    [ -f "$QUANT/$f" ] || { echo "missing human cycle table $f (paper/quant_refit or paper/quant)"; exit 1; }
++done
++if [ "$KIND" = "pooled8" ]; then
++    CFG_ARG=(--config "$RUN_DIR/fit/stages/pooled8/pooled8_anchor_config_s${SEED}.json")
++    [ -f "${CFG_ARG[1]}" ] || { echo "missing pooled persona ${CFG_ARG[1]}"; exit 1; }
++else
++    CFG_ARG=(--config-dir "$RUN_DIR/fit/stages/base")
++    ls "$RUN_DIR/fit/stages/base/"*_anchor_config_s"${SEED}".json >/dev/null 2>&1 || { echo "no fitted personas in $RUN_DIR/fit/stages/base"; exit 1; }
++fi
++
++echo "[$(date)] cycles ${CFG_ARG[*]} letters [$LETTERS] -> $QUANT"
++# shellcheck disable=SC2086
++python -u paper/quantify_gaze_cycles.py --stage model "${CFG_ARG[@]}" --quant-dir "$QUANT" \
++    --letters $LETTERS --workers "${SLURM_CPUS_PER_TASK:-4}" 2>&1 | tee "$QUANT/model_stage.log"
++# shellcheck disable=SC2086
++python -u paper/quantify_gaze_cycles.py --stage stats --quant-dir "$QUANT" --letters $LETTERS \
++    2>&1 | tee "$QUANT/stats.txt"
++date -u +%Y-%m-%dT%H:%M:%SZ > "$QUANT/DONE"
++echo "[$(date)] done"
+diff --git a/cluster/fit_job.sh b/cluster/fit_job.sh
+index f1de5d12..a1591c04 100755
+--- a/cluster/fit_job.sh
++++ b/cluster/fit_job.sh
+@@ -39,12 +39,21 @@ TIME_LIMIT="${TIME_LIMIT:-23400}"      # 6.5 h CMA budget < 8 h wall
+ POPSIZE="${POPSIZE:-12}"
+ PARTICIPANTS_FILE="${PARTICIPANTS_FILE:-participants_10p.txt}"
+ ABLATION=$([ "$VARIANT" = "full" ] && echo none || echo "$VARIANT")
++# GAM_TRAIN_ONLY=1 (submit_run.sh --gam-holdout): the pace law is fitted on the
++# training widths only; the artifact is written into this run's code snapshot
++# (hcs_package models/, where the persona's relative path resolves for the
++# eval and cycles jobs) and copied to $RUN_DIR/fit/gam/ for the record.
++GAM_ARG=$([ "${GAM_TRAIN_ONLY:-0}" = 1 ] && [ "$MODEL" = mpcc ] && echo --gam-train-only || echo "")
+ mkdir -p "$HCS_FIT_RESULTS_DIR"
+ 
+ PID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$PARTICIPANTS_FILE")
+ echo "[$(date)] fit $MODEL/$VARIANT $PID -> $HCS_FIT_RESULTS_DIR (budget ${TIME_LIMIT}s, seed $SEED, code $(cat "$RUN_DIR/COMMIT" 2>/dev/null || echo ?))"
+ python3 eval/eval-anchor-drive/fit_anchor.py --pid "$PID" --model "$MODEL" --ablation "$ABLATION" \
+     --tag base --time-limit "$TIME_LIMIT" --popsize "$POPSIZE" \
+-    --workers "$SLURM_CPUS_PER_TASK" --seed "$SEED" \
++    --workers "$SLURM_CPUS_PER_TASK" --seed "$SEED" $GAM_ARG \
+     2>&1 | tee "$HCS_FIT_RESULTS_DIR/fit_${PID}_s${SEED}.log"
++if [ -n "$GAM_ARG" ]; then
++    mkdir -p "$HCS_FIT_RESULTS_DIR/gam"
++    cp hcs_package/src/hcs_package/models/gam_traversal_"${PID}"_train*.pkl "$HCS_FIT_RESULTS_DIR/gam/"
++fi
+ echo "[$(date)] done $PID"
+diff --git a/docs/r1_ablation.md b/docs/r1_ablation.md
+index 23a682a9..583746f9 100644
+--- a/docs/r1_ablation.md
++++ b/docs/r1_ablation.md
+@@ -19,17 +19,16 @@ other ablations.
+ **V1 `fixed_horizon`** (fixed horizon + pace law)
+ - `horizon_mode: fixed_lead`. Every planning event puts the anchor at a
+   constant arc lead `fixed_lead_m` ahead of the cursor.
+-- `fixed_lead_m` is not fitted. It is set to the participant's mean human
+-  gaze lead at fixation onset (`eval/eval-anchor-drive/human_gaze_horizon_10p.json`,
+-  made by `human_gaze_horizon.py`: canonical merged fixation events, the
+-  25 constant-width steering conditions). A pooled fit uses the mean of
+-  the fitted participants' means (41.7 mm for the 8).
+-  - Per participant (mm): p01 34.3, p02 39.7, p03 30.2, p04 49.4,
+-    p06 46.5, p07 38.3, p08 38.2, p10 56.9.
+-  - The model's horizon is the anchor lead at a planning event, so the
+-    matching human quantity is the lead at fixation onset. The
+-    time-averaged continuous lead is about 0 for every participant, because
+-    the cursor catches up to and passes each anchor, so it would not work.
++- `fixed_lead_m` is fitted by CMA-ES in place of D0 (bounds 10-150 mm), so
++  the ablation has as many free parameters as the full model. It starts at
++  the participant's mean human gaze lead at fixation onset
++  (`eval/eval-anchor-drive/human_gaze_horizon_10p.json`, made by
++  `human_gaze_horizon.py`: canonical merged fixation events, the 25
++  constant-width steering conditions). Per participant (mm): p01 34.3,
++  p02 39.7, p03 30.2, p04 49.4, p06 46.5, p07 38.3, p08 38.2, p10 56.9;
++  pooled fits start at the mean of the fitted participants' means (41.7).
++- `fixed_horizon_human` is the same model with the lead pinned to that
++  human value and not fitted (search: jerk, contour, constraint, goal).
+ - `fixed_lead_speed_floor: false`: no `v*T_min` floor, so the lead is the
+   same constant at every speed. The old `no_lookahead` ablation kept the
+   floor.
+@@ -38,9 +37,8 @@ other ablations.
+   lookahead is fixed. With a fixed lead in free space, pointing breaks into
+   short hops. The old `no_lookahead` did this, and its Fitts slope rose to
+   0.28 against 0.21 for the model and 0.23 for humans.
+-- Search: jerk, contour, constraint, goal. D0 is dropped and nothing is
+-  added. The pace law, replanning and the T0 scan are the same as in the
+-  full model.
++- Search: jerk, contour, constraint, goal, fixed_lead_m. The pace law,
++  replanning and the T0 scan are the same as in the full model.
+ 
+ **V2 `fixed_speed`** (adaptive gaze lookahead + fixed target speed)
+ - `catchup_mode: target_speed`. In a corridor the plan deadline is
+@@ -91,20 +89,65 @@ So:
+   changes. The pooled fitting code there is the same as `c70a5dd`, the
+   commit behind the paper's pooled runs.
+ 
++## Revised run plan (2026-11-24, after reviewing the September ablations)
++
++Three changes to what gets submitted:
++
++1. **Pace law on training widths only (`--gam-holdout`).** The
++   per-participant pace law (traversal GAM) was fitted on all five corridor
++   widths, including the held-out ones (reviewer 1, comment 4). With
++   `--gam-holdout` the fit job trains `gam_traversal_<pid>_train10-50.pkl`
++   from the pace samples of the training widths only, inside the run's code
++   snapshot, and copies it to `<RUN_DIR>/fit/gam/`. Runs carry `gh` in the
++   RUN_ID (`mpcc-full-perpidgh-...`) and `"gam_train_only": true` in
++   RUN_INFO.json. Local check on p01/p04: the two-width pace law
++   interpolates the held-out widths within about 15% of the all-width one.
++   The corrected main model must be refitted too (`--variant full`). The
++   baseline needs no rerun: it has no pace law and its reference speeds were
++   already fitted on the training widths.
++   To analyse a `gh` run locally, copy `<RUN_DIR>/fit/gam/*.pkl` into
++   `hcs_package/src/hcs_package/models/`.
++2. **`fixed_horizon` now fits its lead.** The lead takes D0's place in the
++   search (same number of free parameters as the full model) and starts at
++   the participant's human mean gaze lead. The human-pinned version is kept
++   as `fixed_horizon_human`.
++3. **Cycle statistics are part of every mpcc run.** `cluster/cycles_job.sh`
++   is chained after the fit (8 cores, 3 h wall) and writes
++   `<RUN_DIR>/cycles/{cycles_model.csv,stats.txt}`. `stats.txt` has two new
++   sections: fixation-onset lead vs width, and saccades per trial vs width.
++   These isolate the lookahead; the saccade distance of section 1 includes
++   the overrun, which grows with speed even under a fixed horizon.
++   `submit_cycles.sh <RUN_DIR>` runs the same job on a finished run.
++
+ ## Cluster commands (Great Lakes login node)
+ 
+ ```bash
+ cd /home/xiangyz/ondemand/data/sys/myjobs/projects/chi-27/adaptive-cursor-trajectory-simulator
++R=/home/xiangyz/ondemand/data/sys/myjobs/projects/chi-27/results/runs
++
++# --- 0. Cycle statistics for the September runs (no refit; ~1-2 h each) -------
++git checkout precision
++for r in mpcc-full-perpid-s42-20260909-1257-22c349c \
++         mpcc-no_lookahead-perpid-s42-20260909-1259-22c349c \
++         mpcc-no_intermittent-perpid-s42-20260909-1300-22c349c \
++         mpcc-no_pace-perpid-s42-20260909-1259-22c349c; do
++  ./submit_cycles.sh $R/$r        # add --wall 06:00:00 for every-step variants
++done
+ 
+-# --- Study 1: per-participant fits, 22c349c protocol -------------------------
++# --- 1. Study 1: per-participant fits, 22c349c protocol, corrected pace law ---
+ git show precision:docs/r1_ablation_s1_22c349c.patch > /tmp/r1_s1.patch   # after pushing precision
+ git checkout -b r1-ablation-s1 22c349c && git am /tmp/r1_s1.patch
+-./submit_run.sh --model mpcc --variant fixed_horizon --kind perpid --dry-run
+-./submit_run.sh --model mpcc --variant fixed_horizon --kind perpid
+-./submit_run.sh --model mpcc --variant fixed_speed   --kind perpid
+-# 8 x (8 h fit) -> 8 x eval (+ gaze-lead events) -> aggregate, per variant
+-
+-# --- Study 2: pooled train-all fits on 8p, evaluated on the 14 new participants
++./submit_run.sh --model mpcc --variant full          --kind perpid --gam-holdout --dry-run
++./submit_run.sh --model mpcc --variant full          --kind perpid --gam-holdout   # corrected main model
++./submit_run.sh --model mpcc --variant fixed_horizon --kind perpid --gam-holdout   # R1's ablation
++./submit_run.sh --model mpcc --variant fixed_speed   --kind perpid --gam-holdout   # converse
++# optional, if allocation allows:
++./submit_run.sh --model mpcc --variant fixed_horizon_human --kind perpid --gam-holdout
++./submit_run.sh --model mpcc --variant no_intermittent     --kind perpid --gam-holdout
++# each: 8 x (36 cores, 8 h fit) -> 8 x eval -> aggregate; cycles after the fit
++# (about 2,300 core-hours per run)
++
++# --- 2. Study 2: pooled train-all fits on 8p, evaluated on the 14 new participants
+ git checkout precision
+ ./submit_run.sh --model mpcc --variant fixed_horizon --kind pooled8   # train-all, 12 h budget
+ ./submit_run.sh --model mpcc --variant fixed_speed   --kind pooled8
+@@ -112,6 +155,9 @@ eval-14p/submit_eval_14p.sh --source-run <mpcc-fixed_horizon-pooled8all-...>   #
+ eval-14p/submit_eval_14p.sh --source-run <mpcc-fixed_speed-pooled8all-...>
+ ```
+ 
++Study 2 keeps the all-width pooled pace law: the pooled protocol trains on
++every Study 1 condition, and Study 2's 20/30/40 mm widths are unseen anyway.
++
+ ## Analysis (after mirroring the runs into results-cluster-10p/)
+ 
+ ```bash
+@@ -122,13 +168,8 @@ python paper/r1_ablation_table.py --train-widths 10,50 \
+   --run V1_fixed_horizon=results-cluster-10p/runs/<mpcc-fixed_horizon-perpid-...> \
+   --run V2_fixed_speed=results-cluster-10p/runs/<mpcc-fixed_speed-perpid-...>
+ 
+-# Study 1: saccade-fixate-catch-up cycle statistics (Sec. eval_cycle), the
+-# human side reused from the paper's quant_refit
+-for v in fixed_horizon fixed_speed; do
+-  mkdir -p paper/quant_r1_$v && cp paper/quant_refit/{cycles_human,curv_human}.csv paper/quant_r1_$v/
+-  python paper/quantify_gaze_cycles.py --stage model --config-dir results-cluster-10p/runs/<mpcc-$v-perpid-...>/fit/stages/base --quant-dir paper/quant_r1_$v
+-  python paper/quantify_gaze_cycles.py --stage stats --quant-dir paper/quant_r1_$v
+-done
++# Study 1: cycle statistics come with each run: <RUN_DIR>/cycles/stats.txt
++# (sections 5 and 6 are the lookahead-specific measures)
+ 
+ # Study 2: Section 5.4 numbers with the ablation in the model slot
+ python paper/stats_study2.py --s2-model results-cluster-10p/runs-14p/<eval14p-mpcc-fixed_speed-pooled8all-...> \
+diff --git a/eval/eval-anchor-drive/fit_anchor.py b/eval/eval-anchor-drive/fit_anchor.py
+index ab426b27..52a568bb 100644
+--- a/eval/eval-anchor-drive/fit_anchor.py
++++ b/eval/eval-anchor-drive/fit_anchor.py
+@@ -128,18 +128,27 @@ ABLATIONS = {
+                         "drop": [], "add": [], "skip_t0": False},
+     # Reviewer-1 pair (2x2 with the full model and the baseline: lookahead
+     # {adaptive gaze, fixed} x catch-up {pace law, fixed target speed}).
+-    # V1 fixed horizon + pace law: the anchor sits a constant lead ahead of
+-    # the cursor in corridors, the lead FIXED (not fitted) at the
+-    # participant's mean human gaze lead at fixation onset (pooled fits: the
+-    # mean over the fitted participants). No speed floor on the lead; free
+-    # space looks at the target as the budget does. D0 leaves the search,
+-    # nothing enters it; pace law, replanning and the post-fit T0 scan as in
+-    # the full model.
++    # V1 fixed horizon + pace law (the ablation reviewer 1 asked for): the
++    # anchor sits a constant lead ahead of the cursor in corridors. No speed
++    # floor on the lead; free space looks at the target as the budget does;
++    # pace law, replanning and the post-fit T0 scan as in the full model.
++    # The lead is FITTED, taking D0's place in the search (same number of
++    # free parameters as the full model, whose lookahead scale D0 is fitted
++    # on cursor data too), and starts at the participant's mean human gaze
++    # lead at fixation onset.
+     "fixed_horizon": {"override": {"horizon_mode": "fixed_lead",
+                                    "fixed_lead_speed_floor": False,
+                                    "fixed_lead_free_space": "target"},
+-                      "drop": ["D0"], "add": [], "skip_t0": False,
++                      "drop": ["D0"], "add": [FIXED_LEAD_SPEC], "skip_t0": False,
+                       "human_horizon": True},
++    # Secondary: the same, with the lead PINNED (not fitted) to the mean
++    # human gaze lead (pooled fits: the mean over the fitted participants).
++    # Tests whether a human-sized constant horizon is enough.
++    "fixed_horizon_human": {"override": {"horizon_mode": "fixed_lead",
++                                         "fixed_lead_speed_floor": False,
++                                         "fixed_lead_free_space": "target"},
++                            "drop": ["D0"], "add": [], "skip_t0": False,
++                            "human_horizon": True},
+     # V2 adaptive gaze lookahead + fixed target speed: the budget anchor
+     # stays; the corridor plan deadline is lead / v_type with one constant
+     # target speed per task type, fitted jointly (as the baseline fits its
+@@ -511,22 +520,47 @@ def _init_val(base, name):
+ PACKAGE_MODELS = HERE.parents[1] / "hcs_package" / "src" / "hcs_package" / "models"
+ 
+ 
+-def _train_participant_gam(pid, name):
++BATTERY_WIDTHS = {0.01, 0.0125, 0.0165, 0.025, 0.05}   # steering corridor widths of the 8p study (m)
++
++
++def gam_train_widths():
++    """Steering training widths (m) that exist in the corridor battery."""
++    return sorted(w for w in BATTERY_WIDTHS if w in {round(x, 4) for x in fsm.TRAIN_WIDTHS})
++
++
++def train_gam_name(pid):
++    """Artifact name of the participant's pace law fitted on the steering
++    TRAINING widths only (fit_speed_model.TRAIN_WIDTHS), e.g.
++    gam_traversal_p01_train10-50.pkl. The widths are in the name so runs
++    under different splits never share an artifact."""
++    ws = "-".join(f"{w * 1000:g}" for w in gam_train_widths())
++    return f"gam_traversal_{pid}_train{ws}.pkl"
++
++
++def _train_participant_gam(pid, name, train_only=False):
+     """Fit the missing per-participant traversal GAM from the pace samples
+     (same features/target as train_traversal_gam.py) into the package
+-    models/ dir, where the persona's relative path resolves."""
++    models/ dir, where the persona's relative path resolves. train_only
++    keeps only the pace samples recorded in corridors of the steering
++    training widths, so the held-out widths stay unseen by the pace law
++    (reviewer 1, comment 4)."""
+     sys.path.insert(0, str(HERE.parents[1] / "eval" / "eval-gaze-lead"))
+     import pandas as pd
+     import train_traversal_gam as ttg
+     d = pd.read_csv(ttg.DATA)
+     d = d[d["participant"] == pid]
++    if train_only:
++        n_all = len(d)
++        d = d[np.round(d["W_loc"], 4).isin(gam_train_widths())]
++        print(f"  pace law {pid}: training widths {[round(w * 1000, 1) for w in gam_train_widths()]} mm only "
++              f"({len(d)} of {n_all} pace samples)", flush=True)
+     if not len(d):
+         return False
+     ttg.fit_one(d, PACKAGE_MODELS / name, pid)
+     return True
+ 
+ 
+-def resolve_speed_model(sm, pid, pooled=False):
++def resolve_speed_model(sm, pid, pooled=False, train_only=False):
+     """A per-participant fit gets the participant's own traversal GAM; the
+     pooled artifact serves ONLY pooled fits. Without this, perpid personas
+     silently shared the pooled GAM — which alone sets tunnel pace, so
+@@ -537,6 +571,14 @@ def resolve_speed_model(sm, pid, pooled=False):
+     if pooled:
+         sm.pop("path", None)           # pooled fit -> shipped pooled artifact
+         return sm
++    if train_only:
++        # pace law fitted on the training widths only; always (re)resolved,
++        # whatever the base persona pins, and never the all-width fallback
++        name = train_gam_name(pid)
++        if not ((PACKAGE_MODELS / name).exists() or _train_participant_gam(pid, name, train_only=True)):
++            raise SystemExit(f"no pace samples at the training widths for {pid}: cannot fit {name}")
++        sm["path"] = name
++        return sm
+     if sm.get("path"):
+         return sm                      # persona already pins its artifact
+     name = f"gam_traversal_{pid}.pkl"
+@@ -550,7 +592,7 @@ def resolve_speed_model(sm, pid, pooled=False):
+ 
+ def build_setup(model, pid, ablation="none", *, deadline=None, vmax=None,
+                 init=None, override=None, fix_budget=False, pooled=False,
+-                letters=None):
++                letters=None, gam_train_only=False):
+     """Base persona + CMA spec for (model, ablation). Returns a dict with
+     base, spec, init, skip_t0, model, ablation, tag_model. pooled=True
+     (fit_anchor_pooled8) keeps the pooled traversal GAM; a per-participant
+@@ -581,7 +623,10 @@ def build_setup(model, pid, ablation="none", *, deadline=None, vmax=None,
+         spec += [sp for sp in ab["add"] if sp["name"] not in {s["name"] for s in spec}]
+         skip_t0 = bool(ab["skip_t0"])
+         base.setdefault("plan_vmax", 0.8)
+-        base["speed_model"] = resolve_speed_model(base.get("speed_model"), pid, pooled=pooled)
++        if gam_train_only and pooled:
++            raise ValueError("gam_train_only is for per-participant fits (the pooled protocol trains on all widths)")
++        base["speed_model"] = resolve_speed_model(base.get("speed_model"), pid, pooled=pooled,
++                                                  train_only=gam_train_only)
+     if deadline is not None:
+         base["plan_deadline_s"] = deadline
+     if vmax is not None:
+@@ -670,20 +715,23 @@ def main():
+     ap.add_argument("--fix-deadline", action="store_true", help="skip the post-fit T0 calibration scan (keep the base persona's plan_deadline_s)")
+     ap.add_argument("--quick", action="store_true", help="fit on the straight/sharp/corner subset + 2 pointing rounds per radius")
+     ap.add_argument("--skip-probe", action="store_true", help="skip the held-out probe after the fit")
++    ap.add_argument("--gam-train-only", action="store_true",
++                    help="(mpcc) fit this participant's pace law on the steering training widths only, "
++                         "so held-out widths are unseen by every fitted component")
+     a = ap.parse_args()
+     RESULTS.mkdir(exist_ok=True, parents=True)
+ 
+     su = build_setup(a.model, a.pid, a.ablation, deadline=a.deadline, vmax=a.vmax,
+                      init=(json.loads(a.init) if a.init else None),
+                      override=(json.loads(a.override) if a.override else None),
+-                     fix_budget=a.fix_budget)
++                     fix_budget=a.fix_budget, gam_train_only=a.gam_train_only)
+     base, spec, init, model = su["base"], su["spec"], su["init"], su["model"]
+     tag = (a.tag.strip("_") or (su["ablation"] if su["ablation"] != "none" else "base"))
+     d = load_training(a.pid, a.quick)
+     init_target_speeds(su, [d])
+-    if a.ablation == "fixed_horizon":
+-        print(f"  fixed_horizon: fixed_lead_m = {base['fixed_lead_m'] * 1000:.1f} mm "
+-              f"(human mean gaze lead, {HUMAN_HORIZON_FILE.name})", flush=True)
++    if a.ablation in ("fixed_horizon", "fixed_horizon_human"):
++        print(f"  {a.ablation}: fixed_lead_m {'starts at' if a.ablation == 'fixed_horizon' else 'pinned to'} "
++              f"{base['fixed_lead_m'] * 1000:.1f} mm (human mean gaze lead, {HUMAN_HORIZON_FILE.name})", flush=True)
+     print(f"{a.pid} [{model} / {su['ablation']}] -> stages/{tag}: tunnel train {len(d['tun_train'])} tids, "
+           f"test {len(d['tun_test'])}; pointing train {len(d['pt_train'])} tids "
+           f"({sum(len(v) for v in d['pt_train'].values())} rounds); stability {len(d['stab'])}; "
+@@ -712,7 +760,12 @@ def main():
+     save_cfg["_fit"] = {"model": model, "ablation": su["ablation"], "pid": a.pid, "seed": a.seed,
+                         "tag": tag, "search": [s["name"] for s in spec]}
+     if su["ablation"] == "fixed_horizon":
++        save_cfg["_fit"]["fixed_lead_init"] = init.get("fixed_lead_m")
++    if su["ablation"] == "fixed_horizon_human":
+         save_cfg["_fit"]["fixed_lead_source"] = f"{HUMAN_HORIZON_FILE.name}:{a.pid}"
++    if a.gam_train_only and model == "mpcc":
++        save_cfg["_fit"]["gam_train_only"] = True
++        save_cfg["_fit"]["gam_train_widths_mm"] = [round(w * 1000, 1) for w in gam_train_widths()]
+     if su["ablation"] == "fixed_speed":
+         save_cfg["_fit"]["target_speed_init"] = {k.split(":", 1)[1]: init[k] for k in init
+                                                  if k.startswith("target_speed:")}
+diff --git a/eval/eval-anchor-drive/fit_anchor_pooled8.py b/eval/eval-anchor-drive/fit_anchor_pooled8.py
+index 77fb79cf..e1f84045 100644
+--- a/eval/eval-anchor-drive/fit_anchor_pooled8.py
++++ b/eval/eval-anchor-drive/fit_anchor_pooled8.py
+@@ -198,9 +198,9 @@ def main():
+           f"popsize {a.popsize} on {a.workers} workers | search {[s['name'] for s in spec]}", flush=True)
+     _load_all(a.letters, a.quick)
+     fa.init_target_speeds(su, [_DATA[L] for L in a.letters])
+-    if su["ablation"] == "fixed_horizon":
+-        print(f"  fixed_horizon: fixed_lead_m = {base['fixed_lead_m'] * 1000:.1f} mm "
+-              f"(mean of the participants' human mean gaze leads)", flush=True)
++    if su["ablation"] in ("fixed_horizon", "fixed_horizon_human"):
++        print(f"  {su['ablation']}: fixed_lead_m {'starts at' if su['ablation'] == 'fixed_horizon' else 'pinned to'} "
++              f"{base['fixed_lead_m'] * 1000:.1f} mm (mean of the participants' human mean gaze leads)", flush=True)
+ 
+     t_all = time.time()
+     fitted, best, hist = pooled_cmaes(spec, init, base, a.letters, a.w_point,
+@@ -235,6 +235,8 @@ def main():
+     save_cfg["_fit"] = {"model": model, "ablation": su["ablation"], "pooled": a.letters,
+                         "seed": a.seed, "tag": tag, "search": [s["name"] for s in spec]}
+     if su["ablation"] == "fixed_horizon":
++        save_cfg["_fit"]["fixed_lead_init"] = init.get("fixed_lead_m")
++    if su["ablation"] == "fixed_horizon_human":
+         save_cfg["_fit"]["fixed_lead_source"] = f"{fa.HUMAN_HORIZON_FILE.name}:mean({','.join(a.letters)})"
+     if su["ablation"] == "fixed_speed":
+         save_cfg["_fit"]["target_speed_init"] = {k.split(":", 1)[1]: init[k] for k in init
+diff --git a/paper/quantify_gaze_cycles.py b/paper/quantify_gaze_cycles.py
+index 6b031774..c8a548b2 100644
+--- a/paper/quantify_gaze_cycles.py
++++ b/paper/quantify_gaze_cycles.py
+@@ -221,14 +221,22 @@ def centerline_phi(centerline):
+     return lambda q: float(np.interp(q, s, phi))
+ 
+ 
+-def stage_model(seed, n_runs):
++CONFIG_FILE = None   # --config: ONE persona for every participant (pooled fits)
++
++
++def _model_letter(args):
++    """Cycle rows of one participant's persona (all steering trials x runs).
++    Each run is seeded from (seed, participant, trial, run), so the rows do
++    not depend on how participants are spread over worker processes."""
++    L, seed, n_runs, config_dir, config_file = args
+     rows = []
+-    for L in LETTERS:
++    if True:
+         hum = pd.read_csv(DATA_DIR / f"{L}_steering_lead.csv")
+         trials = (hum.groupby("trial_id").first().reset_index()
+                      [["trial_id", "type_label", "width_mm"]])
+         rounds_by_tid, t2c, t2b = fsm.load_participant(L)
+-        sim = make_sim(CONFIG_DIR / f"{L}_anchor_config_s42.json")
++        sim = make_sim(Path(config_file) if config_file
++                       else Path(config_dir) / f"{L}_anchor_config_s42.json")
+         for _, tr in trials.iterrows():
+             tid, lab, w = int(tr["trial_id"]), tr["type_label"], float(tr["width_mm"])
+             if t2b.get(tid) != "steering" or t2c.get(tid) is None:
+@@ -252,6 +260,19 @@ def stage_model(seed, n_runs):
+             print(f"  [{L}] t{tid} {lab} W{w:g}: "
+                   f"{sum(r['participant'] == L and r['trial_id'] == tid for r in rows)}"
+                   " saccades", flush=True)
++    return rows
++
++
++def stage_model(seed, n_runs, workers=1):
++    jobs = [(L, seed, n_runs, str(CONFIG_DIR), (str(CONFIG_FILE) if CONFIG_FILE else None))
++            for L in LETTERS]
++    if workers > 1 and len(jobs) > 1:
++        import multiprocessing
++        with multiprocessing.Pool(processes=min(workers, len(jobs))) as pool:
++            parts = pool.map(_model_letter, jobs, chunksize=1)
++    else:
++        parts = [_model_letter(j) for j in jobs]
++    rows = [r for part in parts for r in part]     # participant order, as before
+     d = pd.DataFrame(rows)
+     d.to_csv(OUT / "cycles_model.csv", index=False, float_format="%.6f")
+     print(f"model: {len(d)} saccades, {d['catchup_s'].notna().sum()} cycles")
+@@ -427,6 +448,26 @@ def stage_stats():
+     print("\n(cycle counts: human", len(ch), "model", len(cm),
+           "| curvature intervals: human", len(curv_h), "model", len(curv_m), ")")
+ 
++    # Lookahead-specific measures (reviewer-1 ablations). The saccade distance
++    # of section 1 includes the overrun of the previous anchor, which grows
++    # with cursor speed and therefore with width even under a constant
++    # planning horizon; the lead at fixation onset and the number of
++    # commitments per trial isolate the lookahead itself.
++    print("\n== 5. fixation-onset lead vs width (fixations landing ahead; lead = a * W^b) ==")
++    for d, label in ((hum, "human"), (mod, "model")):
++        a_ = d[d["lead_post"] > 0]
++        powerlaw(a_, "lead_post", label)
++        med = (a_.groupby("width_mm")["lead_post"].median() * 1000).round(1)
++        print(f"     median onset lead (mm) by width: {med.to_dict()}; "
++              f"{len(a_) / max(len(d), 1) * 100:.0f}% of fixations land ahead")
++    print("\n== 6. saccades per trial vs width (count = a * W^b) ==")
++    for d, label in ((hum, "human"), (mod, "model")):
++        n = (d.groupby(["participant", "trial_id", "round", "width_mm"]).size()
++               .rename("n_sacc").reset_index())
++        powerlaw(n, "n_sacc", label)
++        print(f"     median saccades per trial by width: "
++              f"{n.groupby('width_mm')['n_sacc'].median().to_dict()}")
++
+ 
+ def main():
+     ap = argparse.ArgumentParser()
+@@ -434,14 +475,34 @@ def main():
+                     choices=["all", "human", "human-curv", "model", "stats"])
+     ap.add_argument("--seed", type=int, default=42)
+     ap.add_argument("--runs", type=int, default=3)
++    ap.add_argument("--config-dir", default=None,
++                    help="directory of fitted personas {letter}_anchor_config_s42.json "
++                         "(default: the legacy anchor_fitting_10p stage; use a run's fit/stages/base)")
++    ap.add_argument("--quant-dir", default=None,
++                    help="output/cache directory (default paper/quant); use a separate one per persona set")
++    ap.add_argument("--config", default=None,
++                    help="ONE persona JSON simulated for every participant (a pooled fit); overrides --config-dir")
++    ap.add_argument("--letters", nargs="+", default=None,
++                    help="participants to process (default: the eight fitted ones)")
++    ap.add_argument("--workers", type=int, default=1,
++                    help="model stage: participants simulated in parallel (results are identical)")
+     a = ap.parse_args()
+-    OUT.mkdir(exist_ok=True)
++    global CONFIG_DIR, OUT, CONFIG_FILE, LETTERS
++    if a.letters:
++        LETTERS = list(a.letters)
++    if a.config:
++        CONFIG_FILE = Path(a.config).resolve()
++    if a.config_dir:
++        CONFIG_DIR = Path(a.config_dir).resolve()
++    if a.quant_dir:
++        OUT = Path(a.quant_dir).resolve()
++    OUT.mkdir(exist_ok=True, parents=True)
+     if a.stage in ("all", "human"):
+         stage_human()
+     if a.stage in ("all", "human-curv"):
+         stage_human_curv()
+     if a.stage in ("all", "model"):
+-        stage_model(a.seed, a.runs)
++        stage_model(a.seed, a.runs, a.workers)
+     if a.stage in ("all", "stats"):
+         stage_stats()
+ 
+diff --git a/submit_cycles.sh b/submit_cycles.sh
+new file mode 100755
+index 00000000..d2c576a2
+--- /dev/null
++++ b/submit_cycles.sh
+@@ -0,0 +1,60 @@
++#!/bin/bash
++# Cycle statistics (cluster/cycles_job.sh) for an EXISTING mpcc run whose fit
++# completed — e.g. the September ablations, whose gaze-lead step failed.
++#
++#   submit_cycles.sh <RUN_DIR> [--wall HH:MM:SS] [--dry-run]
++#
++# The run keeps its own simulator and fitted personas (its code snapshot);
++# only the analysis script (paper/quantify_gaze_cycles.py), the job script
++# and the human cycle tables are copied in from THIS checkout. Outputs go to
++# <RUN_DIR>/cycles/; the submission is recorded in RUN_INFO.json
++# ("cycles_jobs"). Run from the repo root on the login node.
++
++set -euo pipefail
++REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++cd "$REPO_ROOT"
++RUN_DIR="${1:?usage: submit_cycles.sh <RUN_DIR> [--wall HH:MM:SS] [--dry-run]}"; shift
++WALL=""; DRY=0
++while [ $# -gt 0 ]; do
++    case "$1" in
++        --wall) WALL="$2"; shift 2;;
++        --dry-run) DRY=1; shift;;
++        *) echo "unknown option $1"; exit 2;;
++    esac
++done
++[ -f "$RUN_DIR/RUN_INFO.json" ] || { echo "not a run dir: $RUN_DIR"; exit 2; }
++read -r MODEL KIND SEED PARTICIPANTS_FILE < <(python3 -c "
++import json,sys; j=json.load(open(sys.argv[1]+'/RUN_INFO.json'))
++print(j['model'], j['kind'], j['seed'], j.get('participants_file','participants_10p.txt'))" "$RUN_DIR")
++[ "$MODEL" = mpcc ] || { echo "$(basename "$RUN_DIR") is a $MODEL run: the baseline has no anchors, so no cycles"; exit 2; }
++CODE="$RUN_DIR/code"
++[ -d "$CODE" ] || { echo "missing snapshot $CODE"; exit 2; }
++STAGE=$([ "$KIND" = pooled8 ] && echo pooled8 || echo base)
++ls "$RUN_DIR/fit/stages/$STAGE/"*_anchor_config_s"$SEED".json >/dev/null 2>&1 || { echo "no fitted personas under $RUN_DIR/fit/stages/$STAGE"; exit 2; }
++HUM=""; for q in paper/quant_refit paper/quant; do [ -f "$q/cycles_human.csv" ] && [ -f "$q/curv_human.csv" ] && { HUM="$q"; break; }; done
++[ -n "$HUM" ] || { echo "no human cycle tables in paper/quant_refit or paper/quant"; exit 2; }
++VENV_DIR="$REPO_ROOT/venv"
++SHA=$(git rev-parse --short=7 HEAD)
++echo "RUN     $(basename "$RUN_DIR")  ($KIND, seed $SEED)"
++echo "HUMAN   $HUM/{cycles_human,curv_human}.csv   analysis code $SHA"
++[ "$DRY" = 1 ] && { echo "(dry run: nothing submitted)"; exit 0; }
++
++mkdir -p "$RUN_DIR/cycles" "$RUN_DIR/logs" "$RUN_DIR/tmp" "$CODE/paper" "$CODE/cluster"
++cp "$REPO_ROOT/paper/quantify_gaze_cycles.py" "$CODE/paper/quantify_gaze_cycles.py"
++cp "$REPO_ROOT/cluster/cycles_job.sh" "$CODE/cluster/cycles_job.sh"
++cp "$HUM/cycles_human.csv" "$HUM/curv_human.csv" "$RUN_DIR/cycles/"
++rm -rf "$CODE/human_data"; ln -s "$REPO_ROOT/human_data" "$CODE/human_data"
++JOB=$(sbatch --parsable --job-name "cyc-$(basename "$RUN_DIR")" ${WALL:+--time "$WALL"} \
++    --output "$RUN_DIR/logs/cycles_%j.out" --error "$RUN_DIR/logs/cycles_%j.err" \
++    --export="ALL,RUN_DIR=$RUN_DIR,KIND=$KIND,SEED=$SEED,PARTICIPANTS_FILE=$PARTICIPANTS_FILE,VENV_DIR=$VENV_DIR" \
++    "$CODE/cluster/cycles_job.sh")
++JOB="${JOB%%;*}"
++python3 - "$RUN_DIR" "$SHA" "$JOB" <<'EOF2'
++import json, sys, datetime
++d, sha, job = sys.argv[1:]
++p = d + "/RUN_INFO.json"; j = json.load(open(p))
++j.setdefault("cycles_jobs", []).append({"when": datetime.datetime.now().isoformat(timespec="seconds"),
++                                         "analysis_code_commit": sha, "job": job})
++json.dump(j, open(p, "w"), indent=2)
++EOF2
++echo "submitted cycles job $JOB -> $RUN_DIR/cycles/"
+diff --git a/submit_run.sh b/submit_run.sh
+index 55b58ed2..1660c73f 100755
+--- a/submit_run.sh
++++ b/submit_run.sh
+@@ -1,10 +1,20 @@
+ #!/bin/bash
+ # Submit one isolated run (fit -> eval -> aggregate) to Great Lakes.
+ #
+-#   submit_run.sh --model {mpcc,baseline} --variant {full,no_gaze,no_lookahead,no_pace,no_intermittent,fixed_horizon,fixed_speed} \
++#   submit_run.sh --model {mpcc,baseline} --variant {full,no_gaze,no_lookahead,no_pace,no_intermittent,fixed_horizon,fixed_horizon_human,fixed_speed} \
+ #                 --kind {perpid,pooled8} [--seed 42] [--participants participants_10p.txt] \
+ #                 [--time-limit S] [--popsize N] [--min-runs N] [--gamma G] \
+ #                 [--wall HH:MM:SS] [--results-root DIR] [--data-root DIR] [--allow-dirty] [--dry-run]
++#                 [--gam-holdout] [--no-cycles]
++#
++# --gam-holdout (mpcc, perpid): each participant's pace law (traversal GAM) is
++# fitted on the steering TRAINING widths only, so the held-out widths are
++# unseen by every fitted component (reviewer 1, comment 4). The run carries
++# "gh" in its RUN_ID kind segment (e.g. mpcc-full-perpidgh-s42-...) and
++# "gam_train_only": true in RUN_INFO.json. Without it the pace law uses all
++# five widths, as in the September runs.
++# Cycle statistics (cluster/cycles_job.sh -> <RUN_DIR>/cycles/) are chained
++# after the fit for every mpcc run; --no-cycles skips them.
+ #
+ # --time-limit is the CMA-ES budget in seconds; --wall overrides the fit job's
+ # SLURM time limit (default 08:00:00 per-participant, 12:00:00 pooled). Keep
+@@ -28,7 +38,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ cd "$REPO_ROOT"
+ 
+ MODEL=""; VARIANT=""; KIND=""; SEED=42; PARTICIPANTS_FILE="participants_10p.txt"
+-TIME_LIMIT=""; WALL=""; POPSIZE=12; MIN_RUNS=0; GAMMA=""; ALLOW_DIRTY=0; DRY=0
++TIME_LIMIT=""; WALL=""; POPSIZE=12; MIN_RUNS=0; GAMMA=""; ALLOW_DIRTY=0; DRY=0; GAM_HOLDOUT=0; CYCLES=1
+ RESULTS_ROOT="${RESULTS_ROOT:-/home/xiangyz/ondemand/data/sys/myjobs/projects/chi-27/results}"
+ DATA_ROOT="$REPO_ROOT/human_data"
+ DATA_DIR="$DATA_ROOT/task_aligned_all"
+@@ -49,15 +59,21 @@ while [ $# -gt 0 ]; do
+         --data-root) DATA_ROOT="$2"; DATA_DIR="$DATA_ROOT/task_aligned_all"; shift 2;;
+         --venv) VENV_DIR="$2"; shift 2;;
+         --allow-dirty) ALLOW_DIRTY=1; shift;;
++        --gam-holdout) GAM_HOLDOUT=1; shift;;
++        --no-cycles) CYCLES=0; shift;;
+         --dry-run) DRY=1; shift;;
+-        -h|--help) sed -n 2,20p "$0"; exit 0;;
++        -h|--help) sed -n 2,30p "$0"; exit 0;;
+         *) echo "unknown option $1"; exit 2;;
+     esac
+ done
+ case "$MODEL" in mpcc|baseline) ;; *) echo "--model must be mpcc or baseline"; exit 2;; esac
+-case "$VARIANT" in full|no_gaze|no_lookahead|no_pace|no_intermittent|fixed_horizon|fixed_speed) ;; *) echo "--variant invalid"; exit 2;; esac
++case "$VARIANT" in full|no_gaze|no_lookahead|no_pace|no_intermittent|fixed_horizon|fixed_horizon_human|fixed_speed) ;; *) echo "--variant invalid"; exit 2;; esac
+ case "$KIND" in perpid|pooled8) ;; *) echo "--kind must be perpid or pooled8"; exit 2;; esac
+ if [ "$MODEL" = "baseline" ] && [ "$VARIANT" != "full" ]; then echo "baseline has no ablations (use --variant full)"; exit 2; fi
++if [ "$GAM_HOLDOUT" = 1 ] && { [ "$MODEL" != mpcc ] || [ "$KIND" != perpid ]; }; then
++    echo "--gam-holdout applies to --model mpcc --kind perpid (the baseline has no pace law; the pooled protocol trains on all widths)"; exit 2
++fi
++KIND_ID="$KIND"; [ "$GAM_HOLDOUT" = 1 ] && KIND_ID="${KIND}gh"
+ [ -f "$PARTICIPANTS_FILE" ] || { echo "missing $PARTICIPANTS_FILE"; exit 2; }
+ [ -d "$DATA_DIR" ] || { echo "missing data dir $DATA_DIR (rsync human_data/task_aligned_all first)"; exit 2; }
+ ls "$DATA_DIR"/p01_task_aligned_analysis*.csv >/dev/null 2>&1 || echo "WARNING: no task-aligned gaze CSVs under $DATA_DIR — the mpcc gaze-lead figures will fail (rsync human_data/task_aligned_all/*.csv up to enable; the eval itself is unaffected)"
+@@ -73,15 +89,16 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+     fi
+ fi
+ STAMP=$(date +%Y%m%d-%H%M)
+-RUN_ID="${MODEL}-${VARIANT}-${KIND}-s${SEED}-${STAMP}-${SHA}"
++RUN_ID="${MODEL}-${VARIANT}-${KIND_ID}-s${SEED}-${STAMP}-${SHA}"
+ RUN_DIR="$RESULTS_ROOT/runs/$RUN_ID"
+ [ -e "$RUN_DIR" ] && { echo "run dir exists: $RUN_DIR (wait a minute or change --seed)"; exit 2; }
+ echo "RUN_ID  $RUN_ID"
+ echo "RUN_DIR $RUN_DIR"
++echo "PACE    $([ "$MODEL" != mpcc ] && echo 'n/a (baseline)' || { [ "$GAM_HOLDOUT" = 1 ] && echo 'pace law fitted on the training widths only' || echo 'pace law fitted on ALL widths (pass --gam-holdout for a clean held-out split)'; })"
+ [ "$DRY" = 1 ] && { echo "(dry run: nothing created)"; exit 0; }
+ 
+ # --- run tree + code snapshot --------------------------------------------
+-mkdir -p "$RUN_DIR"/{code,fit,personas,eval,gaze-lead,logs,tmp}
++mkdir -p "$RUN_DIR"/{code,fit,personas,eval,gaze-lead,cycles,logs,tmp}
+ if [ "$DIRTY" = 1 ]; then
+     rsync -a --exclude .git --exclude 'results*' --exclude venv --exclude .venv \
+           --exclude '__pycache__' --exclude 'human_data' --exclude 'backup' \
+@@ -101,7 +118,7 @@ ln -s "$DATA_ROOT" "$RUN_DIR/code/human_data"
+ # the legacy default location inside the snapshot point at it as well
+ rm -rf "$RUN_DIR/code/eval/eval-anchor-drive/results"; ln -s "$RUN_DIR/fit" "$RUN_DIR/code/eval/eval-anchor-drive/results"
+ 
+-EXPORTS="ALL,RUN_DIR=$RUN_DIR,MODEL=$MODEL,VARIANT=$VARIANT,KIND=$KIND,SEED=$SEED,POPSIZE=$POPSIZE,MIN_RUNS=$MIN_RUNS,PARTICIPANTS_FILE=$PARTICIPANTS_FILE,VENV_DIR=$VENV_DIR"
++EXPORTS="ALL,RUN_DIR=$RUN_DIR,MODEL=$MODEL,VARIANT=$VARIANT,KIND=$KIND,SEED=$SEED,POPSIZE=$POPSIZE,MIN_RUNS=$MIN_RUNS,PARTICIPANTS_FILE=$PARTICIPANTS_FILE,VENV_DIR=$VENV_DIR,GAM_TRAIN_ONLY=$GAM_HOLDOUT"
+ [ -n "$TIME_LIMIT" ] && EXPORTS="$EXPORTS,TIME_LIMIT=$TIME_LIMIT"
+ [ -n "$GAMMA" ] && EXPORTS="$EXPORTS,GAMMA=$GAMMA"
+ 
+@@ -127,6 +144,15 @@ AGG_JOB=$(sbatch --parsable --job-name "agg-$RUN_ID" \
+     --output "$RUN_DIR/logs/agg_%j.out" --error "$RUN_DIR/logs/agg_%j.err" \
+     --export="$EXPORTS" "$RUN_DIR/code/cluster/aggregate_job.sh")
+ AGG_JOB="${AGG_JOB%%;*}"
++# cycle statistics: needs only the fitted personas, so it follows the fit
++# (independent of the eval array; a failure here never blocks the aggregate)
++CYC_JOB=""
++if [ "$MODEL" = mpcc ] && [ "$CYCLES" = 1 ]; then
++    CYC_JOB=$(sbatch --parsable --job-name "cyc-$RUN_ID" --dependency="afterok:$FIT_JOB" \
++        --output "$RUN_DIR/logs/cycles_%j.out" --error "$RUN_DIR/logs/cycles_%j.err" \
++        --export="$EXPORTS" "$RUN_DIR/code/cluster/cycles_job.sh")
++    CYC_JOB="${CYC_JOB%%;*}"
++fi
+ 
+ # --- record ---------------------------------------------------------------
+ python3 - "$RUN_DIR" <<EOF
+@@ -139,7 +165,8 @@ info = {
+   "participants_file": "$PARTICIPANTS_FILE", "n_participants": $N_PIDS,
+   "time_limit": "${TIME_LIMIT:-default}", "wall": "${WALL:-default}", "popsize": $POPSIZE, "min_runs": $MIN_RUNS, "gamma": "${GAMMA:-default}",
+   "data_root": "$DATA_ROOT", "data_dir": "$DATA_DIR", "venv": "$VENV_DIR",
+-  "jobs": {"fit": "$FIT_JOB", "eval": "$EVAL_JOB", "aggregate": "$AGG_JOB"},
++  "jobs": {"fit": "$FIT_JOB", "eval": "$EVAL_JOB", "aggregate": "$AGG_JOB", "cycles": "$CYC_JOB"},
++  "gam_train_only": bool($GAM_HOLDOUT),
+   "cmdline": " ".join(sys.argv[1:]) or "$0 --model $MODEL --variant $VARIANT --kind $KIND --seed $SEED",
+ }
+ json.dump(info, open(os.path.join(d, "RUN_INFO.json"), "w"), indent=2)
+@@ -147,5 +174,5 @@ EOF
+ INDEX="$RESULTS_ROOT/runs/INDEX.tsv"
+ [ -f "$INDEX" ] || printf 'run_id\tmodel\tvariant\tkind\tseed\tcommit\tdirty\tsubmitted\tfit_job\teval_job\tagg_job\n' > "$INDEX"
+ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$RUN_ID" "$MODEL" "$VARIANT" "$KIND" "$SEED" "$SHA" "$DIRTY" "$STAMP" "$FIT_JOB" "$EVAL_JOB" "$AGG_JOB" >> "$INDEX"
+-echo "submitted: fit $FIT_JOB -> eval $EVAL_JOB -> aggregate $AGG_JOB"
++echo "submitted: fit $FIT_JOB -> eval $EVAL_JOB -> aggregate $AGG_JOB${CYC_JOB:+ ; cycles $CYC_JOB (after the fit)}"
+ echo "logs:      $RUN_DIR/logs/"
+-- 
+2.34.1
+

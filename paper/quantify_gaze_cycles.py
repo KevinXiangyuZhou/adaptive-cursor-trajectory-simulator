@@ -221,14 +221,22 @@ def centerline_phi(centerline):
     return lambda q: float(np.interp(q, s, phi))
 
 
-def stage_model(seed, n_runs):
+CONFIG_FILE = None   # --config: ONE persona for every participant (pooled fits)
+
+
+def _model_letter(args):
+    """Cycle rows of one participant's persona (all steering trials x runs).
+    Each run is seeded from (seed, participant, trial, run), so the rows do
+    not depend on how participants are spread over worker processes."""
+    L, seed, n_runs, config_dir, config_file = args
     rows = []
-    for L in LETTERS:
+    if True:
         hum = pd.read_csv(DATA_DIR / f"{L}_steering_lead.csv")
         trials = (hum.groupby("trial_id").first().reset_index()
                      [["trial_id", "type_label", "width_mm"]])
         rounds_by_tid, t2c, t2b = fsm.load_participant(L)
-        sim = make_sim(CONFIG_DIR / f"{L}_anchor_config_s42.json")
+        sim = make_sim(Path(config_file) if config_file
+                       else Path(config_dir) / f"{L}_anchor_config_s42.json")
         for _, tr in trials.iterrows():
             tid, lab, w = int(tr["trial_id"]), tr["type_label"], float(tr["width_mm"])
             if t2b.get(tid) != "steering" or t2c.get(tid) is None:
@@ -252,6 +260,19 @@ def stage_model(seed, n_runs):
             print(f"  [{L}] t{tid} {lab} W{w:g}: "
                   f"{sum(r['participant'] == L and r['trial_id'] == tid for r in rows)}"
                   " saccades", flush=True)
+    return rows
+
+
+def stage_model(seed, n_runs, workers=1):
+    jobs = [(L, seed, n_runs, str(CONFIG_DIR), (str(CONFIG_FILE) if CONFIG_FILE else None))
+            for L in LETTERS]
+    if workers > 1 and len(jobs) > 1:
+        import multiprocessing
+        with multiprocessing.Pool(processes=min(workers, len(jobs))) as pool:
+            parts = pool.map(_model_letter, jobs, chunksize=1)
+    else:
+        parts = [_model_letter(j) for j in jobs]
+    rows = [r for part in parts for r in part]     # participant order, as before
     d = pd.DataFrame(rows)
     d.to_csv(OUT / "cycles_model.csv", index=False, float_format="%.6f")
     print(f"model: {len(d)} saccades, {d['catchup_s'].notna().sum()} cycles")
@@ -427,6 +448,26 @@ def stage_stats():
     print("\n(cycle counts: human", len(ch), "model", len(cm),
           "| curvature intervals: human", len(curv_h), "model", len(curv_m), ")")
 
+    # Lookahead-specific measures (reviewer-1 ablations). The saccade distance
+    # of section 1 includes the overrun of the previous anchor, which grows
+    # with cursor speed and therefore with width even under a constant
+    # planning horizon; the lead at fixation onset and the number of
+    # commitments per trial isolate the lookahead itself.
+    print("\n== 5. fixation-onset lead vs width (fixations landing ahead; lead = a * W^b) ==")
+    for d, label in ((hum, "human"), (mod, "model")):
+        a_ = d[d["lead_post"] > 0]
+        powerlaw(a_, "lead_post", label)
+        med = (a_.groupby("width_mm")["lead_post"].median() * 1000).round(1)
+        print(f"     median onset lead (mm) by width: {med.to_dict()}; "
+              f"{len(a_) / max(len(d), 1) * 100:.0f}% of fixations land ahead")
+    print("\n== 6. saccades per trial vs width (count = a * W^b) ==")
+    for d, label in ((hum, "human"), (mod, "model")):
+        n = (d.groupby(["participant", "trial_id", "round", "width_mm"]).size()
+               .rename("n_sacc").reset_index())
+        powerlaw(n, "n_sacc", label)
+        print(f"     median saccades per trial by width: "
+              f"{n.groupby('width_mm')['n_sacc'].median().to_dict()}")
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -439,8 +480,18 @@ def main():
                          "(default: the legacy anchor_fitting_10p stage; use a run's fit/stages/base)")
     ap.add_argument("--quant-dir", default=None,
                     help="output/cache directory (default paper/quant); use a separate one per persona set")
+    ap.add_argument("--config", default=None,
+                    help="ONE persona JSON simulated for every participant (a pooled fit); overrides --config-dir")
+    ap.add_argument("--letters", nargs="+", default=None,
+                    help="participants to process (default: the eight fitted ones)")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="model stage: participants simulated in parallel (results are identical)")
     a = ap.parse_args()
-    global CONFIG_DIR, OUT
+    global CONFIG_DIR, OUT, CONFIG_FILE, LETTERS
+    if a.letters:
+        LETTERS = list(a.letters)
+    if a.config:
+        CONFIG_FILE = Path(a.config).resolve()
     if a.config_dir:
         CONFIG_DIR = Path(a.config_dir).resolve()
     if a.quant_dir:
@@ -451,7 +502,7 @@ def main():
     if a.stage in ("all", "human-curv"):
         stage_human_curv()
     if a.stage in ("all", "model"):
-        stage_model(a.seed, a.runs)
+        stage_model(a.seed, a.runs, a.workers)
     if a.stage in ("all", "stats"):
         stage_stats()
 

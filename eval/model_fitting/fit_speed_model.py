@@ -208,6 +208,9 @@ def apply_params(cfg, params):
         elif k.startswith("desired_speed:"):
             # baseline: reference velocity fitted per task type
             cfg.setdefault("desired_speed_by_type", {})[k.split(":", 1)[1]] = v
+        elif k.startswith("target_speed:"):
+            # mpcc fixed_speed ablation: corridor target speed per task type
+            cfg.setdefault("target_speed_by_type", {})[k.split(":", 1)[1]] = v
         elif k in REF_PATH_KEYS:
             cfg.setdefault("reference_path", {})[k] = v
         else:

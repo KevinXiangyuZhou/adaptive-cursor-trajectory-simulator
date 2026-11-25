@@ -47,6 +47,11 @@ PARTICIPANTS_FILE="${PARTICIPANTS_FILE:-participants_10p.txt}"
 ABLATION=$([ "$VARIANT" = "full" ] && echo none || echo "$VARIANT")
 TRAIN_ALL="${TRAIN_ALL:-0}"
 TRAIN_ALL_ARG=$([ "$TRAIN_ALL" = 1 ] && echo --train-all || echo "")
+# GAM_TRAIN_ONLY=1 (submit_run.sh --gam-holdout): the pace law is fitted on the
+# training widths only; the artifact is written into this run's code snapshot
+# (hcs_package models/, where the persona's relative path resolves for the
+# eval and cycles jobs) and copied to $RUN_DIR/fit/gam/ for the record.
+GAM_ARG=$([ "${GAM_TRAIN_ONLY:-0}" = 1 ] && [ "$MODEL" = mpcc ] && echo --gam-train-only || echo "")
 mkdir -p "$HCS_FIT_RESULTS_DIR"
 
 PID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$PARTICIPANTS_FILE")
@@ -54,6 +59,10 @@ echo "[$(date)] fit $MODEL/$VARIANT $PID -> $HCS_FIT_RESULTS_DIR (budget ${TIME_
 # shellcheck disable=SC2086
 python3 eval/eval-anchor-drive/fit_anchor.py --pid "$PID" --model "$MODEL" --ablation "$ABLATION" \
     --tag base --time-limit "$TIME_LIMIT" --popsize "$POPSIZE" \
-    --workers "$SLURM_CPUS_PER_TASK" --seed "$SEED" $TRAIN_ALL_ARG \
+    --workers "$SLURM_CPUS_PER_TASK" --seed "$SEED" $TRAIN_ALL_ARG $GAM_ARG \
     2>&1 | tee "$HCS_FIT_RESULTS_DIR/fit_${PID}_s${SEED}.log"
+if [ -n "$GAM_ARG" ]; then
+    mkdir -p "$HCS_FIT_RESULTS_DIR/gam"
+    cp hcs_package/src/hcs_package/models/gam_traversal_"${PID}"_train*.pkl "$HCS_FIT_RESULTS_DIR/gam/"
+fi
 echo "[$(date)] done $PID"

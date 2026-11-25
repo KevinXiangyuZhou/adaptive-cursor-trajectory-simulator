@@ -77,6 +77,9 @@ class GazeModule:
         horizon_mode: str = 'budget',
         fixed_lead_m: float = 0.03,
         catchup_mode: str = 'pace_law',
+        fixed_lead_speed_floor: bool = True,
+        fixed_lead_free_space: str = 'fixed',
+        target_speed: Optional[float] = None,
     ):
         # Ablation switches (paper evaluation). Defaults reproduce the
         # finalized design exactly: 'budget' anchor placement and the
@@ -84,6 +87,24 @@ class GazeModule:
         self.horizon_mode = str(horizon_mode)
         self.fixed_lead_m = float(fixed_lead_m)
         self.catchup_mode = str(catchup_mode)
+        # fixed_lead refinements (R1 "fixed horizon" ablation). Defaults keep
+        # the original no_lookahead behaviour: reaction-time floor on, the
+        # constant lead applied in free space too.
+        #   fixed_lead_speed_floor False: no v*T_min floor — the lead is the
+        #     same constant at every speed (a truly fixed horizon).
+        #   fixed_lead_free_space 'target': where the task is unconstrained
+        #     the anchor is the path end (the target), as the budget places
+        #     it (its density is zero there) — only the corridor lookahead
+        #     is fixed, so pointing is not split into short hops.
+        self.fixed_lead_speed_floor = bool(fixed_lead_speed_floor)
+        self.fixed_lead_free_space = str(fixed_lead_free_space)
+        # catchup_mode 'target_speed' (R1 "fixed target speed" ablation): in
+        # a corridor the plan deadline is lead / target_speed — a constant
+        # cruise speed (one per task type, resolved by the simulator) instead
+        # of the pace-law traversal time. Free space keeps the T0 rule.
+        self.target_speed = (float(target_speed) if target_speed is not None else None)
+        if self.catchup_mode == 'target_speed' and not (self.target_speed and self.target_speed > 0.0):
+            raise ValueError("catchup_mode='target_speed' needs a target speed > 0")
         self.reference_path = reference_path
         self.budget_horizon = budget_horizon
         self.scheduler = scheduler
@@ -217,11 +238,20 @@ class GazeModule:
         solve_anchor_s = None
         s_from = min(theta0, total)
         v_now0 = float(np.hypot(cursor_vel[0], cursor_vel[1]))
-        if self.horizon_mode == 'fixed_lead':
+        in_free_space = False
+        if self.clearance_profile is not None:
+            s_fs, c_fs = self.clearance_profile
+            in_free_space = float(np.interp(theta0, s_fs, c_fs)) >= FREE_SPACE_CLEARANCE_M
+        if self.horizon_mode == 'fixed_lead' and in_free_space and self.fixed_lead_free_space == 'target':
+            # R1 fixed horizon: unconstrained space looks at the target.
+            anchor_s = total
+        elif self.horizon_mode == 'fixed_lead':
             # Ablation "no adaptive lookahead": a constant arc-length lead,
             # with the same reaction-time floor (v * T_min) and path-end cap
             # the budget applies, so only the width dependence is removed.
-            s_floor = s_from + max(0.0, v_now0) * self.budget_horizon.T_min
+            # fixed_lead_speed_floor False drops the floor (R1 fixed horizon).
+            s_floor = (s_from + max(0.0, v_now0) * self.budget_horizon.T_min
+                       if self.fixed_lead_speed_floor else s_from)
             anchor_s = min(max(s_from + self.fixed_lead_m, s_floor), total)
         else:
             anchor_s = self.budget_horizon.anchor(s_from, v_now=v_now0)
@@ -254,6 +284,13 @@ class GazeModule:
         if (self.catchup_mode == 'pace_law'
                 and w_loc0 is not None and 0.0 < w_loc0 < FREE_SPACE_CLEARANCE_M):
             t_gam = self._traversal_time(theta0, float(anchor_s))
+        # Ablation "fixed target speed" (catchup_mode 'target_speed'): the
+        # corridor deadline covers the lead at a constant speed; it takes
+        # the place of the pace-law traversal time and nothing else changes
+        # (same v_max and acceleration floors, same free-space T0 rule).
+        if (self.catchup_mode == 'target_speed'
+                and w_loc0 is not None and 0.0 < w_loc0 < FREE_SPACE_CLEARANCE_M):
+            t_gam = lead_now / self.target_speed
         if t_gam is not None:
             t_plan = max(t_gam, lead_now / max(self.plan_vmax, 1e-6))
         else:

@@ -80,9 +80,9 @@ FIT_DEP=""   # SLURM job the eval array must wait for (source fit still running)
 if [ -n "$SOURCE_RUN" ]; then
     SRC_DIR="$RESULTS_ROOT/runs/$SOURCE_RUN"
     [ -f "$SRC_DIR/RUN_INFO.json" ] || { echo "not a run dir: $SRC_DIR"; exit 2; }
-    read -r SRC_MODEL SRC_KIND SRC_TRAIN_ALL SRC_SHA SRC_FIT_JOB < <(python3 -c "
+    read -r SRC_MODEL SRC_KIND SRC_TRAIN_ALL SRC_SHA SRC_VARIANT SRC_FIT_JOB < <(python3 -c "
 import json,sys; j=json.load(open(sys.argv[1]))
-print(j['model'], j['kind'], int(bool(j.get('train_all', False))), (j.get('commit') or '')[:7], j.get('jobs',{}).get('fit',''))" "$SRC_DIR/RUN_INFO.json")
+print(j['model'], j['kind'], int(bool(j.get('train_all', False))), (j.get('commit') or '')[:7], j.get('variant') or 'full', j.get('jobs',{}).get('fit',''))" "$SRC_DIR/RUN_INFO.json")
     [ "$SRC_KIND" = pooled8 ] || { echo "$SOURCE_RUN is a $SRC_KIND run; eval-14p needs ONE pooled persona (kind pooled8)"; exit 2; }
     [ -n "$MODEL" ] && [ "$MODEL" != "$SRC_MODEL" ] && { echo "--model $MODEL contradicts the source run's model $SRC_MODEL"; exit 2; }
     MODEL="$SRC_MODEL"
@@ -99,8 +99,10 @@ print(j['model'], j['kind'], int(bool(j.get('train_all', False))), (j.get('commi
     [ -z "$REFERENCE" ] && REFERENCE="$SRC_DIR/eval/Steering/steering_condition_summary.csv"   # checked at aggregate time
     if [ -z "$TAG" ]; then
         # mpcc-full-pooled8all-s42-20260911-0335-c70a5dd -> mpcc-pooled8all-c70a5dd
+        # ablations keep their variant: mpcc-fixed_speed-pooled8all-... -> mpcc-fixed_speed-pooled8all-<sha>
         if [ "$SRC_TRAIN_ALL" = 1 ]; then ALL_SUFFIX=all; else ALL_SUFFIX=""; fi   # (a && in a $() would trip set -e)
-        TAG="${MODEL}-${SRC_KIND}${ALL_SUFFIX}-${SRC_SHA}"
+        if [ "$SRC_VARIANT" = full ]; then VAR_PART=""; else VAR_PART="-${SRC_VARIANT}"; fi
+        TAG="${MODEL}${VAR_PART}-${SRC_KIND}${ALL_SUFFIX}-${SRC_SHA}"
     fi
 elif [ -z "$PERSONA" ]; then
     PERSONA="eval-14p/personas/pooled8-991900f/default.json"

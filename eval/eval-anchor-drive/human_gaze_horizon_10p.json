@@ -1,0 +1,79 @@
+{
+  "description": "mean gaze lead at fixation onset (arc length, m) over the constant-width steering battery; fixed planning horizon of the fixed_horizon ablation",
+  "events": "fit_gaze_pooled.build_pool (merged keep=True, round-quality pruned, lead > 3 mm, end-capped excluded), steering-bucket trial ids only",
+  "steering_tids": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35
+  ],
+  "participants": {
+    "p01": {
+      "mean_lead_m": 0.034338,
+      "median_lead_m": 0.023891,
+      "n_events": 390
+    },
+    "p02": {
+      "mean_lead_m": 0.039701,
+      "median_lead_m": 0.031628,
+      "n_events": 273
+    },
+    "p03": {
+      "mean_lead_m": 0.030207,
+      "median_lead_m": 0.019671,
+      "n_events": 305
+    },
+    "p04": {
+      "mean_lead_m": 0.049426,
+      "median_lead_m": 0.042236,
+      "n_events": 391
+    },
+    "p06": {
+      "mean_lead_m": 0.046493,
+      "median_lead_m": 0.036445,
+      "n_events": 469
+    },
+    "p07": {
+      "mean_lead_m": 0.0383,
+      "median_lead_m": 0.028666,
+      "n_events": 225
+    },
+    "p08": {
+      "mean_lead_m": 0.038178,
+      "median_lead_m": 0.032616,
+      "n_events": 357
+    },
+    "p10": {
+      "mean_lead_m": 0.056884,
+      "median_lead_m": 0.053753,
+      "n_events": 370
+    }
+  },
+  "pooled": {
+    "mean_of_participant_means_m": 0.041691,
+    "event_mean_m": 0.042399,
+    "n_events": 2780
+  },
+  "generated": "2026-11-24"
+}

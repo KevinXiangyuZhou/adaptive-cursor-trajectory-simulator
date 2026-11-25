@@ -29,6 +29,12 @@ counterpart of Figure 3a (same drawing code).
 
 Usage: python paper/stats_study2.py
 Writes: paper/quant_study2/{stats.txt, table3_rows.tex, conditions.csv}
+
+Reviewer-1 ablations: the same numbers with an ablation's eval14p run in the
+"Ours" slot (the baseline and Study 1 references unchanged), into its own
+folder and figure stem so the paper's outputs are not overwritten:
+  python paper/stats_study2.py --s2-model results-cluster-10p/runs-14p/<eval14p-mpcc-fixed_speed-...> \
+      --out paper/quant_study2_fixed_speed --figure-stem steering_law_budget_study2_fixed_speed
 """
 import csv
 import glob
@@ -55,6 +61,7 @@ S2_RAW = REPO / "eval-14p" / "human_data" / "raw"
 S1_RAW = REPO / "human_data" / "task_aligned_all"
 S1_HUMAN_SLOPE_PAPER = 0.059               # Figure 3a, verified by plot_laws --eval perpid
 OUT = REPO / "paper" / "quant_study2"
+FIG_STEM = "steering_law_budget_study2"
 TYPE_ORDER = ["Straight", "Corner", "Sinusoidal", "Gentle sinusoidal", "Sharp sinusoidal"]
 TYPE_LABEL = {"straight": "Straight", "corner": "Corner", "sinusoidal": "Sinusoidal",
               "gentle_sinusoidal": "Gentle sinusoidal", "sharp_sinusoidal": "Sharp sinusoidal"}
@@ -201,12 +208,40 @@ def per_pid_means(rows_by_pid, key):
     return np.array([np.mean([r[key] for r in rows]) for _, rows in sorted(rows_by_pid.items())])
 
 
+def _rel(p):
+    try:
+        return Path(p).resolve().relative_to(REPO)
+    except ValueError:
+        return Path(p)
+
+
+def _cli():
+    import argparse
+    global S2_MODEL, OUT, FIG_STEM
+    ap = argparse.ArgumentParser(description="Section 5.4 / Study 2 statistics")
+    ap.add_argument("--s2-model", default=None,
+                    help="eval14p run dir (or its eval/) reported as the model, e.g. an R1 ablation")
+    ap.add_argument("--out", default=None, help="output folder (default paper/quant_study2)")
+    ap.add_argument("--figure-stem", default=None, help="paper/figures stem of the Study 2 law figure")
+    a = ap.parse_args()
+    if a.s2_model:
+        p = Path(a.s2_model)
+        p = p if p.is_absolute() else REPO / p
+        S2_MODEL = p / "eval" if (p / "eval").is_dir() else p
+    if a.out:
+        OUT = Path(a.out) if Path(a.out).is_absolute() else REPO / a.out
+    if a.figure_stem:
+        FIG_STEM = a.figure_stem
+    elif a.s2_model:
+        FIG_STEM = f"steering_law_budget_study2_{Path(a.out or 'custom').name}"
+
+
 def main():
-    OUT.mkdir(exist_ok=True)
+    OUT.mkdir(exist_ok=True, parents=True)
     say("=== sources ===")
     for k, v in (("Study 2 model", S2_MODEL), ("Study 2 baseline", S2_BASE),
                  ("Study 1 model", S1_MODEL), ("Study 1 baseline", S1_BASE)):
-        say(f"  {k:17s} {v.relative_to(REPO)}")
+        say(f"  {k:17s} {_rel(v)}")
 
     # ---- Study 1 reference: lam, fits (must match Figure 3a) -----------------
     g1 = geometry(S1_RAW)
@@ -279,7 +314,7 @@ def main():
     ax.set_ylim(top=1.5 * max(y.max() for _, y in d2.values()))
     ax.text(0.03, 0.70, rf"$\lambda$ = {lam:.2f} m/rad (fit on human)",
             transform=ax.transAxes, fontsize=6, va="top", ha="left")
-    pl.save(fig, "steering_law_budget_study2")
+    pl.save(fig, FIG_STEM)
     for s in fits:
         assert np.allclose(fits[s], s2_fits[s]), "figure fits differ from reported fits"
 
@@ -391,8 +426,9 @@ def main():
             say(f"    {label:13s} model {m.mean():7.3f}  baseline {b.mean():7.3f}  W={st.statistic:.0f} p={st.pvalue:.4f}  model better in {better}/{len(m)} participants")
 
     (OUT / "stats.txt").write_text("\n".join(_log) + "\n")
-    print(f"\nwrote {OUT.relative_to(REPO)}/stats.txt, table3_rows.tex, conditions.csv")
+    print(f"\nwrote {_rel(OUT)}/stats.txt, table3_rows.tex, conditions.csv")
 
 
 if __name__ == "__main__":
+    _cli()
     main()
